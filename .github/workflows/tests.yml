@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: python -m unittest discover -s tests -p '*.py'
+      - run: python -m unittest discover -s tests -p '*.py' -v -f
   linux-and-image:
     runs-on: ubuntu-latest
     steps:
