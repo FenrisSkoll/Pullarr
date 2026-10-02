@@ -205,7 +205,8 @@ main:not(:has(#queue tr)):has(#queue) > .icon-text-color {display:none;}
 .entry-info-container h2 {font-size:1.25rem;}
 .filter-bar > * {padding:.6rem;}
 main:has(#wanted-results) form {display:flex;flex-wrap:wrap;gap:.75rem;align-items:end;}
-main:has(#wanted-results) label {display:flex;flex-direction:column;gap:.35rem;}
+main:has(#wanted-results) label {display:flex;flex-direction:column;gap:.35rem;min-width:0;max-width:100%;}
+main:has(#wanted-results) select {min-width:0;max-width:100%;}
 #switch-search {display:flex;flex-wrap:wrap;gap:.75rem;align-items:end;margin-block:1rem;}
 #switch-search label {display:flex;flex-direction:column;gap:.35rem;}
 #switch-search label :where(input,select) {margin:0;}

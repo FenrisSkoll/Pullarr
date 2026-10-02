@@ -98,7 +98,9 @@ def main(image, browser=False):
                         r = page.goto(origin+route)
                         page.wait_for_timeout(500)
                         assert r.status == 200 and 'Pullarr' in page.title(), route
-                        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'), route
+                        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'), {
+                            'route': route, 'viewport': width,
+                            'overflow': page.evaluate("Array.from(document.querySelectorAll('main *')).filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,12).map(e=>({tag:e.tagName,id:e.id,width:e.getBoundingClientRect().width}))")}
                 chromium.close()
         assert not errors, errors
         probe = "import sqlite3;d=sqlite3.connect('file:/app/db/Kapowarr.db?mode=ro',uri=True);assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==72;print('schema72 integrity/FKs PASS')"
