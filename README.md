@@ -32,7 +32,7 @@ availability, terms and rate limits are outside Pullarr's control.
 ## Docker quick start
 
 The Unraid Community Applications template is included in this repository.
-Listing is pending public source/image publication and official CA Validate/Scan.
+Listing remains pending official CA Validate/Scan and review.
 Use persistent appdata and one common `/data` mount for media and downloads;
 hardlinks also require compatible underlying storage. See the [Unraid guide](docs/unraid.md).
 
@@ -57,7 +57,7 @@ download visibility, permissions, backups and upgrades. Do not run two Pullarr
 processes against the same database.
 
 For Unraid storage, UID/GID and hardlink guidance, see [Unraid deployment](docs/unraid.md).
-Community Applications availability remains pending public publication and review.
+Community Applications availability remains pending official Validate/Scan and review.
 
 ## Source installation
 
@@ -117,7 +117,9 @@ recompression**. qBittorrent is the only supported torrent client.
 The completed implementation programmes are summarized in the changelog. Private
 development diaries, runtime evidence and agent instructions are intentionally
 not part of this public source candidate. The inherited application version
-`1.3.2` is retained; no new release tag or public version claim is invented.
+`1.3.2` is retained for the first deliberate public release (`v1.3.2`).
+The official image reference is `ghcr.io/fenrisskoll/pullarr:latest`; verify
+anonymous availability before installing or submitting the CA template.
 
 ## License and attribution
 

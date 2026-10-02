@@ -150,7 +150,8 @@ Community Applications image updates will use deliberately maintained stable
 `latest` releases, with immutable version and commit tags available for
 reproducibility.
 
-No public container image is published yet.
+The official stable image reference is `ghcr.io/fenrisskoll/pullarr:latest`.
+Verify anonymous pull before installation or Community Applications submission.
 
 ## Maintainer acceptance and publication
 

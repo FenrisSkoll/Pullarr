@@ -1,13 +1,13 @@
 # Release notes
 
-## Public source candidate — not a tagged release
+## 1.3.2 — first public release
 
 Unraid Community Applications metadata, icon, validation and materialization
 tooling are included alongside the application source. CA listing/approval is
-still pending publication and official Validate/Scan.
+still pending official Validate/Scan and review.
 
-The application retains its inherited version 1.3.2 and schema72. No release tag
-has been selected. This snapshot includes the completed provider abstraction,
+The application retains its inherited version 1.3.2 and schema72; the deliberate
+release tag is v1.3.2. This snapshot includes the completed provider abstraction,
 canonical identity, reviewed import/organization, monitoring, Collections,
 Calendar, Reading Orders/CBL, Quality Profiles/upgrades/provenance, Discover,
 Pullarr UI, expanded clients/indexers and archive-maintenance programmes.
