@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     assert not subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT), 'Commit final source first'
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    output = ROOT / 'release-output' / 'public'
+    output = ROOT / 'release-output' / 'public' / revision[:12]
     output.mkdir(parents=True, exist_ok=True)
     checksums = []
     for extension, format_name in (('zip', 'zip'), ('tar.gz', 'tar.gz')):
@@ -34,11 +34,18 @@ def main():
             subprocess.run([sys.executable, 'scripts/public_release_gate.py'], cwd=destination, check=True)
             environment = dict(os.environ, PYTHONPATH=str(destination/'tests'))
             subprocess.run([sys.executable, '-m', 'unittest', 'TPublicSecurity',
-                            'TArchiveMaintenance.ArchiveEngineTests'], cwd=destination, env=environment, check=True)
+                            'TArchiveMaintenance.ArchiveEngineTests', 'TUnraidTemplate',
+                            'TUnraidPackaging'], cwd=destination, env=environment, check=True)
             subprocess.run([sys.executable, 'Pullarr.py', '--help'], cwd=destination, env=environment,
                            stdout=subprocess.DEVNULL, check=True)
         checksums.append(hashlib.sha256(archive.read_bytes()).hexdigest()+'  '+archive.name)
+    notes = output/'RELEASE-NOTES.md'
+    notes.write_text(f'# Pullarr source candidate\n\nCommit: {revision}\n\n'
+                     'Includes the Unraid CA template. Listing remains pending public URLs/image '
+                     'and official Validate/Scan; nothing is published by this script.\n', encoding='utf-8')
+    checksums.append(hashlib.sha256(notes.read_bytes()).hexdigest()+'  '+notes.name)
     (output/'SHA256SUMS').write_text('\n'.join(checksums)+'\n', encoding='ascii')
+    (output.parent/'CURRENT').write_text(revision[:12]+'\n', encoding='ascii')
     print('\n'.join(checksums))
 
 

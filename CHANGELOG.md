@@ -2,6 +2,10 @@
 
 ## Public source candidate — not a tagged release
 
+Unraid Community Applications metadata, icon, validation and materialization
+tooling are included alongside the application source. CA listing/approval is
+still pending publication and official Validate/Scan.
+
 The application retains its inherited version 1.3.2 and schema72. No release tag
 has been selected. This snapshot includes the completed provider abstraction,
 canonical identity, reviewed import/organization, monitoring, Collections,

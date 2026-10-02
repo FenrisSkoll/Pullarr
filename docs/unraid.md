@@ -3,8 +3,9 @@
 Pullarr's Community Applications package is prepared locally, **not yet listed**.
 After publication/CA approval, install Pullarr from Apps and review every mapping.
 Until then build the public source image normally; there is no special Unraid fork.
-Linux/amd64 is the supported CA image architecture. See the separate template
-repository README once its real public address is selected.
+Linux/amd64 is the supported CA image architecture. This repository contains
+the application, root `ca_profile.xml` and `templates/pullarr.xml`; no additional
+repository is needed.
 
 Use bridge networking, WebUI container/host port5656 (host port editable), and
 no privileged mode, extra capabilities, Docker socket, devices or host networking.
@@ -74,3 +75,41 @@ and the protected `container-release` environment. Configure required reviewers
 there before enabling publication. No PR can invoke its publish job. The image
 package is `ghcr.io/<lowercase-owner>/pullarr`; no Docker Hub mirror is assumed.
 Make the package public and verify anonymous pull before CA submission.
+
+## Template materialization
+
+The local branch is `release/public-ready`; eventual public raw URLs target
+`main`. Three deliberate tokens remain: `__PULLARR_GITHUB_OWNER__`,
+`__PULLARR_APP_REPO__`, and `__PULLARR_IMAGE__`. Select real values before release.
+
+```sh
+python scripts/unraid_template.py --allow-placeholders
+python scripts/unraid_template.py --owner OWNER --app-repo REPO --image ghcr.io/owner/pullarr:TAG --materialize release-output/ca-final
+python scripts/unraid_template.py --root release-output/ca-final
+```
+
+The new output directory is required; source files are never overwritten.
+Review and copy only its two XML files back to their matching repository paths.
+The icon lives at `docs/assets/pullarr-ca.png` (256×256); its canonical vector
+source is `frontend/static/img/favicon.svg`. Both use the application GPL license.
+The registry package is GHCR Pullarr; no invented support or donation URL is used.
+`--local-test` permits `pullarr:TAG` only for disposable testing, never submission.
+
+For Docker acceptance, pass the materialized `templates/pullarr.xml` with
+`--template`; without that option the gate reads this repository's actual XML.
+It substitutes disposable host directories and an ephemeral loopback host port,
+not the template's container paths, port or UID/GID.
+
+## Publication and CA submission
+
+Accept the source, choose a deliberate version/tag, and build/publish the GHCR
+image only through an explicitly authorized release. Materialize the template
+with that exact image reference and rerun public release/history/template gates.
+Push only the intended public branch to `main`, never all local branches.
+Verify anonymous access to the raw root profile, template, icon and README;
+verify anonymous image pull and run the resulting template configuration.
+Then open Community Apps `/submit`, run **Validate**, run **Scan**, fix findings,
+and submit for review. Until these steps occur this is not a CA listing.
+
+Normal image updates do not require a new XML file when using a deliberately
+maintained stable tag. Immutable release tags remain available for reproducibility.

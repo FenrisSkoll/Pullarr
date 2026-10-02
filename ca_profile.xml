@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommunityApplications>
+  <Profile>Pullarr Docker template: comic library management, reviewed acquisition and organization. Application source and deployment guidance are linked from the template.</Profile>
+  <Icon>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/docs/assets/pullarr-ca.png</Icon>
+  <WebPage>https://github.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__</WebPage>
+</CommunityApplications>

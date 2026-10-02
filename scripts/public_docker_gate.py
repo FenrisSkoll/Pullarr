@@ -63,6 +63,9 @@ def main(image, browser=False):
         r = requests.put(origin+'/api/settings', params=auth, json={'db_backup_amount': 4}, timeout=10)
         assert r.status_code == 200
         docker('restart', identifier)
+        # Docker may allocate a different ephemeral host port on restart.
+        port = json.loads(docker('inspect', identifier))[0]['NetworkSettings']['Ports']['5656/tcp'][0]['HostPort']
+        origin = 'http://127.0.0.1:' + port
         for _ in range(100):
             try:
                 if requests.get(origin+'/api/settings', params=auth, timeout=2).status_code == 200:
@@ -70,6 +73,8 @@ def main(image, browser=False):
             except requests.RequestException:
                 pass
             time.sleep(.2)
+        else:
+            raise AssertionError('Disposable public restart did not become ready')
         docker('rm', '-f', identifier)
         origin, restarted_key = start()
         assert key == restarted_key

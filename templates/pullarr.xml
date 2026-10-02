@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Container version="2">
+  <Name>Pullarr</Name>
+  <Repository>__PULLARR_IMAGE__</Repository>
+  <Registry>https://github.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/pkgs/container/pullarr</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Icon>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/docs/assets/pullarr-ca.png</Icon>
+  <WebUI>http://[IP]:[PORT:5656]</WebUI>
+  <Overview>Manage comic metadata, monitoring and Wanted acquisition, Reading Orders, quality profiles and verified upgrades. Browse GetComics Discover; use SABnzbd, NZBGet or qBittorrent with Prowlarr or Torznab. Reviewed archive maintenance preserves page bytes. Configure authentication before exposing beyond your trusted network.</Overview>
+  <Project>https://github.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__</Project>
+  <TemplateURL>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/templates/pullarr.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/README.md</ReadMe>
+  <Category>MediaApp:Books</Category>
+  <ExtraSearchTerms>comic comics manga arr library downloader organizer reading</ExtraSearchTerms>
+  <Requires>Linux x86_64. Persistent appdata and access to client downloads. A common data mount and compatible underlying filesystem are required for hardlinks; safe copy fallback is supported.</Requires>
+  <License>GPL-3.0</License>
+  <Config Name="WebUI" Target="5656" Default="5656" Mode="tcp" Description="Pullarr WebUI. Enable authentication before LAN access; never expose directly to the Internet." Type="Port" Display="always" Required="true" Mask="false"/>
+  <Config Name="Database" Target="/app/db" Default="/mnt/user/appdata/pullarr/db" Mode="rw" Description="Persistent database and settings. Back up before upgrades." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Logs" Target="/app/logs" Default="/mnt/user/appdata/pullarr/logs" Mode="rw" Description="Persistent application logs; treat as private." Type="Path" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Pullarr temporary downloads" Target="/app/temp_downloads" Default="/mnt/user/appdata/pullarr/temp_downloads" Mode="rw" Description="Pullarr-controlled acquisition workspace. Not the external download client's completed-data path." Type="Path" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Data" Target="/data" Default="/mnt/user/data" Mode="rw" Description="Common parent containing library and client downloads, e.g. media/comics and downloads/torrents. Use the same /data layout in clients; hardlinks also require compatible underlying storage." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="PUID" Target="PUID" Default="99" Description="UID controlling container-created file ownership. Pre-authorize this UID on your data share." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="PGID" Target="PGID" Default="100" Description="GID controlling container-created file ownership." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="TZ" Target="TZ" Default="Etc/UTC" Description="Timezone used by container processes, e.g. Etc/UTC." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>

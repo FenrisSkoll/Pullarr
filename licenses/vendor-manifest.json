@@ -2,6 +2,12 @@
   "schema": 1,
   "files": [
     {
+      "path": "docs/assets/pullarr-ca.png",
+      "sha256": "bddedc7ff4aa0eeaeba678b5e3b8c530b2eb9862130eaa0f56d521465c8b6a22",
+      "license": "GPL-3.0",
+      "source": "Original Pullarr mark; SVG source frontend/static/img/favicon.svg; 256x256 CA raster"
+    },
+    {
       "path": "backend/lib/unrar_linux_64",
       "source": "https://www.rarlab.com/rar/rarlinux-x64-723.tar.gz",
       "archive_sha256": "759b4b6aa0d9f77131882162951193f3a0e54bf60e1d8dc4255aa308accab588",

@@ -15,6 +15,7 @@ DEFAULT_PATHS = {'/app/db':'db','/app/logs':'logs','/app/temp_downloads':'temp_d
 
 
 def contract(template):
+    template = template or ROOT/'templates/pullarr.xml'
     if template:
         data = Path(template).read_bytes()
         assert len(data)<32768 and b'<!DOCTYPE' not in data.upper()
@@ -117,7 +118,7 @@ def main(image, template=None, browser=False):
         image_info = json.loads(docker('image','inspect',image))[0]
         assert image_info['Architecture']=='amd64' and image_info['Os']=='linux'
         print(json.dumps(dict(image=image_info['Id'],architecture='linux/amd64',bytes=image_info['Size'],
-            template_derived=bool(template),uid=99,gid=100,bridge=True,privileged=False,fixtures=fixture,
+            template_derived=True,uid=99,gid=100,bridge=True,privileged=False,fixtures=fixture,
             restart=True,recreation=True,migration='71-to-72',health='healthy',browser_errors=errors,
             image_layer_files=audit_layers(image))))
     finally:

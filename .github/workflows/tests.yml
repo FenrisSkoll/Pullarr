@@ -18,6 +18,8 @@ jobs:
           node-version: '24'
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python scripts/public_release_gate.py
+      - run: python scripts/unraid_template.py --allow-placeholders
+      - run: python -m unittest discover -s tests -p 'TUnraid*.py'
       - run: python scripts/public_history_gate.py
       - run: python scripts/check_title_fixture_secrets.py
       - run: python scripts/check_pullarr_assets.py

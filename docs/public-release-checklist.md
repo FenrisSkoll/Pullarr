@@ -40,7 +40,9 @@ No script here pushes code, creates a public release or publishes an image.
 10. Create local source ZIP/tar and SHA256SUMS; inspect/extract/scan each artifact.
     `python scripts/public_source_artifacts.py` exports committed HEAD and runs
     public-file, security/archive and entrypoint checks on both extracted formats.
-    Intended upload artifacts are under `release-output/public/`; other files in
+    Intended upload artifacts are in the commit directory named by
+    `release-output/public/CURRENT`; previous commit directories are old evidence,
+    not the current release. Other files in
     `release-output/` are private audit/intermediate reports, not release assets.
     Keep artifacts/SBOM outside tracked source. Review release notes and backup/
     migration instructions. Version/tag selection is deliberate; schema is not
@@ -50,6 +52,12 @@ No script here pushes code, creates a public release or publishes an image.
 12. Only after approval, add the chosen public remote and push **only** the approved
     branch. Never use `--mirror` or push all local refs by default. Publishing a
     container is a separate authorized step and must provide matching source.
+
+For CA packaging also run `python scripts/unraid_template.py --allow-placeholders`
+while URLs are pending, and strict validation after materialization. Run
+`python -m unittest discover -s tests -p 'TUnraid*.py'` and the template-derived
+Docker gate described in [Unraid deployment](unraid.md). This is one repository;
+official CA Validate/Scan and anonymous image/URL checks remain publication steps.
 
 PR CI: static/public-file checks, Windows/Linux tests and Docker smoke. Full local
 pre-upload: all steps above, including full-history scanning (shallow CI cannot

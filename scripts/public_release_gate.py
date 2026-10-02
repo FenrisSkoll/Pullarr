@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from unraid_template import validate as validate_unraid
+
 ROOT = Path(__file__).resolve().parents[1]
 LIMIT = 50 * 1024 * 1024
 
@@ -24,6 +26,8 @@ def tracked(root=ROOT):
 
 
 def check(root=ROOT, database=None):
+    template_text = (root/'templates/pullarr.xml').read_text()
+    validate_unraid(root, placeholders='__PULLARR_IMAGE__' in template_text)
     names = tracked(root)
     assert names, 'No intended public files (stage candidate files first)'
     errors = []
@@ -72,6 +76,8 @@ def check(root=ROOT, database=None):
                 errors.append((name, 'vendor/fixture checksum changed'))
         if re.search(rb'(?i)[A-Z]:[\\/]+Users[\\/]+[^\s\\/]+', content):
             errors.append((name, 'personal home path'))
+        if re.search(rb'Pullarr[-]unraid|__PULLARR[_]UNRAID[_]REPO__', content):
+            errors.append((name, 'obsolete separate template repository reference'))
     for name in ('README.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md',
                  'CONTRIBUTING.md', 'docs/public-release-checklist.md', 'backend/lib/UnRAR-LICENSE.txt'):
         if name not in names:

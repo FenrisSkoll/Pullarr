@@ -13,4 +13,5 @@ entrypoint.sh text eol=lf
 *.txt text eol=lf
 *.exe binary
 *.cbr binary
+*.png binary
 backend/lib/unrar_linux_64 binary

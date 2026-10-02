@@ -31,6 +31,11 @@ availability, terms and rate limits are outside Pullarr's control.
 
 ## Docker quick start
 
+The Unraid Community Applications template is included in this repository.
+Listing is pending public source/image publication and official CA Validate/Scan.
+Use persistent appdata and one common `/data` mount for media and downloads;
+hardlinks also require compatible underlying storage. See the [Unraid guide](docs/unraid.md).
+
 Docker must be installed. From this source checkout:
 
 ```sh
