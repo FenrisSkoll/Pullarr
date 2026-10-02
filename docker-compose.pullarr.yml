@@ -1,0 +1,21 @@
+name: pullarr
+services:
+  pullarr:
+    image: pullarr:local
+    build: .
+    container_name: pullarr
+    ports:
+      - "127.0.0.1:5658:5656"
+    environment:
+      TZ: Europe/London
+    volumes:
+      - pullarr-db:/app/db
+      - pullarr-logs:/app/logs
+      - pullarr-downloads:/app/temp_downloads
+      - pullarr-comics:/comics
+    restart: unless-stopped
+volumes:
+  pullarr-db:
+  pullarr-logs:
+  pullarr-downloads:
+  pullarr-comics:

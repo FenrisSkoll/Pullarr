@@ -1,0 +1,18 @@
+#provider-switch { display: block; padding: 1.5rem; width: 100%; overflow: auto; overflow-wrap: anywhere; color: var(--text-color); }
+#provider-switch > * { flex: none; overflow: visible; }
+#provider-switch section { margin: 1rem 0; }
+#provider-switch h2, #provider-switch h3 { margin: 1rem 0 .5rem; }
+#provider-switch p { margin: .6rem 0; }
+#provider-switch button, #provider-switch input, #provider-switch select { margin: .3rem; padding: .5rem; }
+#provider-switch button, #provider-switch input, #provider-switch select { color: var(--text-color); background: var(--foreground-color); border: 1px solid var(--border-color); border-radius: .3rem; font: inherit; }
+#provider-switch button:hover { border-color: var(--accent-color); }
+#provider-switch a, #provider-switch summary { color: var(--accent-color); cursor: pointer; }
+#provider-switch table { width: 100%; border-collapse: collapse; }
+#provider-switch td, #provider-switch th { padding: .5rem; border-bottom: 1px solid #888; text-align: left; vertical-align: top; }
+#provider-switch .switch-blockers { border: 2px solid #c65; padding: .7rem; }
+#provider-switch dialog { margin: auto; max-width: min(60rem, 95vw); max-height: 85vh; overflow: auto; padding: 1.5rem; color: var(--text-color); background: var(--background-color); border: 1px solid var(--border-color); }
+#provider-switch dialog::backdrop { background: #000a; }
+#provider-switch pre { white-space: pre-wrap; max-height: 25rem; overflow: auto; }
+#provider-switch .switch-card { display: flex; gap: 1rem; padding: .5rem; border-bottom: 1px solid #888; }
+#provider-switch .switch-card img { width: 4rem; height: 6rem; object-fit: contain; }
+#provider-switch button:disabled { opacity: .5; cursor: not-allowed; }

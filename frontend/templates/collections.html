@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Collections{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/collections.css') }}">{% endblock %}
+{% block js %}<script src="{{ url_for('static', filename='js/collections.js') }}" defer></script>{% endblock %}
+{% block main %}
+<main id="collections">
+ <h1>Collections</h1>
+ <p>Local publication families, independent of metadata provider. In Library means a local volume exists—not that every issue is downloaded. Content coverage is separate.</p>
+ <p id="collections-message" role="status" aria-live="polite"></p>
+ <section aria-labelledby="collections-list-title"><h2 id="collections-list-title">Your Collections</h2>
+  <button id="collections-create" type="button">Create Collection</button><div id="collections-list"></div>
+ </section>
+ <section id="collections-workspace" hidden aria-labelledby="collections-title">
+  <h2 id="collections-title"></h2><p id="collections-completeness"></p>
+  <p>Collection monitoring is future discovery/calendar intent only. It never changes library monitoring, Wanted, downloads or paths.</p>
+  <div id="collections-tree" role="group" aria-label="Collection hierarchy"></div>
+  <h3 id="collections-node-title"></h3>
+  <div class="collection-controls"><button id="collections-subgroup" type="button">Add subgroup</button>
+   <button id="collections-edit" type="button">Edit / move subgroup</button>
+   <button id="collections-delete" type="button">Delete selected subtree</button></div>
+  <h3>Accepted publications</h3><div id="collections-publications"></div>
+  <h3>Add an existing local volume</h3>
+  <form id="collections-local-form"><label>Local library title<input id="collections-local-query" type="search" maxlength="200"></label><button type="submit">Search local library</button></form>
+  <div id="collections-local-results"></div>
+  <h3>Find external publications</h3>
+  <p>Search results are exact provider identities, not verified family relationships. Propose a result, then explicitly review membership. No volume is added automatically.</p>
+  <form id="collections-search-form"><label>Publication title or qualified ID<input id="collections-query" maxlength="500" required></label>
+   <label>Provider<select id="collections-provider" aria-label="Provider"><option value="all">All configured providers</option><option value="comicvine">ComicVine</option><option value="metron">Metron</option><option value="gcd">GCD</option></select></label>
+   <label><input id="collections-proposals" type="checkbox">Save results as pending search-based suggestions</label>
+   <button type="submit">Find Publications</button></form>
+  <div id="collections-search-results" aria-live="polite"></div>
+  <h3>Membership suggestions</h3>
+  <label>Decision<select id="collections-decision" aria-label="Decision"><option value="pending">Pending</option><option value="review_later">Review Later</option><option value="rejected">Rejected</option><option value="accepted">Accepted</option></select></label>
+  <button id="collections-refresh-suggestions" type="button">Reload decisions</button><div id="collections-suggestions"></div>
+ </section>
+ <dialog id="collections-dialog" aria-labelledby="collections-dialog-title"><form id="collections-dialog-form">
+  <h2 id="collections-dialog-title"></h2><div id="collections-dialog-body"></div>
+  <div class="collection-controls"><button id="collections-confirm" type="submit">Save</button><button id="collections-cancel" type="button">Cancel</button></div>
+ </form></dialog>
+</main>
+{% endblock %}

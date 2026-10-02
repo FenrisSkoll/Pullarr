@@ -1,0 +1,20 @@
+#collections { display: block; padding: 1.5rem; max-width: 1400px; width: 100%; overflow: auto; color: var(--text-color); }
+#collections > * { flex: none; overflow: visible; }
+#collections [hidden] { display: none !important; }
+#collections section { margin: 1.5rem 0; }
+#collections label { display: inline-flex; flex-direction: column; gap: .35rem; margin: .4rem; }
+#collections input, #collections select, #collections textarea { max-width: 100%; padding: .4rem; }
+#collections button { margin: .25rem; padding: .4rem .7rem; }
+#collections button, #collections input, #collections select, #collections textarea { color: var(--text-color); background: var(--foreground-color); border: 1px solid var(--border-color); border-radius: .3rem; font: inherit; }
+#collections button:disabled { opacity: .5; cursor: not-allowed; }
+#collections a, #collections summary { color: var(--accent-color); cursor: pointer; }
+#collections button:focus-visible, #collections a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.collection-table { overflow-x: auto; max-width: 100%; }
+.collection-table table { width: 100%; border-collapse: collapse; }
+.collection-table th, .collection-table td { padding: .6rem; text-align: left; vertical-align: top; border-bottom: 1px solid #8886; overflow-wrap: anywhere; }
+#collections-tree ul { margin-left: 1.4rem; }
+#collections-dialog { margin: auto; max-width: min(700px, 94vw); max-height: 90vh; overflow: auto; padding: 1.5rem; color: var(--text-color); background: var(--background-color); border: 1px solid var(--border-color); }
+#collections-dialog::backdrop { background: #0008; }
+#collections-dialog-body { overflow-wrap: anywhere; }
+#collections-message { min-height: 1.5em; }
+.collection-controls { display: flex; flex-wrap: wrap; }

@@ -1,0 +1,800 @@
+# -*- coding: utf-8 -*-
+
+"""
+Setting up, running and shutting down the webserver.
+Also handling startup types and the websocket.
+"""
+
+from __future__ import annotations
+
+from multiprocessing import SimpleQueue
+from os import urandom
+from threading import Thread, Timer
+from typing import (TYPE_CHECKING, Any, Callable, Dict, Iterable,
+                    List, Mapping, Type, TypeVar, Union)
+
+from flask import Flask, render_template, request
+from flask.json.provider import DefaultJSONProvider
+from flask_socketio import SocketIO
+from socketio import PubSubManager
+from waitress.server import create_server
+from waitress.task import ThreadedTaskDispatcher as TTD
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+
+from backend.base.definitions import (Constants, StartType, StartTypeHandler,
+                                      WebSocketEvent, WebSocketEventType)
+from backend.base.files import folder_path
+from backend.base.helpers import Singleton
+from backend.base.logging import LOGGER, setup_logging
+from backend.internals.db import (DBConnectionManager, close_db,
+                                  set_db_location,
+                                  setup_db_adapters_and_converters)
+from backend.internals.db_backup_import import revert_db_import
+from backend.internals.settings import Settings
+
+if TYPE_CHECKING:
+    from flask.ctx import AppContext
+
+    from backend.base.definitions import Download, Task
+
+
+# region Thread Manager
+class ThreadedTaskDispatcher(TTD):
+    def __init__(self) -> None:
+        super().__init__()
+
+        # The DB connection should be closed when the thread is ending, but
+        # right before it actually has. Waitress will consider a thread closed
+        # once it's not in the self.threads set anymore, regardless of whether
+        # the thread has actually ended/joined, so anything we do after that
+        # could be cut short by the main thread ending. So we need to close
+        # the DB connection before the thread is discarded from the set.
+        class TDDSet(set):
+            def discard(self, element: Any) -> None:
+                DBConnectionManager.close_connection_of_thread()
+                return super().discard(element)
+
+        self.threads = TDDSet()
+        return
+
+    def shutdown(self, cancel_pending: bool = True, timeout: int = 5) -> bool:
+        print()
+        LOGGER.info('Shutting down Pullarr')
+
+        WebSocket().disconnect_all()
+
+        result = super().shutdown(cancel_pending, timeout)
+        return result
+
+
+# region Server
+class Server(metaclass=Singleton):
+    url_base = ''
+
+    def __init__(self) -> None:
+        self.__start_type = None
+        self.app = self._create_app()
+        return
+
+    @staticmethod
+    def _create_app() -> Flask:
+        """Creates a flask app instance that can be used to start a web server.
+
+        Returns:
+            Flask: The instance.
+        """
+        from frontend.api import api
+        from frontend.ui import ui
+
+        app = Flask(
+            __name__,
+            template_folder=folder_path('frontend', 'templates'),
+            static_folder=folder_path('frontend', 'static'),
+            static_url_path='/static'
+        )
+        app.config['SECRET_KEY'] = urandom(32)
+
+        json_provider = DefaultJSONProvider(app)
+        json_provider.sort_keys = False
+        json_provider.compact = False
+        app.json = json_provider
+
+        # Supported HTTP runtime: one application process, threaded Waitress.
+        # Pending reviews are process-local; successful retries are durable.
+        from backend.features.provider_switch_review import \
+            ProviderSwitchReviews
+        app.extensions['provider_switch_reviews'] = ProviderSwitchReviews()
+
+        from backend.features.maintenance_runtime import MaintenanceRuntime
+        from backend.internals.db import DBConnection
+        app.extensions['maintenance'] = MaintenanceRuntime(DBConnection.default_file)
+        from backend.features.collections import Collections
+        app.extensions['collections'] = Collections()
+        from backend.features.release_calendar import ReleaseCalendar
+        app.extensions['release_calendar'] = ReleaseCalendar()
+        from backend.features.reading_orders import ReadingOrders
+        app.extensions['reading_orders'] = ReadingOrders()
+        from backend.features.quality import QualityAnalysis
+        app.extensions['quality_analysis'] = QualityAnalysis()
+        from backend.features.discovery import Discover
+        app.extensions['discover'] = Discover()
+
+        ws = WebSocket()
+        ws.init_app(
+            app,
+            path=f'{Constants.API_PREFIX}/socket.io',
+            cors_allowed_origins='*',
+            async_mode='threading',
+            client_manager=MPWebSocketQueue(SimpleQueue(), write_only=False)
+        )
+
+        @ws.on('connect')
+        def auth_ws(auth_payload: Any) -> bool:
+            if not (
+                isinstance(auth_payload, dict)
+                and 'api_key' in auth_payload
+                and isinstance(auth_payload['api_key'], str)
+                and auth_payload['api_key'] == Settings().sv.api_key
+            ):
+                ip = request.environ.get(
+                    'HTTP_X_FORWARDED_FOR',
+                    request.remote_addr
+                )
+                LOGGER.warning(f'Unauthorised request from {ip}')
+                return False
+
+            return True
+
+        # Add error handlers
+        @app.errorhandler(400)
+        def bad_request(e):
+            return {'error': 'BadRequest', 'result': {}}, 400
+
+        @app.errorhandler(404)
+        def not_found(e):
+            if request.path.startswith(Constants.API_PREFIX):
+                return {'error': 'NotFound', 'result': {}}, 404
+            return render_template('page_not_found.html', url_base=Server.url_base), 404
+
+        @app.errorhandler(405)
+        def method_not_allowed(e):
+            return {'error': 'MethodNotAllowed', 'result': {}}, 405
+
+        @app.errorhandler(500)
+        def internal_error(e):
+            return {'error': 'InternalError', 'result': {}}, 500
+
+        # Add endpoints
+        app.register_blueprint(ui)
+        app.register_blueprint(api, url_prefix=Constants.API_PREFIX)
+
+        # Setup db handling
+        app.teardown_appcontext(close_db)
+
+        return app
+
+    def run(
+        self,
+        host: str,
+        port: int,
+        url_base: str
+    ) -> Union[StartType, None]:
+        """Start the webserver.
+
+        Args:
+            host (str): IP address to bind to, or `0.0.0.0` for all.
+            port (int): The port to listen on.
+            url_base (str): The url prefix/base to host the endpoints on, or
+                an empty string for no prefix.
+
+        Returns:
+            Union[StartType, None]: `None` on shutdown, `StartType` on restart.
+        """
+        self.app.config["APPLICATION_ROOT"] = url_base
+        self.app.wsgi_app = DispatcherMiddleware( # type: ignore
+            Flask(__name__),
+            {url_base: self.app.wsgi_app}
+        )
+        self.__class__.url_base = url_base
+
+        # Background downloads emit before any browser connects. Socket.IO
+        # otherwise initializes this pipe consumer lazily on first connection,
+        # allowing the bounded OS pipe to fill and block an acquisition worker.
+        websocket = WebSocket()
+        if not websocket.server.manager_initialized:
+            websocket.server.manager_initialized = True
+            websocket.client_manager.initialize()
+
+        dispatcher = ThreadedTaskDispatcher()
+        dispatcher.set_thread_count(Constants.HOSTING_THREADS)
+
+        self.server = create_server(
+            self.app,
+            _dispatcher=dispatcher,
+            host=host,
+            port=port,
+            threads=Constants.HOSTING_THREADS
+        )
+
+        LOGGER.info(f'Pullarr running on http://{host}:{port}{self.url_base}')
+        self.server.run()
+
+        return self.__start_type
+
+    def __trigger_server_shutdown(self) -> None:
+        """Shutdown waitress server. Intended to be run in a thread."""
+        if not hasattr(self, 'server'):
+            return
+
+        self.server.task_dispatcher.shutdown()
+        self.server.close()
+        self.server._map.clear() # type: ignore
+        return
+
+    def shutdown(self) -> None:
+        """
+        Stop the waitress server. Starts a thread that will trigger the server
+        shutdown after one second.
+        """
+        self.get_db_timer_thread(
+            interval=1.0,
+            target=self.__trigger_server_shutdown,
+            name="InternalStateHandler"
+        ).start()
+        return
+
+    def restart(
+        self,
+        start_type: StartType = StartType.RESTART
+    ) -> None:
+        """Same as `self.shutdown()`, but restart instead of shutting down.
+
+        Args:
+            start_type (StartType, optional): Why Kapowarr should restart.
+                Defaults to StartType.RESTART.
+        """
+        self.__start_type = start_type
+        self.shutdown()
+        return
+
+    def get_db_thread(
+        self,
+        target: Callable,
+        name: str,
+        args: Iterable[Any] = (),
+        kwargs: Mapping[str, Any] = {}
+    ) -> Thread:
+        """Create a thread that runs under Flask app context.
+
+        Args:
+            target (Callable): The function to run in the thread.
+
+            name (str): The name of the thread.
+
+            args (Iterable[Any], optional): The arguments to pass to the function.
+                Defaults to ().
+
+            kwargs (Mapping[str, Any], optional): The keyword arguments to pass
+                to the function.
+                Defaults to {}.
+
+        Returns:
+            Thread: The Thread instance.
+        """
+        def db_thread(*args, **kwargs) -> None:
+            with self.app.app_context():
+                target(*args, **kwargs)
+            return
+
+        t = Thread(
+            target=db_thread,
+            name=name,
+            args=args,
+            kwargs=kwargs
+        )
+        return t
+
+    def get_db_timer_thread(
+        self,
+        interval: float,
+        target: Callable,
+        name: Union[str, None] = None,
+        args: Iterable[Any] = (),
+        kwargs: Mapping[str, Any] = {}
+    ) -> Timer:
+        """Create a timer thread that runs under Flask app context.
+
+        Args:
+            interval (float): The time to wait before running the target.
+
+            target (Callable): The function to run in the thread.
+
+            name (Union[str, None], optional): The name of the thread.
+                Defaults to None.
+
+            args (Iterable[Any], optional): The arguments to pass to the function.
+                Defaults to ().
+
+            kwargs (Mapping[str, Any], optional): The keyword arguments to pass
+                to the function.
+                Defaults to {}.
+
+        Returns:
+            Timer: The timer thread instance.
+        """
+        def db_thread(*args, **kwargs) -> None:
+            with self.app.app_context():
+                target(*args, **kwargs)
+            return
+
+        t = Timer(
+            interval=interval,
+            function=db_thread,
+            args=args,
+            kwargs=kwargs
+        )
+        if name:
+            t.name = name
+        return t
+
+
+# region Websocket
+class MPWebSocketQueue(PubSubManager):
+    name = 'mp_queue'
+
+    def __init__(
+        self,
+        queue: SimpleQueue[Dict[str, Any]],
+        write_only: bool = False,
+        channel='flask-socketio',
+        logger=None
+    ) -> None:
+        super().__init__(channel, write_only, logger)
+        self.queue = queue
+        return
+
+    def initialize(self):
+        super().initialize()
+        if not self.write_only:
+            self.thread.name = "WebSocketQueueThread"
+
+    def _publish(self, data: Dict[str, Any]):
+        self.queue.put(data)
+        return
+
+    def _listen(self):
+        while True:
+            result = self.queue.get()
+            yield result
+
+
+class WebSocket(SocketIO, metaclass=Singleton):
+    server_options: dict
+
+    @property
+    def client_manager(self) -> MPWebSocketQueue:
+        return self.server_options['client_manager']
+
+    def disconnect_all(self) -> None:
+        """Disconnect all clients from the default namespace"""
+        for sid, _ in self.client_manager.get_participants('/', None):
+            self.client_manager.disconnect(sid, '/')
+        return
+
+    def emit(self, event: WebSocketEvent) -> None: # type: ignore
+        """Emit an event.
+
+        Args:
+            event (WebSocketEvent): The event to emit.
+        """
+        cm = self.client_manager
+
+        if not cm.write_only:
+            super().emit(
+                event.get_type().value,
+                event.get_body()
+            )
+
+        else:
+            message = {
+                'method': 'emit',
+                'event': event.get_type().value,
+                'data': event.get_body(),
+                'namespace': '/',
+                'host_id': cm.host_id
+            }
+            cm._handle_emit(message)
+            cm._publish(message)
+
+        return
+
+
+# region Websocket Events
+class AddedToQueueEvent(WebSocketEvent):
+    "A download has been added to the queue"
+
+    def __init__(self, download: Download) -> None:
+        """Create the event.
+
+        Args:
+            download (Download): The download that has been added.
+        """
+        self.download = download
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.QUEUE_ADDED
+
+    def get_body(self) -> Dict[str, Any]:
+        return self.download.as_dict()
+
+
+class QueueStatusEvent(WebSocketEvent):
+    "The status of a download has changed (progress, speed, state, etc.)"
+
+    def __init__(self, download: Download) -> None:
+        """Create the event.
+
+        Args:
+            download (Download): The download for which the status
+                should be shared.
+        """
+        self.download = download
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.QUEUE_STATUS
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "id": self.download.id,
+            "status": self.download.state.value,
+            "size": self.download.size,
+            "speed": self.download.speed,
+            "progress": self.download.progress
+        }
+
+
+class RemovedFromQueueEvent(WebSocketEvent):
+    """
+    A download has been removed from the queue because it has finished or
+    has been cancelled
+    """
+
+    def __init__(self, download: Download) -> None:
+        """Create the event.
+
+        Args:
+            download (Download): The download that has been finished or cancelled.
+        """
+        self.download = download
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.QUEUE_ENDED
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "id": self.download.id
+        }
+
+
+class TaskAddedEvent(WebSocketEvent):
+    "A task has been added to the queue"
+
+    def __init__(self, task: Task) -> None:
+        """Create the event.
+
+        Args:
+            task (Task): The task that has been added.
+        """
+        self.task = task
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.TASK_ADDED
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "action": self.task.action,
+            "volume_id": self.task.volume_id,
+            "issue_id": self.task.issue_id
+        }
+
+
+class TaskStatusEvent(WebSocketEvent):
+    "Update on the status of the currently running task"
+
+    def __init__(self, message: str) -> None:
+        """Create the event.
+
+        Args:
+            message (str): The message representing the status of the task.
+        """
+        self.message = message
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.TASK_STATUS
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "message": self.message
+        }
+
+
+class TaskEndedEvent(WebSocketEvent):
+    """
+    A task has been removed from the queue because it has finished or
+    has been cancelled
+    """
+
+    def __init__(self, task: Task) -> None:
+        """Create the event.
+
+        Args:
+            task (Task): The task that has been finished or cancelled.
+        """
+        self.task = task
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.TASK_ENDED
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "action": self.task.action,
+            "volume_id": self.task.volume_id,
+            "issue_id": self.task.issue_id
+        }
+
+
+class MassEditorStatusEvent(WebSocketEvent):
+    "Update on the Mass Editor progress"
+
+    def __init__(
+        self,
+        identifier: str,
+        current_item: int,
+        total_items: int
+    ) -> None:
+        """Create the event.
+
+        Args:
+            identifier (str): The identifier of the job.
+            current_item (int): The item number currently being worked on.
+            total_items (int): The total number of items that will be worked on.
+        """
+        self.identifier = identifier
+        self.current_item = current_item
+        self.total_items = total_items
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.MASS_EDITOR_STATUS
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "identifier": self.identifier,
+            "current_item": self.current_item,
+            "total_items": self.total_items
+        }
+
+
+class DownloadedStatusEvent(WebSocketEvent):
+    "A change in what issues are marked as downloaded or not for a volume"
+
+    def __init__(
+        self,
+        volume_id: int,
+        not_downloaded_issues: List[int] = [],
+        downloaded_issues: List[int] = []
+    ) -> None:
+        """Create the event.
+
+        Args:
+            volume_id (int): The ID of the volume.
+
+            not_downloaded_issues (List[int], optional): The issue IDs that were
+                previously downloaded, but aren't anymore.
+                Defaults to [].
+
+            downloaded_issues (List[int], optional): The issue IDs that were
+                previously not downloaded, but now are.
+                Defaults to [].
+        """
+        self.volume_id = volume_id
+        self.not_downloaded_issues = not_downloaded_issues
+        self.downloaded_issues = downloaded_issues
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.DOWNLOADED_STATUS
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "volume_id": self.volume_id,
+            "not_downloaded_issues": self.not_downloaded_issues,
+            "downloaded_issues": self.downloaded_issues
+        }
+
+
+class StatusCountEvent(WebSocketEvent):
+    "The number of active status issues has changed"
+
+    def __init__(self, count: int) -> None:
+        """Create the event.
+
+        Args:
+            count (int): The total number of active status types.
+        """
+        self.count = count
+        return
+
+    def get_type(self) -> WebSocketEventType:
+        return WebSocketEventType.STATUS_COUNT
+
+    def get_body(self) -> Dict[str, Any]:
+        return {
+            "count": self.count
+        }
+
+
+# region StartType Handling
+StartTypeHandlerType = TypeVar("StartTypeHandlerType", bound=StartTypeHandler)
+
+
+class StartTypeHandlers:
+    handlers: dict[StartType, StartTypeHandler] = {}
+    timeout_thread: Union[Timer, None] = None
+    running_handler: Union[StartType, None] = None
+
+    @classmethod
+    def register_handler(cls, start_type: StartType):
+        """Register a handler for a certain start type.
+
+        ```
+        @StartTypeHandlers.register_handler(example_type)
+        class ExampleHandler(StartTypeHandler):
+            ...
+        ```
+
+        Args:
+            start_type (StartType): The start type that the handler is for.
+
+        Raises:
+            RuntimeError: A start type handler with the given start type is
+                already registered.
+        """
+        def wrapper(
+            handler_class: Type[StartTypeHandlerType]
+        ) -> Type[StartTypeHandlerType]:
+            if start_type in cls.handlers:
+                raise RuntimeError(
+                    f"Start type handler with start type {start_type.name} "
+                    "registered multiple times"
+                )
+            cls.handlers[start_type] = handler_class()
+            return handler_class
+        return wrapper
+
+    @staticmethod
+    def _on_timeout_wrapper(
+        handler_description: str,
+        on_timeout: Callable[[], None],
+        restart_on_timeout: bool
+    ) -> None:
+        LOGGER.info(
+            "Timer for %s expired",
+            handler_description
+        )
+        on_timeout()
+        if restart_on_timeout:
+            Server().restart()
+        return
+
+    @classmethod
+    def start_timer(cls, start_type: StartType) -> None:
+        """Start the timer for a start type.
+
+        Args:
+            start_type (StartType): The start type to start the timer for.
+        """
+        if start_type not in cls.handlers:
+            return
+
+        if cls.timeout_thread and cls.timeout_thread.is_alive():
+            cls.timeout_thread.cancel()
+
+        handler = cls.handlers[start_type]
+        cls.running_handler = start_type
+        cls.timeout_thread = Server().get_db_timer_thread(
+            interval=handler.timeout,
+            target=cls._on_timeout_wrapper,
+            name=f"StartTypeHandler.{start_type.name}",
+            args=(
+                handler.description,
+                handler.on_timeout,
+                handler.restart_on_timeout
+            )
+        )
+        cls.timeout_thread.start()
+        LOGGER.info(
+            "Starting timer for %s (%d seconds)",
+            handler.description, handler.timeout
+        )
+        return
+
+    @classmethod
+    def diffuse_timer(cls, start_type: StartType) -> None:
+        """Stop/Diffuse the timer for a start type.
+
+        Args:
+            start_type (StartType): The start type to stop the timer for.
+        """
+        if cls.running_handler != start_type:
+            return
+
+        timeout_thread = cls.timeout_thread
+        if not (timeout_thread and timeout_thread.is_alive()):
+            return
+
+        timeout_thread.cancel()
+        cls.timeout_thread = None
+
+        handler = cls.handlers[start_type]
+        LOGGER.info(
+            "Timer for %s diffused",
+            handler.description
+        )
+        cls.running_handler = None
+        handler.on_diffuse()
+        return
+
+
+@StartTypeHandlers.register_handler(StartType.RESTART_HOSTING_CHANGES)
+class HostingChangesHandler(StartTypeHandler):
+    description = "hosting changes"
+    timeout = Constants.HOSTING_REVERT_TIME
+    restart_on_timeout = True
+
+    def on_timeout(self) -> None:
+        Settings().restore_hosting_settings()
+        return
+
+    def on_diffuse(self) -> None:
+        return
+
+
+@StartTypeHandlers.register_handler(StartType.RESTART_DB_CHANGES)
+class DatabaseChangesHandler(StartTypeHandler):
+    description = "database import"
+    timeout = Constants.DB_REVERT_TIME
+    restart_on_timeout = True
+
+    def on_timeout(self) -> None:
+        revert_db_import(swap=True)
+        return
+
+    def on_diffuse(self) -> None:
+        revert_db_import(swap=False)
+        return
+
+
+# region Subprocess Handling
+def setup_process(
+    log_level: int,
+    log_folder: Union[str, None],
+    log_file: Union[str, None],
+    db_folder: Union[str, None],
+    ws_queue: SimpleQueue
+) -> Callable[[], AppContext]:
+    setup_logging(log_folder, log_file, log_level, do_rollover=False)
+    set_db_location(db_folder)
+    setup_db_adapters_and_converters()
+
+    WebSocket(client_manager=MPWebSocketQueue(ws_queue, write_only=True))
+
+    app = Flask(__name__)
+    app.teardown_appcontext(close_db)
+    return app.app_context

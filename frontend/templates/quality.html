@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Quality Profiles{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/quality.css') }}">{% endblock %}
+{% block js %}<script src="{{ url_for('static', filename='js/quality.js') }}" defer></script>{% endblock %}
+{% block main %}
+<main id="quality">
+ <h1>Quality Profiles &amp; Acquisition Provenance</h1>
+ <p>Release labels are claims. Dimensions are verified from files. Size, page count, DPI, container and codec names do not inherently mean better visual quality. Upgrades require a strictly higher group and verification before replacement.</p>
+ <p id="q-message" role="status" aria-live="polite"></p>
+ <nav aria-label="Quality actions"><button id="q-list" type="button">All Quality Profiles</button><button id="q-create" type="button">Create Quality Profile</button></nav>
+ <section id="q-content" aria-live="polite"></section>
+ <dialog id="q-dialog" aria-labelledby="q-dialog-title"><h2 id="q-dialog-title"></h2><div id="q-dialog-body"></div><button id="q-close" type="button">Cancel / Close</button></dialog>
+</main>
+{% endblock %}

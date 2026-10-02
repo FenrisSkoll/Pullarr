@@ -1,0 +1,12 @@
+#reading-orders { padding: 1.5rem; max-width: 100%; }
+#reading-orders nav, #reading-orders .ro-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
+#reading-orders button, #reading-orders input, #reading-orders select, #reading-orders textarea { padding: .5rem; margin: .3rem; }
+#reading-orders label { display: block; margin: .5rem 0; }
+#reading-orders textarea { display: block; width: min(90%, 40rem); }
+#reading-orders .ro-table { overflow-x: auto; max-width: 100%; }
+#reading-orders table { width: 100%; border-collapse: collapse; }
+#reading-orders th, #reading-orders td { padding: .6rem; text-align: left; border-bottom: 1px solid #7776; vertical-align: top; overflow-wrap: anywhere; }
+#reading-orders dialog { max-width: min(52rem, 94vw); max-height: 90vh; overflow: auto; padding: 1.2rem; }
+#reading-orders :focus-visible { outline: 3px solid #4e9fe5; outline-offset: 3px; }
+#reading-orders #ro-message { min-height: 1.5em; }
+@media (max-width: 650px) { #reading-orders { padding: .7rem; } #reading-orders table { min-width: 620px; } }

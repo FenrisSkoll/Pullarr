@@ -1,0 +1,13 @@
+#discover {padding: 1rem; max-width: 100%;}
+#d-filters {display:flex;flex-wrap:wrap;gap:.7rem;margin:1rem 0;align-items:end;}
+#d-filters label {display:flex;flex-direction:column;gap:.3rem;}
+#d-content {overflow-x:auto;}
+#discover table {width:100%;border-collapse:collapse;}
+#discover td,#discover th {padding:.6rem;text-align:left;vertical-align:top;overflow-wrap:anywhere;}
+#discover th {border-bottom:1px solid currentColor;}
+#discover button {margin:.25rem;padding:.4rem;}
+#discover :focus-visible {outline:3px solid #3b98e3;outline-offset:2px;}
+#d-dialog {max-width:min(850px,92vw);max-height:90vh;overflow:auto;}
+#d-dialog label {display:block;margin:.7rem 0;}
+#d-dialog p {overflow-wrap:anywhere;}
+@media(max-width:650px) {#discover {padding:.5rem;} #d-filters label,#d-filters input,#d-filters select {max-width:100%;} #d-content table {min-width:620px;}}

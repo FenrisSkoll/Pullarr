@@ -1,0 +1,109 @@
+{
+  "origin": {
+    "provider": "metron",
+    "series_id": "17494",
+    "removed": "images, creators, account data and unrelated fields; no headers retained"
+  },
+  "series": {
+    "id": 17494,
+    "name": "Bone",
+    "volume": 1,
+    "issue_count": 1,
+    "year_began": 2004,
+    "desc": "",
+    "alt_names": [],
+    "language": "en",
+    "resource_url": "https://metron.cloud/series/bone-2004-1/",
+    "cv_id": 44338,
+    "gcd_id": 12115,
+    "series_type": {
+      "id": 15,
+      "name": "Omnibus"
+    },
+    "publisher": {
+      "id": 19,
+      "name": "Cartoon Books"
+    }
+  },
+  "issue_list": [
+    {
+      "id": 185041,
+      "number": "1",
+      "modified": "2026-09-24T20:30:08.405210-04:00"
+    }
+  ],
+  "issues": [
+    {
+      "id": 185041,
+      "number": "1",
+      "title": "The Complete Cartoon Epic In One Volume",
+      "name": [
+        "The Map",
+        "Thorn",
+        "Phoney Bone",
+        "Kingdok",
+        "Barrelhaven",
+        "Phoney's Inferno",
+        "The Spring Fair",
+        "The Cave",
+        "The Mystery Cow",
+        "The Great Cow Race",
+        "Lonesome Road",
+        "Watch Duty",
+        "Moby Bone",
+        "Road Trip",
+        "Double or Nothing",
+        "Eyes of the Storm",
+        "Mending Fences",
+        "Dreams",
+        "Things that go Bump in the Night",
+        "Business",
+        "Earth & Sky",
+        "Council in the Dark",
+        "The Straggler",
+        "Deliver Us These Laws",
+        "The Mid-Summer's Day Plan",
+        "The Turning",
+        "One the Dragon's Stair",
+        "Roque Ja",
+        "The Orphans",
+        "Rat Creature Temple",
+        "Ghost Circles",
+        "Call of the Wild",
+        "The Hollow Tree",
+        "Dragons in the Earth",
+        "Protection Spell",
+        "Wolf Call",
+        "Blood Moon",
+        "End Times",
+        "The Promise",
+        "Darker Truths",
+        "Snap! Crackle! Pop!",
+        "The Root Cellar",
+        "Prayer Stones",
+        "The Gate of Atheia",
+        "The Cold Spot",
+        "To Be or Not To Be",
+        "Moonwort",
+        "The Crown of Horns",
+        "Rash Word, Rash Actions",
+        "Fear",
+        "Escape From the City",
+        "The Armory",
+        "Escape From the City",
+        "Chamber of Horns"
+      ],
+      "desc": "Synthetic fixture description. Edition evidence: trade paperback.",
+      "cover_date": "2004-07-01",
+      "store_date": "2004-07-28",
+      "cv_id": 305316,
+      "gcd_id": 215788,
+      "modified": "2026-09-24T20:30:08.405210-04:00",
+      "series": {
+        "id": 17494,
+        "name": "Bone"
+      }
+    }
+  ],
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

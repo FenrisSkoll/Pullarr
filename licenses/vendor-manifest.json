@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "path": "backend/lib/unrar_linux_64",
+      "source": "https://www.rarlab.com/rar/rarlinux-x64-723.tar.gz",
+      "archive_sha256": "759b4b6aa0d9f77131882162951193f3a0e54bf60e1d8dc4255aa308accab588",
+      "sha256": "926d3a00775ed96afccfdef69c3781334b71ccdb733931edf30f4866e4f08410",
+      "version": "7.23",
+      "license": "LicenseRef-UnRAR"
+    },
+    {
+      "path": "backend/lib/unrar_windows_64.exe",
+      "source": "https://www.rarlab.com/rar/winrar-x64-723.exe",
+      "archive_sha256": "8ff0daf3ed564cc743c0e23ff2e253997ffc74460f9673f0b6dd037b2db4ce7b",
+      "sha256": "0d3715001790f0fd18d3e850f947b540530b2d2deb9a2e6a9e84f2ed7b234235",
+      "version": "7.23",
+      "license": "LicenseRef-UnRAR"
+    },
+    {
+      "path": "tests/fixtures/archives/synthetic-25.cbr",
+      "sha256": "4d628c320fc76f7fceef030ce93a8712eb26d80ed41545fb2ea89d0667ea9ca5",
+      "license": "GPL-3.0",
+      "source": "Original generated white PNG and minimal XML test payloads; tests/fixtures/archives/README.md"
+    },
+    {
+      "path": "tests/fixtures/archives/synthetic-250.cbr",
+      "sha256": "ae941abeeaa301354c2e84e85391b1f05567aafdacf1e8e3874fff63fcf8ddc3",
+      "license": "GPL-3.0",
+      "source": "Original generated white PNG and minimal XML test payloads; tests/fixtures/archives/README.md"
+    },
+    {
+      "path": "tests/fixtures/archives/synthetic-rar4.cbr",
+      "sha256": "c99bb2e9705d874c0a5212719d2cd835c9831434ca151494282a462abe695516",
+      "license": "GPL-3.0",
+      "source": "Original generated white PNG and minimal XML test payloads; tests/fixtures/archives/README.md"
+    },
+    {
+      "path": "tests/fixtures/archives/synthetic-rar5.cbr",
+      "sha256": "ed36ae06963ae949802279f89baf3217c0d7d1891b530efebcc8183b80cea31e",
+      "license": "GPL-3.0",
+      "source": "Original generated white PNG and minimal XML test payloads; tests/fixtures/archives/README.md"
+    },
+    {
+      "path": "frontend/static/vendor/socket.io-4.7.5.min.js",
+      "sha256": "73eba16bc895fdfa454e27ecb80def31ede8d861f99e175ff93b110eabec044f",
+      "text_lf": true,
+      "license": "MIT",
+      "version": "4.7.5",
+      "source": "https://github.com/socketio/socket.io-client/tree/4.7.5"
+    },
+    {
+      "path": "tests/fixtures/vendor/socket.io-4.7.5.min.js",
+      "sha256": "73eba16bc895fdfa454e27ecb80def31ede8d861f99e175ff93b110eabec044f",
+      "text_lf": true,
+      "license": "MIT",
+      "version": "4.7.5",
+      "source": "https://github.com/socketio/socket.io-client/tree/4.7.5"
+    }
+  ]
+}

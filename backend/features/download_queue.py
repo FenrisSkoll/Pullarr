@@ -1,0 +1,859 @@
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+
+from json import dumps, loads
+from os import listdir
+from os.path import basename, join
+from time import sleep
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple, Union
+from uuid import uuid4
+
+from typing_extensions import assert_never
+
+from backend.base.custom_exceptions import (ClientNotWorking,
+                                            DownloadLinkBroken,
+                                            DownloadQueueEntryNotFound,
+                                            DownloadQueueEntryUnmovable,
+                                            DownloadServiceRateLimitReached,
+                                            EnqueuingDownloadFailure,
+                                            InvalidKeyValue, IssueNotFound)
+from backend.base.definitions import (BlocklistReason, Constants, Download,
+                                      DownloadClientIdentifier,
+                                      DownloadService, DownloadState,
+                                      EnqueuingDownloadFailureReason,
+                                      ExternalDownload, SeedingHandling)
+from backend.base.files import create_folder, delete_file_folder
+from backend.base.helpers import CommaList, Singleton
+from backend.base.logging import LOGGER
+from backend.features.post_processing import (PostProcessor,
+                                              PostProcessorTorrentsComplete,
+                                              PostProcessorTorrentsCopy)
+from backend.implementations.blocklist import add_to_blocklist
+from backend.implementations.download_client_manager import DownloadClients
+from backend.implementations.download_prepper_manager import DownloadPreppers
+from backend.implementations.external_client_manager import ExternalClients
+from backend.implementations.indexer_client_manager import IndexerClients
+from backend.implementations.volumes import Issue
+from backend.internals.db import get_db, iter_commit
+from backend.internals.server import (AddedToQueueEvent, QueueStatusEvent,
+                                      RemovedFromQueueEvent, Server, WebSocket)
+from backend.internals.settings import Settings
+
+if TYPE_CHECKING:
+    from threading import Thread
+
+
+class DownloadHandler(metaclass=Singleton):
+    queue: List[Download] = []
+
+    def __init__(self) -> None:
+        """Setup the download handler"""
+        self.settings = Settings()
+        create_folder(self.settings.sv.download_folder)
+        return
+
+    # region Adding
+    def __prepare_downloads_for_queue(
+        self,
+        downloads: List[Download],
+        forced_match: bool
+    ) -> List[Download]:
+        """Get download instances ready to be put in the queue.
+        Registers them in the db if not already. Creates the download thread.
+        For torrents, it chooses the client and runs the download (status) thread.
+
+        Args:
+            downloads (List[Download]): The downloads to get ready.
+
+            forced_match (bool): The download was forced.
+
+        Returns:
+            List[Download]: The downloads, now prepared.
+        """
+        cursor = get_db()
+        for download in downloads:
+            if download.id is None:
+                if isinstance(download, ExternalDownload):
+                    external_client_id = download.external_client.id
+                else:
+                    external_client_id = None
+
+                if download.selected_release is not None:
+                    download.selected_release = dict(download.selected_release, completion_id=uuid4().hex)
+                    decision_id = download.selected_release.get('automation_decision_id')
+                    if decision_id:
+                        cursor.execute('''INSERT INTO wanted_acquisitions(decision_id,kind,acquisition_id)
+                            VALUES(?,'direct_download',?)''',
+                            (decision_id, download.selected_release['completion_id']))
+                    covered_issues = dumps(download.selected_release, sort_keys=True)
+                elif isinstance(download.covered_issues, tuple):
+                    covered_issues = CommaList(
+                        map(str, download.covered_issues)
+                    ).__str__()
+
+                elif isinstance(download.covered_issues, float):
+                    covered_issues = str(download.covered_issues)
+
+                else:
+                    covered_issues = None
+
+                download.id = cursor.execute(
+                    """
+                    INSERT INTO download_queue(
+                        volume_id, client_type, external_client_id,
+                        download_link, covered_issues, force_original_name,
+                        source_type, source_name,
+                        web_link, web_title, web_sub_title
+                    )
+                    VALUES (
+                        :volume_id, :client_type, :external_client_id,
+                        :download_link, :covered_issues, :force_original_name,
+                        :source_type, :source_name,
+                        :web_link, :web_title, :web_sub_title
+                    );
+                    """,
+                    {
+                        'volume_id': download.volume_id,
+                        'client_type': download.identifier.value,
+                        'external_client_id': external_client_id,
+                        'download_link': download.download_link,
+                        'covered_issues': covered_issues,
+                        'force_original_name': forced_match,
+                        'source_type': download.download_service.value,
+                        'source_name': download.source_name,
+                        'web_link': download.web_link,
+                        'web_title': download.web_title,
+                        'web_sub_title': download.web_sub_title
+                    }
+                ).lastrowid
+
+            if download.selected_release is not None:
+                # Queue receipt and automation correlation must be durable before
+                # either direct or external worker can start a side effect.
+                cursor.connection.commit()
+
+            if not isinstance(download, ExternalDownload):
+                download.download_thread = Server().get_db_thread(
+                    target=self.__run_download,
+                    args=(download,),
+                    name=f'DownloadThread-{download.id}'
+                )
+
+            else:
+                thread = Server().get_db_thread(
+                    target=self.__run_external_download,
+                    args=(download,),
+                    name=f'ExternalDownloadThread-{download.id}'
+                )
+                download.download_thread = thread
+                thread.start()
+
+            WebSocket().emit(AddedToQueueEvent(download))
+        return downloads
+
+    def add(
+        self,
+        link: str,
+        indexer_id: int,
+        volume_id: int,
+        issue_id: Union[int, None] = None,
+        force_match: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Add a download to the queue.
+
+        Args:
+            link (str): A link to download from.
+
+            indexer_id (int): The ID of the indexer that the link came from.
+
+            volume_id (int): The ID of the volume for which the download is
+                intended.
+
+            issue_id (Union[int, None], optional): The ID of the issue for which
+                the download is intended.
+                Defaults to None.
+
+            force_match (bool, optional): On sources where downloads are
+                filtered, don't and instead download everything.
+                Defaults to False.
+
+        Raises:
+            EnqueuingDownloadFailure: Failed to add download to queue.
+
+        Returns:
+            List[Dict[str, Any]]: Queue entries that were added from the link.
+        """
+        LOGGER.info(
+            'Adding download for ' +
+            f'volume {volume_id}{f" issue {issue_id}" if issue_id else ""}: ' +
+            f'{link}'
+        )
+
+        if self.link_in_queue(link):
+            LOGGER.info('Download already in queue')
+            return []
+
+        indexer = IndexerClients.get_client(indexer_id)
+        PrepperClass = DownloadPreppers.get_prepper(
+            indexer.download_type, indexer.client_type
+        )
+        prepper = PrepperClass(
+            link, indexer_id,
+            volume_id, issue_id,
+            force_match
+        )
+
+        try:
+            downloads = prepper.get_downloads()
+
+        except EnqueuingDownloadFailure as e:
+            if e.reason == EnqueuingDownloadFailureReason.WEBPAGE_BROKEN:
+                add_to_blocklist(
+                    web_link=link,
+                    web_title=prepper.web_title,
+                    web_sub_title=None,
+                    download_link=None,
+                    download_service=None,
+                    volume_id=volume_id,
+                    issue_id=issue_id,
+                    reason=BlocklistReason.LINK_BROKEN
+                )
+
+            elif e.reason == EnqueuingDownloadFailureReason.NO_WORKING_LINKS:
+                add_to_blocklist(
+                    web_link=link,
+                    web_title=prepper.web_title,
+                    web_sub_title=None,
+                    download_link=None,
+                    download_service=None,
+                    volume_id=volume_id,
+                    issue_id=issue_id,
+                    reason=BlocklistReason.NO_WORKING_LINKS
+                )
+
+            raise e
+
+        result = self.__prepare_downloads_for_queue(
+            downloads,
+            forced_match=force_match
+        )
+        self.queue += result
+
+        self._process_queue()
+        return [r.as_dict() for r in result]
+
+    def add_multiple(
+        self,
+        add_args: Iterable[Tuple[str, int, int, Union[int, None], bool]]
+    ) -> None:
+        for entry in add_args:
+            try:
+                self.add(*entry)
+            except EnqueuingDownloadFailure:
+                pass
+
+            sleep(1.0)
+        return
+
+    def add_resolved(self, downloads: List[Download], forced_match: bool) -> List[Dict[str, Any]]:
+        """Internal selected-offering boundary. Never invokes a legacy prepper.
+
+        The manual selection service holds its claim lock before reaching here.
+        Versioned selected receipts reach Phase 6 on completion. Legacy queue
+        rows retain their explicitly isolated compatibility completion path.
+        """
+        if any(self.link_in_queue(d.download_link) for d in downloads):
+            return []
+        result = self.__prepare_downloads_for_queue(downloads, forced_match)
+        self.queue += result
+        self._process_queue()
+        return [{'id': d.id, 'title': d.title, 'status': d.state.value,
+                 'source_name': d.source_name} for d in result]
+
+    def __load_downloads(self) -> None:
+        """
+        Load downloads from the database and add them to the queue
+        for re-downloading
+        """
+        cursor = get_db()
+        downloads = cursor.execute("""
+            SELECT
+                id, volume_id, client_type, external_client_id,
+                download_link, covered_issues,
+                force_original_name,
+                source_type, source_name,
+                web_link, web_title, web_sub_title
+            FROM download_queue;
+        """).fetchall()
+
+        if downloads:
+            LOGGER.info('Loading downloads')
+
+        for download in iter_commit(downloads):
+            LOGGER.debug('Loading persisted download: %s', download['id'])
+            selected_release = None
+            if (download['covered_issues'] or '').startswith('{'):
+                selected_release = loads(download['covered_issues'])
+                if selected_release.get('version') != 'ddl-selection/v1':
+                    LOGGER.warning('Unsupported queued DDL selection receipt: %s', download['id'])
+                    continue
+                if 'completion' in selected_release:
+                    from backend.features.acquisition_completion import \
+                        handoff_queued_completion
+                    try:
+                        handoff_queued_completion(cursor, download['id'], selected_release)
+                    except Exception:
+                        LOGGER.warning('Completed DDL handoff requires review; queue %s retained', download['id'])
+                    continue
+                covered_issues = None
+            elif download['covered_issues'] is None:
+                covered_issues = None
+
+            elif ',' in download['covered_issues']:
+                covered_issues = (
+                    float(download['covered_issues'].split(',')[0]),
+                    float(download['covered_issues'].split(',')[1])
+                )
+
+            else:
+                covered_issues = float(download['covered_issues'])
+
+            DownloadClient = DownloadClients.get_client(
+                DownloadClientIdentifier(download['client_type'])
+            )
+            kwargs = {}
+            if selected_release is not None:
+                kwargs['selected_release'] = selected_release
+            if issubclass(
+                DownloadClient,
+                ExternalDownload
+            ):
+                kwargs.update({
+                    'external_client': ExternalClients.get_client(
+                        download['external_client_id']
+                    )
+                })
+
+            try:
+                dl_instance = DownloadClient(
+                    download_link=download['download_link'],
+                    volume_id=download['volume_id'],
+                    covered_issues=covered_issues,
+                    download_service=DownloadService(download['source_type']),
+                    source_name=download['source_name'],
+                    web_link=download['web_link'],
+                    web_title=download['web_title'],
+                    web_sub_title=download['web_sub_title'],
+                    forced_match=download['force_original_name'],
+                    **kwargs
+                )
+                dl_instance.id = download['id']
+
+            except DownloadLinkBroken:
+                # Link is broken
+
+                issue_id = None
+                if isinstance(covered_issues, float):
+                    issue_id = Issue.from_volume_and_calc_number(
+                        download['volume_id'],
+                        covered_issues
+                    ).id
+
+                add_to_blocklist(
+                    web_link=download['web_link'],
+                    web_title=download['web_title'],
+                    web_sub_title=download['web_sub_title'],
+                    download_link=download['download_link'],
+                    download_service=DownloadService(download['source_type']),
+                    volume_id=download['volume_id'],
+                    issue_id=issue_id,
+                    reason=BlocklistReason.LINK_BROKEN
+                )
+                cursor.execute(
+                    "DELETE FROM download_queue WHERE id = ?;",
+                    (download['id'],)
+                )
+                continue
+
+            except (
+                DownloadServiceRateLimitReached, IssueNotFound, ClientNotWorking
+            ):
+                cursor.execute(
+                    "DELETE FROM download_queue WHERE id = ?;",
+                    (download['id'],)
+                )
+                continue
+
+            self.queue += self.__prepare_downloads_for_queue(
+                [dl_instance],
+                forced_match=download['force_original_name']
+            )
+
+        self._process_queue()
+        return
+
+    def load_downloads(self) -> Thread:
+        """Load downloads from the database and add them to the queue
+        for re-downloading. This is done in a separate thread.
+
+        Returns:
+            Thread: The thread that is loading the downloads.
+        """
+        result = Server().get_db_thread(
+            target=self.__load_downloads,
+            name="DownloadImportThread"
+        )
+        result.start()
+        return result
+
+    # region Running Download
+    def __run_download(self, download: Download) -> None:
+        """Start a download. Intended to be run in a thread.
+
+        Args:
+            download (Download): The download to run.
+                One of the entries in self.queue.
+        """
+        LOGGER.info(f'Starting download: {download.id}')
+
+        ws = WebSocket()
+        status_event = QueueStatusEvent(download)
+        try:
+            download.run()
+
+        except DownloadServiceRateLimitReached as e:
+            download.stop(DownloadState.FAILED_STATE)
+            self._remove_all_of_service(e.service, exclude_id=download.id)
+
+        ws.emit(status_event)
+        pp = PostProcessor(download)
+        if download.state == DownloadState.SHUTDOWN_STATE:
+            pp.shutdown()
+            return
+
+        elif download.state == DownloadState.CANCELED_STATE:
+            pp.canceled()
+
+        elif download.state == DownloadState.FAILED_STATE:
+            pp.failed()
+
+        elif download.state == DownloadState.DOWNLOADING_STATE:
+            download.state = DownloadState.IMPORTING_STATE
+            ws.emit(status_event)
+
+            # While this download is post-processing, start the next one.
+            self._process_queue()
+
+            pp.success()
+
+        self.queue.remove(download)
+        ws.emit(RemovedFromQueueEvent(download))
+
+        self._process_queue()
+        return
+
+    def __run_external_download(self, download: ExternalDownload) -> None:
+        """Start an external download. Intended to be run in a thread.
+
+        Args:
+            download (ExternalDownload): The external download to run.
+                One of the entries in self.queue.
+        """
+        download.run()
+
+        ws = WebSocket()
+        status_event = QueueStatusEvent(download)
+        seeding_handling = self.settings.sv.seeding_handling
+
+        if seeding_handling == SeedingHandling.COMPLETE:
+            pp = PostProcessorTorrentsComplete(download)
+
+        elif seeding_handling == SeedingHandling.COPY:
+            pp = PostProcessorTorrentsCopy(download)
+
+        else:
+            assert_never(seeding_handling)
+
+        # When seeding_handling is 'copy', keep track of whether we already
+        # copied the files
+        files_copied = False
+
+        while True:
+            download.update_status()
+            ws.emit(status_event)
+
+            if download.state == DownloadState.CANCELED_STATE:
+                download.remove_from_client(delete_files=True)
+                pp.canceled()
+                self.queue.remove(download)
+                break
+
+            elif download.state == DownloadState.FAILED_STATE:
+                download.remove_from_client(delete_files=True)
+                pp.perm_failed()
+                self.queue.remove(download)
+                break
+
+            elif download.state == DownloadState.SHUTDOWN_STATE:
+                break
+
+            elif (
+                seeding_handling == SeedingHandling.COPY
+                and download.state == DownloadState.SEEDING_STATE
+                and not files_copied
+            ):
+                files_copied = True
+                pp.seeding()
+
+            elif download.state == DownloadState.IMPORTING_STATE:
+                if self.settings.sv.delete_completed_downloads:
+                    download.remove_from_client(delete_files=False)
+                pp.success()
+                self.queue.remove(download)
+                break
+
+            else:
+                # Queued
+                # Or downloading
+                # Or seeding with files copied
+                # Or seeding with seeding_handling = 'complete'
+                download.sleep_event.wait(
+                    timeout=Constants.EXTERNAL_CLIENT_UPDATE_INTERVAL
+                )
+
+        ws.emit(RemovedFromQueueEvent(download))
+        return
+
+    # region Queue Management
+    def link_in_queue(self, link: str) -> bool:
+        """Check if a link is already in the queue.
+
+        Args:
+            link (str): The link to check for.
+
+        Returns:
+            bool: Whether the link is in the queue.
+        """
+        return any(
+            link in (d.web_link, d.download_link)
+            for d in self.queue
+        )
+
+    def download_for_volume_queued(self, volume_id: int) -> bool:
+        """Check whether there is a download in the queue for a given volume.
+
+        Args:
+            volume_id (int): The ID of the volume to check for.
+
+        Returns:
+            bool: Whether there is a download in the queue for the given volume.
+        """
+        return any(
+            d.volume_id == volume_id
+            for d in self.queue
+        )
+
+    def _process_queue(self) -> None:
+        """
+        Handle the queue. In the case that there is something in the queue
+        and not the max amount of downloads are active, start a download.
+        This can safely be called at any point in time and with the queue in
+        any state.
+        """
+        active_downloads = 0
+        max_downloads = self.settings.sv.concurrent_direct_downloads
+        for download in self.queue:
+            if isinstance(download, ExternalDownload):
+                continue
+
+            if download.state == DownloadState.DOWNLOADING_STATE:
+                active_downloads += 1
+
+            elif (
+                download.state == DownloadState.QUEUED_STATE
+                and active_downloads < max_downloads
+            ):
+                if download.download_thread is not None:
+                    download.download_thread.start()
+                active_downloads += 1
+
+            if active_downloads >= max_downloads:
+                break
+
+        return
+
+    def set_queue_location(
+        self,
+        download_id: int,
+        index: int
+    ) -> None:
+        """Set the location of a download in the queue.
+
+        Args:
+            download_id (int): The ID of the download to move.
+
+            index (int): The new index of the download.
+
+        Raises:
+            DownloadQueueEntryNotFound: The ID doesn't map to any download in
+                the queue.
+            DownloadUnmovable: The download is not allowed to be moved.
+            InvalidKeyValue: The index is out of bounds.
+        """
+        download = self.get_one(download_id)
+        if download.state != DownloadState.QUEUED_STATE:
+            raise DownloadQueueEntryUnmovable(download_id)
+
+        if index < 0 or index >= len(self.queue):
+            raise InvalidKeyValue('index', index)
+
+        self.queue.remove(download)
+        self.queue.insert(index, download)
+        return
+
+    # region Getting
+    def get_all(self) -> List[Dict[str, Any]]:
+        """Get all queue entries
+
+        Returns:
+            List[Dict[str, Any]]: All queue entries.
+        """
+        return [e.as_dict() for e in self.queue]
+
+    def get_one(self, download_id: int) -> Download:
+        """Get a queue entry based on it's ID.
+
+        Args:
+            download_id (int): The ID of the download to fetch.
+
+        Raises:
+            DownloadQueueEntryNotFound: The ID doesn't map to any download in
+                the queue.
+
+        Returns:
+            Download: The queue entry.
+        """
+        for entry in self.queue:
+            if entry.id == download_id:
+                return entry
+        raise DownloadQueueEntryNotFound(download_id)
+
+    # region Removing and stopping
+    def remove(self, download_id: int, blocklist: bool = False) -> None:
+        """Remove a download entry from the queue.
+
+        Args:
+            download_id (int): The ID of the download to remove from the queue.
+
+            blocklist (bool, optional): Add the page link to the blocklist.
+                Defaults to False.
+
+        Raises:
+            DownloadQueueEntryNotFound: The ID doesn't map to any download in
+                the queue.
+        """
+        LOGGER.info(f'Removing download with id {download_id} and {blocklist=}')
+
+        download = self.get_one(download_id)
+        if not download.download_thread:
+            return
+
+        prev_state = download.state
+        was_thread_running = download.download_thread.is_alive()
+        download.stop()
+        WebSocket().emit(QueueStatusEvent(download))
+
+        if (
+            # DDL download
+            not isinstance(download, ExternalDownload)
+            and (
+                # Download was queued when we stopped it
+                prev_state == DownloadState.QUEUED_STATE
+                or
+                (
+                    # Download errored out without catching it
+                    prev_state == DownloadState.DOWNLOADING_STATE
+                    and not was_thread_running
+                )
+            )
+        ):
+            self.queue.remove(download)
+            PostProcessor(download).canceled()
+            WebSocket().emit(RemovedFromQueueEvent(download))
+
+        if blocklist:
+            add_to_blocklist(
+                web_link=download.web_link,
+                web_title=download.web_title,
+                web_sub_title=download.web_sub_title,
+                download_link=download.download_link,
+                download_service=download.download_service,
+                volume_id=download.volume_id,
+                issue_id=download.issue_id,
+                reason=BlocklistReason.ADDED_BY_USER
+            )
+
+        return
+
+    def _remove_all_of_service(
+        self,
+        download_service: DownloadService,
+        exclude_id: int
+    ) -> None:
+        """Remove all downloads from the queue that are from a given download
+        download service, except for the one with the id of `exclude_id`.
+        That one will be handled by the download itself.
+
+        Args:
+            download_service (DownloadService): The service of which to remove
+                all downloads in the queue.
+            exclude_id (int): The ID of the download to not remove from the
+                queue.
+        """
+        for download in reversed(self.queue):
+            if (
+                download.download_service == download_service
+                and download.id != exclude_id
+            ):
+                self.remove(download.id)
+        return
+
+    def remove_all(self) -> None:
+        """Remove all downloads from the queue"""
+        for download in reversed(self.queue):
+            self.remove(download.id)
+
+        for download in self.queue:
+            if download.download_thread is not None:
+                download.download_thread.join()
+
+        get_db().execute(
+            "DELETE FROM download_queue;"
+        )
+
+        return
+
+    def stop_handle(self) -> None:
+        """Cancel any running download and stop the handler"""
+        LOGGER.debug('Stopping download thread')
+
+        for e in self.queue:
+            e.stop(DownloadState.SHUTDOWN_STATE)
+
+        for e in self.queue:
+            if (
+                e.download_thread is not None
+                and e.download_thread.is_alive()
+            ):
+                e.download_thread.join()
+
+        return
+
+    def empty_download_folder(self) -> None:
+        """
+        Empty the download folder of files that aren't being downloaded.
+        Handy in the case that a crash left half-downloaded files behind in the
+        folder.
+        """
+        LOGGER.info('Emptying the download folder')
+        folder = self.settings.sv.download_folder
+
+        files_in_queue = [
+            basename(file)
+            for download in self.queue
+            for file in download.files
+        ]
+        files_in_folder = listdir(folder)
+        ghost_files = [
+            join(folder, f)
+            for f in files_in_folder
+            if f not in files_in_queue
+        ]
+
+        for f in ghost_files:
+            delete_file_folder(f)
+
+        return
+
+
+# region Download History
+def get_download_history(
+    volume_id: Union[int, None] = None,
+    issue_id: Union[int, None] = None,
+    offset: int = 0
+) -> List[Dict[str, Any]]:
+    """Get the download history in blocks of 50.
+
+    Args:
+        volume_id (Union[int, None], optional): Get the history of a specific
+            volume.
+            Defaults to None.
+
+        issue_id (Union[int, None], optional): Get the history of a specific
+            issue. No need to supply volume_id in order to get issue history.
+            Defaults to None.
+
+        offset (int, optional): The offset of the list. The higher the number,
+            the deeper into history you go.
+            Defaults to 0.
+
+    Returns:
+        List[Dict[str, Any]]: The history entries.
+    """
+    if issue_id is not None:
+        comm = """
+            SELECT
+                web_link, web_title, web_sub_title,
+                file_title,
+                volume_id, issue_id,
+                source, downloaded_at, success
+            FROM download_history
+            WHERE issue_id = :issue_id
+            ORDER BY downloaded_at DESC
+            LIMIT 50
+            OFFSET :offset;
+            """
+
+    elif volume_id is not None:
+        comm = """
+            SELECT
+                web_link, web_title, web_sub_title,
+                file_title,
+                volume_id, issue_id,
+                source, downloaded_at, success
+            FROM download_history
+            WHERE volume_id = :volume_id
+            ORDER BY downloaded_at DESC
+            LIMIT 50
+            OFFSET :offset;
+            """
+
+    else:
+        comm = """
+            SELECT
+                web_link, web_title, web_sub_title,
+                file_title,
+                volume_id, issue_id,
+                source, downloaded_at, success
+            FROM download_history
+            ORDER BY downloaded_at DESC
+            LIMIT 50
+            OFFSET :offset;
+            """
+
+    return get_db().execute(
+        comm,
+        {
+            'issue_id': issue_id,
+            'volume_id': volume_id,
+            'offset': offset * 50
+        }
+    ).fetchalldict()
+
+
+def delete_download_history() -> None:
+    "Delete complete download history"
+    LOGGER.info("Deleting download history")
+    get_db().execute("DELETE FROM download_history;")
+    return

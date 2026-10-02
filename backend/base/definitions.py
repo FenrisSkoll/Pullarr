@@ -1,0 +1,1960 @@
+# -*- coding: utf-8 -*-
+
+"""
+Definitions of types, constants, enums, typed dicts, dataclasses
+and abstract classes.
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from enum import Enum
+from threading import Event, Thread
+from typing import (TYPE_CHECKING, Any, Callable, Dict, List,
+                    Mapping, Tuple, TypedDict, TypeVar, Union)
+
+from typing_extensions import NotRequired
+
+if TYPE_CHECKING:
+    from threading import Timer
+
+    from backend.base.helpers import CommaList
+
+# region Types
+T = TypeVar("T")
+U = TypeVar("U")
+FileConverter = Callable[[str], List[str]]
+
+
+# region Constants
+class Constants:
+    MIN_PYTHON_VERSION = (3, 8, 0)
+    "The minimum Python version allowed"
+
+    SUB_PROCESS_TIMEOUT = 20.0 # seconds
+    "Seconds to wait after interrupt until subprocess is killed"
+
+    HOSTING_THREADS = 10
+    "Amount of threads for the webserver"
+
+    HOSTING_REVERT_TIME = 60.0 # seconds
+    """
+    Seconds to wait after restarting from hosting changes
+    until they are reverted
+    """
+
+    API_PREFIX = "/api"
+    "The URL prefix that all API endpoints bind to"
+
+    DB_FOLDER = ("db",)
+    "Subfolder of application folder to put database in"
+
+    DB_NAME = "Kapowarr.db"
+    "Name of database file itself"
+
+    DB_ORIGINAL_NAME = "Kapowarr_original.db"
+    "Name of database file when backed up because a new database is imported"
+
+    DB_TIMEOUT = 10.0 # seconds
+    "Seconds to wait on database command before timing out"
+
+    DB_REVERT_TIME = 60.0 # seconds
+    """
+    After a new database is imported, how long the user has to access the web-UI
+    before the import is reverted
+    """
+
+    DB_MAX_CONCURRENT_CONNECTIONS = 32
+    "Maximum allowed database connections to be open at the same time"
+
+    LOGGER_NAME = "Kapowarr"
+    "Name of the logger that is used"
+
+    LOGGER_FILENAME = "Kapowarr.log"
+    "Filename that the logs are put in"
+
+    CREDENTIAL_REPLACEMENT: str = "********"
+    """
+    What sensitive data like usernames and passwords are replaced with when
+    shared as a string
+    """
+
+    MAX_FILENAME_LENGTH = 255
+    "The maximum amount of characters that a filename is allowed to be"
+
+    ARCHIVE_EXTRACT_FOLDER = ".archive_extract"
+    "The subfolder to extract archives into temporarily"
+
+    ZIP_MIN_MOD_TIME = 315619200 # epoch
+    "The minimum modification time that a file inside a zip should have"
+
+    DEFAULT_USERAGENT = "Pullarr"
+    "The user agent to use when making web requests"
+
+    BROWSER_USERAGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+    "The user agent to use when making web requests as a browser"
+
+    REQUEST_TIMEOUT = 30 # seconds
+    "The default timeout for network requests"
+
+    TOTAL_RETRIES = 5
+    "The amount of times to try a network connection before giving up"
+
+    BACKOFF_FACTOR_RETRIES = 1
+    "Backoff factor for waiting in-between retries"
+
+    STATUS_FORCELIST_RETRIES = (
+        500, 502, 503, 504,
+        522 # CloudFlare timed out connecting to host server
+    )
+    "The HTTP status codes for which a retry should be done"
+
+    PROXY_TEST_URL = "https://httpbin.org/ip"
+
+    CV_SITE_URL = "https://comicvine.gamespot.com"
+    "The base URL of ComicVine"
+
+    CV_API_URL = "https://comicvine.gamespot.com/api"
+    "The base URL of the ComicVine API"
+
+    CV_BRAKE_TIME = 1.0 # seconds
+    "Average amount of seconds between requests to the CV API"
+
+    MEGA_API_URL = "https://eu.api.mega.co.nz/cs"
+    "The base URL of the Mega API"
+
+    PIXELDRAIN_API_URL = "https://pixeldrain.com/api"
+    "The base URL of the Pixeldrain API"
+
+    FS_API_BASE = "/v1"
+    "The base endpoint of the FlareSolverr API"
+
+    FS_RESOLVE_TIMEOUT = 300 # seconds
+    "Timeout for FlareSolverr to solve the challenge"
+
+    MAX_CONCURRENT_FS_SESSIONS = 2
+    "The maximum amount of FlareSolverr browser sessions that can concurrently run"
+
+    CF_CHALLENGE_HEADER = ("cf-mitigated", "challenge")
+    """
+    The key and value of the header supplied by CloudFlare
+    when a challenge is presented
+    """
+
+    EXTERNAL_CLIENT_UPDATE_INTERVAL = 30 # seconds
+    "The interval in seconds between status updates from external clients"
+
+    EXTERNAL_DOWNLOAD_TAG = "kapowarr"
+    "The tag to give to downloads at external clients"
+
+
+class FileConstants:
+    IMAGE_EXTENSIONS = (
+        ".png", ".jpeg", ".jpg", ".webp", ".gif",
+        ".PNG", ".JPEG", ".JPG", ".WEBP", ".GIF"
+    )
+    "Image extensions, both lowercase and uppercase, with dot-prefix"
+
+    CONTAINER_EXTENSIONS = (
+        ".cbz", ".zip", ".cbr", ".rar", ".cb7", ".7zip", ".7z",
+        ".cbt", ".tar.gz", ".epub", ".pdf", ".cba", ".mobi",
+        ".CBZ", ".ZIP", ".CBR", ".RAR", ".CB7", ".7ZIP", ".7Z",
+        ".CBT", ".TAR.GZ", ".EPUB", ".PDF", ".CBA", ".MOBI"
+    )
+    "Archive/container extensions, both lowercase and uppercase, with dot-prefix"
+
+    METADATA_EXTENSIONS = (
+        ".xml", ".json",
+        ".XML", ".JSON"
+    )
+    "Metadata file extensions, both lowercase and uppercase, with dot-prefix"
+
+    METADATA_FILES = {
+        "cvinfo.xml", "comicinfo.xml",
+        "series.json", "metadata.json"
+    }
+    "Filenames of metadata files, only lowercase"
+
+    ARCHIVE_MAGIC_BYTES = {
+        b"\x50\x4B\x03\x04": "zip",        # ZIP
+        b"Rar!\x1A\x07\x00": "rar",        # RAR 4.x
+        b"Rar!\x1A\x07\x01\x00": "rar",    # RAR 5.x
+        b"\x37\x7A\xBC\xAF\x27\x1C": "7z"  # 7z
+    }
+    """
+    Maps magic bytes of archive files to their lowercase extension
+    without dot-prefix
+    """
+
+    CB_TO_ARCHIVE_EXTENSIONS = {
+        "cbz": "zip",
+        "cbr": "rar",
+        "cb7": "7z"
+    }
+    """
+    Maps lowercase cb* extensions to their lowercase archive extension,
+    both without dot-prefix
+    """
+
+    CONTENT_EXTENSIONS = (
+        *IMAGE_EXTENSIONS,
+        *CONTAINER_EXTENSIONS
+    )
+    "Media file extensions, both lowercase and uppercase, with dot-prefix"
+
+    SCANNABLE_EXTENSIONS = (
+        *CONTENT_EXTENSIONS,
+        *METADATA_EXTENSIONS
+    )
+    """
+    Media and metadata file extensions, both lowercase and uppercase,
+    with dot-prefix
+    """
+
+
+class CharConstants:
+    ALPHABET = (
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+        'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
+    )
+    "A tuple of all lowercase letters in the alphabet"
+
+    DIGITS = {
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+    }
+    "A set of the numbers 0-9 in string form"
+
+    ROMAN_DIGITS = {
+        "i": 1,
+        "ii": 2,
+        "iii": 3,
+        "iv": 4,
+        "v": 5,
+        "vi": 6,
+        "vii": 7,
+        "viii": 8,
+        "ix": 9,
+        "x": 10
+    }
+    "A map of lowercase roman numerals 1-10 to their int equivalent"
+
+
+# region Enums
+class BaseEnum(Enum):
+    def __eq__(self, other: object) -> bool:
+        return self.value == other
+
+    def __hash__(self) -> int:
+        return id(self.value)
+
+
+class OSType(BaseEnum):
+    LINUX = "Linux"
+    WINDOWS = "Windows"
+    MACOS = "MacOS"
+    OTHER = "Unknown"
+
+
+class WebSocketEventType(BaseEnum):
+    "The type of websocket event"
+
+    TASK_ADDED = "task_added"
+    TASK_STATUS = "task_status"
+    TASK_ENDED = "task_ended"
+
+    QUEUE_ADDED = "queue_added"
+    "A download is added to the queue"
+    QUEUE_STATUS = "queue_status"
+    "A status update on a download in the queue"
+    QUEUE_ENDED = "queue_ended"
+    "A download has finished in the queue"
+
+    MASS_EDITOR_STATUS = "mass_editor_status"
+    "The progress of a mass editor action"
+
+    DOWNLOADED_STATUS = "downloaded_status"
+    "A change in what issues are marked as downloaded and which aren't"
+
+    STATUS_COUNT = "status_count"
+    "A change in the number of active status issues"
+
+
+class StatusType(BaseEnum):
+    "A type of status issue that can be reported"
+
+    CV_RATE_LIMIT = "cv_rate_limit"
+    DOWNLOAD_SERVICE_RATE_LIMIT = "download_service_rate_limit"
+
+    ROOT_FOLDER_ALMOST_FULL = "root_folder_almost_full"
+    ROOT_FOLDER_FULL = "root_folder_full"
+
+    CF_CHALLENGE_WITH_NO_FS = "cf_challenge_with_no_fs"
+
+
+class StartType(BaseEnum):
+    "The reason for or cause of starting up"
+
+    STARTUP = 130
+    "Normal startup"
+    RESTART = 131
+    "A normal restart"
+    RESTART_HOSTING_CHANGES = 132
+    "A restart because changes to the hosting settings were made"
+    RESTART_DB_CHANGES = 133
+    "A restart because a database import was done"
+
+
+class InvalidDatabaseReason(BaseEnum):
+    "The reason that a database file is invalid"
+
+    DOES_NOT_EXIST = "does_not_exist"
+    "Database file does not exist"
+
+    NOT_KAPOWARR_DB = "not_kapowarr_db"
+    "Uploaded database is not a Kapowarr database file"
+
+    VERSION_NOT_SUPPORTED = "version_not_supported"
+    """
+    Uploaded database is higher version than this Kapowarr installation can
+    support
+    """
+
+
+class ProxyType(BaseEnum):
+    NONE = None
+    "Proxy disabled"
+
+    HTTP = "http"
+    HTTPS = "https"
+    SOCKS5 = "socks5"
+    SOCKS5H = "socks5h"
+
+
+class FileDate(BaseEnum):
+    "What to set the date of the issue file to"
+
+    NONE = None
+    "Don't change"
+
+    ISSUE_RELEASE_DATE = 'issue_release_date'
+    "Set to the date the issue was released"
+
+
+class SeedingHandling(BaseEnum):
+    "How to handle downloads that completed but still have to seed"
+
+    COMPLETE = "complete"
+    "Let download fully complete (finish seeding) and then move all files"
+
+    COPY = "copy"
+    """
+    Copy the files while the download is seeding,
+    and once done delete original files
+    """
+
+
+class DateType(BaseEnum):
+    "The type of comic date used in the database"
+
+    COVER_DATE = "cover_date"
+    STORE_DATE = "store_date"
+
+
+class GeneralFileType(BaseEnum):
+    METADATA = "metadata"
+    COVER = "cover"
+
+
+class SpecialVersion(BaseEnum):
+    "The type of volume"
+
+    TPB = "tpb"
+
+    ONE_SHOT = "one-shot"
+
+    HARD_COVER = "hard-cover"
+
+    OMNIBUS = "omnibus"
+
+    VOLUME_AS_ISSUE = "volume-as-issue"
+    "Volume where each issue is named `Volume N`"
+
+    COVER = "cover"
+    "Image file is cover of either issue or volume. Overrules over SVs."
+
+    METADATA = "metadata"
+
+    NORMAL = None
+    "Normal volume, so not a special version"
+
+
+SV_TO_SHORT_TERM = {
+    SpecialVersion.HARD_COVER: "HC",
+    SpecialVersion.ONE_SHOT: "OS",
+    SpecialVersion.TPB: "TPB",
+    SpecialVersion.OMNIBUS: "Omnibus",
+    SpecialVersion.COVER: "Cover",
+    SpecialVersion.VOLUME_AS_ISSUE: "",
+    SpecialVersion.NORMAL: ""
+}
+"""
+A mapping from a SpecialVersion to a short string representing it.
+E.g. `SpecialVersion.HARD_COVER` -> `HC`
+"""
+
+
+SV_TO_FULL_TERM = {
+    SpecialVersion.HARD_COVER: "Hard-Cover",
+    SpecialVersion.ONE_SHOT: "One-Shot",
+    SpecialVersion.TPB: "TPB",
+    SpecialVersion.OMNIBUS: "Omnibus",
+    SpecialVersion.COVER: "Cover",
+    SpecialVersion.VOLUME_AS_ISSUE: "",
+    SpecialVersion.NORMAL: ""
+}
+"""
+A mapping from a SpecialVersion to a full string representing it.
+E.g. `SpecialVersion.HARD_COVER` -> `Hard-Cover`
+"""
+
+
+class LibrarySorting(BaseEnum):
+    """
+    The way to order the library, where the key value is the value of the
+    `ORDER BY ...` SQL statement
+    """
+
+    TITLE = "title, year, volume_number"
+    YEAR = "year, title, volume_number"
+    VOLUME_NUMBER = "volume_number, title, year"
+    RECENTLY_ADDED = "id DESC, title, year, volume_number"
+    PUBLISHER = "publisher, title, year, volume_number"
+    WANTED = ("issues_downloaded_monitored >= issue_count_monitored, "
+              "title, year, volume_number")
+    RECENTLY_RELEASED = ("(SELECT MAX(date) FROM vol_issues) DESC, "
+                         "title, year, volume_number")
+
+
+class LibraryFilter(BaseEnum):
+    """
+    The filter to apply to the library, where the key value is the entire
+    `WHERE ...` SQL statement
+    """
+
+    WANTED = "WHERE issues_downloaded_monitored < issue_count_monitored"
+    MONITORED = "WHERE monitored = 1"
+
+
+class MonitorScheme(BaseEnum):
+    ALL = "all"
+    MISSING = "missing"
+    NONE = "none"
+
+
+class CredentialSource(BaseEnum):
+    MEGA = "mega"
+    PIXELDRAIN = "pixeldrain"
+
+
+class BlocklistReasonID(BaseEnum):
+    "The ID assosiated with the reason for putting a link on the blocklist"
+
+    LINK_BROKEN = 1
+    NO_WORKING_LINKS = 3
+    ADDED_BY_USER = 4
+
+
+class BlocklistReason(BaseEnum):
+    "The reason for putting a link on the blocklist"
+
+    LINK_BROKEN = "link_broken"
+    NO_WORKING_LINKS = "no_working_links"
+    ADDED_BY_USER = "added_by_user"
+
+
+class BrokenClientReason(BaseEnum):
+    """"
+    The reason that a download client is not working
+    (aside from an invalid link)
+    """
+
+    CONNECTION_ERROR = "connection_error"
+    NOT_CLIENT_INSTANCE = "not_client_instance"
+    VERSION_NOT_SUPPORTED = "version_not_supported"
+    FAILED_PROCESSING_RESPONSE = "failed_processing_response"
+    ACCESS_DENIED = "access_denied"
+    """
+    Access denied not because credentials are invalid but because,
+    e.g., Mega failed to log in anonymously or a webpage is blocked by CF
+    """
+
+
+class EnqueuingDownloadFailureReason(BaseEnum):
+    "The reason a download failed to be added to the queue"
+
+    # Download link is webpage with links on it. E.g. GetComics.
+    WEBPAGE_BROKEN = "webpage_broken"
+    NO_MATCHES = "no_matches"
+    NO_WORKING_LINKS = "no_working_links"
+    ONLY_RATE_LIMITED_LINKS = "only_rate_limited_links"
+
+    # Any download link, whether webpage or direct link.
+    LINK_BROKEN = "link_broken"
+    LINK_RATE_LIMITED = "link_rate_limited"
+
+
+class DownloadType(BaseEnum):
+    "The download protocol (download type)"
+
+    DDL = 1
+    TORRENT = 2
+
+
+class IndexerClientField(BaseEnum):
+    "A field that the indexer client requires"
+
+    TITLE = "title"
+    ENABLED = "enabled"
+    URL = "url"
+
+    # GC
+    GC_SERVICE_PREFERENCE = "gc_service_preference"
+    """
+    Only applicable for the GC client. The preference order for download
+    services offered on a GC download page.
+    """
+
+    GC_AVOID_LARGE_DOWNLOADS = "gc_avoid_large_downloads"
+    """
+    Only applicable for the GC client. Whether to avoid downloads if they're
+    over 400MB.
+    """
+
+
+class SearchAction(BaseEnum):
+    "The next course of action during a search with an indexer"
+
+    SEARCH_VOLUME = 1
+    SEARCH_ISSUE = 2
+    FETCH_NEXT_PAGE = 3
+    NEXT_QUERY_VARIATION = 4
+    NEXT_TITLE_ALIAS = 5
+    STOP = 6
+
+
+class ExternalClientField(BaseEnum):
+    "A field for which the external client possibly requires a value to work"
+
+    TITLE = "title"
+    ENABLED = "enabled"
+    BASE_URL = "base_url"
+    USERNAME = "username"
+    PASSWORD = "password"
+    API_TOKEN = "api_token"
+
+
+class GCDownloadService(BaseEnum):
+    "Download services/protocols offered on a GetComics webpage"
+
+    MEGA = "Mega"
+    MEDIAFIRE = "MediaFire"
+    WETRANSFER = "WeTransfer"
+    PIXELDRAIN = "Pixeldrain"
+    GETCOMICS = "GetComics"
+    "A DDL download link straight from their own servers"
+    GETCOMICS_TORRENT = "GetComics (torrent)"
+    "A torrent magnet link directly on the webpage"
+
+
+# autopep8: off
+GC_DOWNLOAD_SERVICE_TERMS = {
+    GCDownloadService.MEGA: ("mega", "mega link"),
+    GCDownloadService.MEDIAFIRE: ("mediafire", "mediafire link"),
+    GCDownloadService.WETRANSFER: ("wetransfer", "we transfer", "wetransfer link", "we transfer link"),
+    GCDownloadService.PIXELDRAIN: ("pixeldrain", "pixel drain", "pixeldrain link", "pixel drain link"),
+    GCDownloadService.GETCOMICS: ("getcomics", "download now", "main download", "main server", "main link", "mirror download", "mirror server", "mirror link", "link 1", "link 2"),
+    GCDownloadService.GETCOMICS_TORRENT: ("getcomics (torrent)", "torrent", "torrent link", "magnet", "magnet link")
+}
+"""
+GCDownloadService to strings that can be found in the button text for the
+service on the GC page
+"""
+# autopep8: on
+
+
+# Future proofing. In the future, there'll be services like 'torrent' and
+# 'usenet'. In part of the code, we want access to all download services,
+# and in the other part we only want the GC services. So in preparation
+# of the torrent and usenet services coming, we're already making the
+# distinction here.
+class DownloadService(BaseEnum):
+    "All possible download services/protocols"
+
+    MEGA = "Mega"
+    MEDIAFIRE = "MediaFire"
+    WETRANSFER = "WeTransfer"
+    PIXELDRAIN = "Pixeldrain"
+    GETCOMICS = "GetComics"
+    "A DDL download link straight from their own servers"
+    GETCOMICS_TORRENT = "GetComics (torrent)"
+    "A torrent magnet link directly on the webpage"
+
+
+class DownloadClientIdentifier(BaseEnum):
+    "The database identifiers for the download clients"
+
+    DDL = "direct"
+    MEDIAFIRE = "mf"
+    MEDIAFIRE_FOLDER = "mf_folder"
+    MEGA = "mega"
+    MEGA_FOLDER = "mega_folder"
+    PIXELDRAIN = "pd"
+    PIXELDRAIN_FOLDER = "pd_folder"
+    TORRENT = "torrent"
+    WETRANSFER = "wt"
+
+
+class DownloadState(BaseEnum):
+    QUEUED_STATE = "queued"
+    PAUSED_STATE = "paused"
+    DOWNLOADING_STATE = "downloading"
+    SEEDING_STATE = "seeding"
+    IMPORTING_STATE = "importing"
+
+    FAILED_STATE = "failed"
+    "Download was unsuccessful"
+    CANCELED_STATE = "canceled"
+    "Download was removed from queue"
+    SHUTDOWN_STATE = "shutting down"
+    "Download was stopped because Kapowarr is shutting down"
+
+
+RAR_EXECUTABLES = {
+    OSType.LINUX: "rar_linux_64",
+    OSType.MACOS: "rar_bsd_64",
+    OSType.WINDOWS: "rar_windows_64.exe"
+}
+"""
+A mapping of the OS to the rar executable to use
+"""
+
+
+# region TypedDicts
+class ApiResponse(TypedDict):
+    result: Any
+    error: Union[str, None]
+    code: int
+
+
+class StatusData(TypedDict):
+    type: str
+    "The status type"
+
+    display_subtypes: List[str]
+    """
+    The subtypes, in a form that makes displaying easy
+    (e.g. the indexer title instead of ID)
+    """
+
+
+class DatabaseBackupEntry(TypedDict):
+    index: int
+    creation_date: int
+    filepath: str
+    filename: str
+
+
+class FilenameData(TypedDict):
+    series: str
+    year: Union[int, None]
+    volume_number: Union[int, Tuple[int, int], None]
+    special_version: Union[str, None]
+    issue_number: Union[float, Tuple[float, float], None]
+    annual: bool
+
+
+class RemoteMappingData(TypedDict):
+    id: int
+    external_download_client_id: int
+    remote_path: str
+    local_path: str
+
+
+class IndexerClientData(TypedDict):
+    id: int
+    enabled: bool
+    download_type: int
+    client_type: str
+    required_tokens: List[str]
+    title: str
+    url: str
+    gc_service_preference: Union['CommaList', None]
+    gc_avoid_large_downloads: Union[bool, None]
+
+
+class SearchQuery(TypedDict):
+    query: str
+    page: int
+    total_available_variations: int
+
+
+class SearchResultData(FilenameData):
+    link: str
+    display_title: str
+    size: int
+    indexer_id: int
+    indexer_title: str
+
+
+class SearchResultMatchData(TypedDict):
+    match: bool
+    match_issue: Union[str, None]
+
+
+class MatchedSearchResultData(
+    SearchResultMatchData,
+    SearchResultData,
+    total=False
+):
+    _issue_number: Union[float, Tuple[float, float]]
+
+
+class IssueMetadata(TypedDict):
+    comicvine_id: int
+    volume_id: int
+    issue_number: str
+    calculated_issue_number: float
+    title: Union[str, None]
+    date: Union[str, None]
+    description: str
+
+
+class VolumeMetadata(TypedDict):
+    comicvine_id: int
+    title: str
+    year: Union[int, None]
+    volume_number: int
+    cover_link: str
+    cover: Union[bytes, None]
+    description: str
+    site_url: str
+    aliases: List[str]
+    publisher: Union[str, None]
+    issue_count: int
+    translated: bool
+    already_added: Union[int, None]
+    issues: Union[List[IssueMetadata], None]
+
+
+class CVFileMapping(TypedDict):
+    id: int
+    filepath: str
+
+
+class DownloadGroup(TypedDict):
+    web_sub_title: str
+    size: int
+    info: FilenameData
+    links: Dict[GCDownloadService, List[str]]
+    source_year: NotRequired[int]
+
+
+class ExternalDownloadClientData(TypedDict):
+    id: int
+    enabled: bool
+    download_type: int
+    client_type: str
+    required_tokens: List[str]
+    title: str
+    base_url: str
+    username: Union[str, None]
+    password: Union[str, None]
+    api_token: Union[str, None]
+
+
+class ClientTestResult(TypedDict):
+    success: bool
+    description: Union[None, str]
+
+
+class SizeData(TypedDict):
+    total: int
+    used: int
+    free: int
+
+
+class FileData(TypedDict):
+    id: int
+    filepath: str
+    size: int
+
+
+class GeneralFileData(FileData):
+    file_type: str
+
+
+class FileMatch(TypedDict):
+    filepath: str
+    issue_ids: List[int]
+    general_file: bool
+    forced_match: bool
+
+
+class QueuedTaskData(TypedDict):
+    id: int
+    task: 'Task'
+    thread: Thread
+
+
+# region Dataclasses
+@dataclass
+class BlocklistEntry:
+    id: int
+    volume_id: Union[int, None]
+    issue_id: Union[int, None]
+
+    web_link: Union[str, None]
+    web_title: Union[str, None]
+    web_sub_title: Union[str, None]
+
+    download_link: Union[str, None]
+    download_service: Union[str, None]
+
+    reason: BlocklistReason
+    added_at: int
+
+    def todict(self) -> Dict[str, Any]:
+        result = asdict(self)
+        result["reason"] = self.reason.value
+        return result
+
+
+@dataclass
+class RootFolder:
+    id: int
+    folder: str
+    size: Union[SizeData, None]
+
+    def todict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class BaseNamingKeys:
+    series_name: str
+    clean_series_name: str
+    volume_number: str
+    comicvine_id: Union[int, str]
+    year: Union[int, None]
+    publisher: Union[str, None]
+
+    def todict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class VolumeNamingKeys(BaseNamingKeys):
+    special_version: Union[str, None]
+
+
+@dataclass
+class TitlelessIssueNamingKeys(BaseNamingKeys):
+    issue_comicvine_id: Union[int, str]
+    issue_number: str
+    issue_release_date: Union[str, None]
+    issue_release_year: Union[int, None]
+
+
+@dataclass
+class IssueNamingKeys(TitlelessIssueNamingKeys):
+    issue_title: Union[str, None]
+
+
+@dataclass
+class IssueData:
+    id: int
+    volume_id: int
+    comicvine_id: Union[int, None]
+    issue_number: str
+    calculated_issue_number: float
+    title: Union[str, None]
+    date: Union[str, None]
+    description: str
+    monitored: bool
+    files: List[FileData]
+
+    def __post_init__(self) -> None:
+        if self.calculated_issue_number is None:
+            raise UnsupportedLegacyIssue()
+
+    def todict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class VolumeData:
+    id: int
+    comicvine_id: Union[int, None]
+    title: str
+    alt_title: Union[str, None]
+    year: Union[int, None]
+    volume_number: int
+    description: str
+    site_url: str
+    publisher: Union[str, None]
+    monitored: bool
+    monitor_new_issues: bool
+    root_folder: int
+    folder: str
+    custom_folder: bool
+    special_version: SpecialVersion
+    special_version_locked: bool
+    last_cv_fetch: int
+
+
+@dataclass
+class CredentialData:
+    id: int
+    source: CredentialSource
+    username: Union[str, None]
+    email: Union[str, None]
+    password: Union[str, None]
+    api_key: Union[str, None]
+
+    def __post_init__(self):
+        if isinstance(self.username, str):
+            self.username = self.username.strip() or None
+        if isinstance(self.email, str):
+            self.email = self.email.strip() or None
+        if isinstance(self.password, str):
+            self.password = self.password.strip() or None
+        if isinstance(self.api_key, str):
+            self.api_key = self.api_key.strip() or None
+        return
+
+    def todict(self, hide_password: bool = False) -> Dict[str, Any]:
+        """Return a dictionary version of this dataclass.
+
+        Args:
+            hide_password (bool, optional): Replace the password with stars.
+                Defaults to False.
+
+        Returns:
+            Dict[str, Any]: The dictionary.
+        """
+        result = asdict(self)
+
+        result['source'] = self.source.value
+        if result['password'] is not None and hide_password:
+            result['password'] = Constants.CREDENTIAL_REPLACEMENT
+
+        return result
+
+
+@dataclass
+class QueryKeys:
+    titles: List[str]
+    year: Union[int, None]
+    volume_number: int
+    special_version: SpecialVersion
+    issue_number: Union[str, None]
+
+
+@dataclass
+class QueryResult:
+    results: List[SearchResultData]
+    next_page_available: bool
+
+
+@dataclass
+class SearchIterationStats:
+    result_count: int
+    matched_count: int
+    new_match_count: int
+    next_page_available: bool
+    remaining_wanted_issues: List[int]
+    total_available_variations: int
+
+
+# region Abstract Classes
+class KapowarrException(Exception, ABC):
+    "An exception specific to Kapowarr"
+
+    @property
+    @abstractmethod
+    def api_response(self) -> ApiResponse:
+        ...
+
+
+class UnsupportedLegacyIssue(KapowarrException):
+    """The unversioned legacy DTO cannot truthfully represent a rich-only issue."""
+
+    @property
+    def api_response(self) -> ApiResponse:
+        return {'code': 409, 'error': 'UnsupportedLegacyIssue', 'result': {}}
+
+
+class StartTypeHandler(ABC):
+    description: str
+    """A short description of what the start type is for"""
+
+    timeout: float
+    """The amount of time in seconds before reverting"""
+
+    restart_on_timeout: bool
+    """Whether the application should restart once the timeout is reached"""
+
+    @abstractmethod
+    def on_timeout(self) -> None:
+        """
+        Called when the timeout is reached. Generally reverts changes.
+        """
+        ...
+
+    @abstractmethod
+    def on_diffuse(self) -> None:
+        """
+        Called when the timer is diffused. Generally finalises changes.
+        """
+        ...
+
+
+class StatusHandler(ABC):
+    "A handler for a specific status type"
+
+    def __init__(self, status_type: StatusType) -> None:
+        self.status_type = status_type
+        self._subtypes: Dict[str, int] = {}
+        self._timers: Dict[str, Timer] = {}
+        return
+
+    @abstractmethod
+    def get_expiry(self, subtype: str, timestamp: int) -> Union[int, None]:
+        """Get the absolute expiry timestamp for this subtype. Override in
+        handlers that auto-expire. Defaults to None (no auto-expiry, persists
+        until manually cleared).
+
+        Args:
+            subtype (str): The subtype identifier.
+            timestamp (int): When the status was reported (epoch seconds).
+
+        Returns:
+            Union[int, None]: The absolute expiry timestamp, or None.
+        """
+        ...
+
+    @abstractmethod
+    def report(self, subtype: str, timestamp: int) -> None:
+        """Report a subtype of this status type.
+
+        Args:
+            subtype (str): The subtype identifier.
+            timestamp (int): When the status was reported (epoch seconds).
+        """
+        ...
+
+    @abstractmethod
+    def restore(
+        self,
+        subtype: str,
+        timestamp: int,
+        remaining: Union[int, None]
+    ) -> None:
+        """Restore a subtype from database on startup.
+
+        Args:
+            subtype (str): The subtype identifier.
+            timestamp (int): The stored timestamp.
+            remaining (Union[int, None]): Seconds until expiry, or None if the
+                status has no auto-expiry.
+        """
+        ...
+
+    @abstractmethod
+    def clear(self, subtype: Union[str, None] = None) -> None:
+        """Clear a subtype or all subtypes. Cancel associated timers.
+
+        Args:
+            subtype (Union[str, None], optional): The subtype to clear. If None,
+                clear all subtypes.
+                Defaults to None.
+        """
+        ...
+
+    @abstractmethod
+    def problem_reported(self, subtype: Union[str, None] = None) -> bool:
+        """Whether a problem is reported for this handler.
+
+        Args:
+            subtype (Union[str, None], optional): Check for a specific subtype.
+                If None, check if any subtype is active.
+                Defaults to None.
+
+        Returns:
+            bool: Whether the problem is reported.
+        """
+        ...
+
+    @abstractmethod
+    def get_display(self) -> StatusData:
+        """Get the data the represents the status report.
+
+        Returns:
+            Dict[str, Any]: The formatted data.
+        """
+        ...
+
+
+class WebSocketEvent(ABC):
+    @abstractmethod
+    def get_type(self) -> WebSocketEventType:
+        """Get the type of event.
+
+        Returns:
+            WebSocketEventType: The event type.
+        """
+        ...
+
+    @abstractmethod
+    def get_body(self) -> Dict[str, Any]:
+        """Get the body/data/arguments of the event.
+
+        Returns:
+            Dict[str, Any]: The body.
+        """
+        ...
+
+
+class Task(ABC):
+    action: str
+
+    stop: bool
+    message: str
+    display_title: str
+
+    @property
+    @abstractmethod
+    def volume_id(self) -> Union[int, None]:
+        ...
+
+    @property
+    @abstractmethod
+    def issue_id(self) -> Union[int, None]:
+        ...
+
+    @abstractmethod
+    def __init__(self, **kwargs) -> None:
+        ...
+
+    @abstractmethod
+    def run(self) -> Union[None, List[Tuple[str, int, int, Union[int, None]]]]:
+        """Run the task
+
+        Returns:
+            Union[None, List[Tuple[str, int, Union[int, None]]]]:
+                Either `None` if the task has no result or
+                `List[Tuple[str, int, Union[int, None]]]` if the task returns
+                search results.
+        """
+        ...
+
+
+class IndexerClient(ABC):
+    client_type: str
+    "The name of the indexer client (e.g. 'Torznab')"
+
+    download_type: DownloadType
+    "The protocol it supplies downloads for (e.g. torrents)"
+
+    required_tokens: Tuple[IndexerClientField, ...]
+    "The keys the client needs or could need for operation"
+
+    allow_multiple_instances: bool
+    """
+    Allow this client to be added multiple times. For something like Torznab,
+    you want that. For something like GC, you don't want to allow that.
+    """
+
+    @property
+    @abstractmethod
+    def id(self) -> int:
+        ...
+
+    @property
+    @abstractmethod
+    def title(self) -> str:
+        ...
+
+    @abstractmethod
+    def __init__(self, indexer_id: int) -> None:
+        """Start the indexer.
+
+        Args:
+            indexer_id (int): The ID of the indexer.
+        """
+        ...
+
+    @abstractmethod
+    def get_indexer_data(self) -> IndexerClientData:
+        """Get info about the indexer.
+
+        Returns:
+            IndexerClientData: The info about the indexer.
+        """
+        ...
+
+    @abstractmethod
+    def update_indexer(self, data: Mapping[str, Any]) -> None:
+        """Edit the indexer.
+
+        Args:
+            data (Mapping[str, Any]): The keys and their new values for
+                the indexer settings.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+            KeyNotFound: A required key was not found.
+            InvalidKeyValue: One of the parameters has an invalid argument.
+        """
+        ...
+
+    @abstractmethod
+    def delete_indexer(self) -> None:
+        """Delete the indexer"""
+        ...
+
+    @abstractmethod
+    async def search(self, query: SearchQuery) -> QueryResult:
+        """Perform a search at the indexer.
+
+        Args:
+            query (SearchQuery): The query to use.
+
+        Returns:
+            QueryResult: The search results.
+        """
+        ...
+
+    @abstractmethod
+    async def discover(self, last_check: datetime) -> List[SearchResultData]:
+        """Get a list of all new releases at the indexer since a certain datetime.
+
+        Args:
+            last_check (datetime): Get the releases starting from, but not
+                including, this datetime.
+
+        Returns:
+            List[SearchResultData]: The search results.
+        """
+        ...
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Shutdown the connection to the indexer. Run after search is complete."""
+        ...
+
+    @classmethod
+    @abstractmethod
+    def test(cls, url: str, **extra_fields: Any) -> None:
+        """Check if an indexer is working.
+
+        Args:
+            url (str): The url on which the indexer is available.
+            extra_fields (kwargs, optional): Extra fields and their values,
+                possibly used by the indexer during testing.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+
+        Returns:
+            None: Test was successful
+        """
+        ...
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__}(id={self.id}; title={self.title}); {id(self)}>'
+
+
+class QueryBuilder(ABC):
+    download_type: DownloadType
+    "The protocol the indexers supply downloads for (e.g. torrents)"
+
+    def __init__(self) -> None:
+        self.page = 1
+        self.query_variation_index = 0
+        self.alias_index = 0
+        self.originally_volume_search = False
+        return
+
+    def _update_state(self, search_action: SearchAction) -> None:
+        """Update the core state of the builder, like the page number and
+        various indices.
+
+        Args:
+            search_action (SearchAction): The next action, to act on.
+        """
+        if search_action == SearchAction.SEARCH_VOLUME:
+            self.page = 1
+            self.query_variation_index = 0
+            self.originally_volume_search = True
+
+        elif search_action == SearchAction.SEARCH_ISSUE:
+            self.page = 1
+            self.query_variation_index = 0
+
+        elif search_action == SearchAction.FETCH_NEXT_PAGE:
+            self.page += 1
+
+        elif search_action == SearchAction.NEXT_QUERY_VARIATION:
+            self.page = 1
+            self.query_variation_index += 1
+
+        elif search_action == SearchAction.NEXT_TITLE_ALIAS:
+            self.page = 1
+            self.alias_index += 1
+            self.query_variation_index = 0
+
+        return
+
+    @abstractmethod
+    def next_query(
+        self,
+        search_action: SearchAction,
+        query_keys: QueryKeys
+    ) -> SearchQuery:
+        """Based on the next action and accompanying metadata of what is being
+        searched of, build a query string for the indexer to use.
+
+        Args:
+            search_action (SearchAction): The next search action that will be
+                performed, based on which a query should be built.
+            query_keys (QueryKeys): The metadata values to fill the fields in
+                the query with.
+
+        Returns:
+            SearchQuery: The resulting query string and which page to fetch.
+        """
+        ...
+
+
+class ExternalDownloadClient(ABC):
+    client_type: str
+    "The name of the external client (e.g. 'qBittorrent')"
+
+    download_type: DownloadType
+    "The protocol it uses to download (e.g. a torrent)"
+
+    required_tokens: Tuple[ExternalClientField, ...]
+    """
+    The keys the client needs or could need for operation
+    (mostly whether it's username + password or api_token)
+    """
+
+    @property
+    @abstractmethod
+    def id(self) -> int:
+        ...
+
+    @property
+    @abstractmethod
+    def enabled(self) -> bool:
+        ...
+
+    @property
+    @abstractmethod
+    def title(self) -> str:
+        ...
+
+    @property
+    @abstractmethod
+    def base_url(self) -> str:
+        ...
+
+    @property
+    @abstractmethod
+    def username(self) -> Union[str, None]:
+        ...
+
+    @property
+    @abstractmethod
+    def password(self) -> Union[str, None]:
+        ...
+
+    @property
+    @abstractmethod
+    def api_token(self) -> Union[str, None]:
+        ...
+
+    @abstractmethod
+    def __init__(self, client_id: int) -> None:
+        """Create a connection with a client.
+
+        Args:
+            client_id (int): The ID of the client.
+        """
+        ...
+
+    @abstractmethod
+    def get_client_data(self) -> ExternalDownloadClientData:
+        """Get info about the client.
+
+        Returns:
+            ExternalDownloadClientData: The info about the client.
+        """
+        ...
+
+    @abstractmethod
+    def update_client(self, data: Mapping[str, Any]) -> None:
+        """Edit the client.
+
+        Args:
+            data (Mapping[str, Any]): The keys and their new values for
+                the client settings.
+
+        Raises:
+            ExternalClientDownloading: There is a download using the client.
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+            KeyNotFound: A required key was not found.
+            InvalidKeyValue: One of the parameters has an invalid argument.
+        """
+        ...
+
+    @abstractmethod
+    def delete_client(self) -> None:
+        """Delete the client.
+
+        Raises:
+            ExternalClientDownloading: There is a download using the client.
+        """
+        ...
+
+    @abstractmethod
+    def add_download(
+        self,
+        download_link: str,
+        target_folder: str,
+        download_name: Union[str, None]
+    ) -> str:
+        """Add a download to the client.
+
+        Args:
+            download_link (str): The link to the download (e.g. magnet link).
+            target_folder (str): The folder to download in.
+            download_name (Union[str, None]): The name of the downloaded folder
+                or file. Set to `None` to keep original name.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+
+        Returns:
+            str: The ID/hash of the entry in the download client.
+        """
+        ...
+
+    @abstractmethod
+    def get_download(self, download_id: str) -> Union[Dict[str, Any], None]:
+        """Get the information/status of a download.
+
+        Args:
+            download_id (str): The ID/hash of the download to get info of.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+
+        Returns:
+            Union[Dict[str, Any], None]: The status of the download or
+                `None` if client deleted the download.
+        """
+        ...
+
+    @abstractmethod
+    def delete_download(self, download_id: str, delete_files: bool) -> None:
+        """Remove the download from the client.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+
+        Args:
+            download_id (str): The ID/hash of the download to delete.
+            delete_files (bool): Whether to delete the downloaded files.
+        """
+        ...
+
+    @abstractmethod
+    def on_shutdown(self) -> None:
+        """Shut down the connection to the client"""
+        ...
+
+    @classmethod
+    @abstractmethod
+    def test(
+        cls,
+        base_url: str,
+        username: Union[str, None],
+        password: Union[str, None],
+        api_token: Union[str, None]
+    ) -> None:
+        """Check if a download client is working.
+
+        Args:
+            base_url (str): The base url on which the client is running.
+            username (Union[str, None]): The username to access the client, if set.
+            password (Union[str, None]): The password to access the client, if set.
+            api_token (Union[str, None]): The API token to access the client, if set.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+
+        Returns:
+            None: Test was successful
+        """
+        ...
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__}(id={self.id}; title={self.title}); {id(self)}>'
+
+
+class DownloadPrepper(ABC):
+    "Converts a download link to a download instance"
+
+    client_type: str
+    "The name of the external client (e.g. 'qBittorrent')"
+
+    download_type: DownloadType
+    "The protocol it uses to download (e.g. a torrent)"
+
+    @property
+    @abstractmethod
+    def web_title(self) -> Union[str, None]:
+        ...
+
+    @abstractmethod
+    def __init__(
+        self,
+        link: str,
+        indexer_id: int,
+        volume_id: int,
+        issue_id: Union[int, None] = None,
+        force_match: bool = False
+    ) -> None:
+        """Set up the prepper.
+
+        Args:
+            link (str): A link to download from.
+
+            indexer_id (int): The ID of the indexer that the link came from.
+
+            volume_id (int): The ID of the volume for which the download is
+                intended.
+
+            issue_id (Union[int, None], optional): The ID of the issue for which
+                the download is intended.
+                Defaults to None.
+
+            force_match (bool, optional): On sources where downloads are
+                filtered, don't and instead download everything.
+                Defaults to False.
+        """
+        ...
+
+    @abstractmethod
+    def get_downloads(self) -> List['Download']:
+        """Process the link and turn it into one or more downloads.
+
+        Raises:
+            EnqueuingDownloadFailure: Failed to process link.
+
+        Returns:
+            List[Download]: The list of downloads.
+        """
+        ...
+
+
+class Download(ABC):
+    identifier: DownloadClientIdentifier
+    "An identifier for the specific download implementation"
+    selected_release: Union[dict, None] = None
+    "Compact unified DDL selection receipt; not an evaluation or import result."
+
+    @property
+    @abstractmethod
+    def id(self) -> int:
+        ...
+
+    @id.setter
+    @abstractmethod
+    def id(self, value: int) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def volume_id(self) -> int:
+        ...
+
+    @property
+    @abstractmethod
+    def issue_id(self) -> Union[int, None]:
+        ...
+
+    @property
+    @abstractmethod
+    def covered_issues(self) -> Union[float, Tuple[float, float], None]:
+        ...
+
+    @property
+    @abstractmethod
+    def web_link(self) -> Union[str, None]:
+        "Link to webpage for download"
+        ...
+
+    @property
+    @abstractmethod
+    def web_title(self) -> Union[str, None]:
+        "Title of webpage (or release) for download"
+        ...
+
+    @property
+    @abstractmethod
+    def web_sub_title(self) -> Union[str, None]:
+        "Title of sub-section that download falls under (e.g. GC group name)"
+        ...
+
+    @property
+    @abstractmethod
+    def download_link(self) -> str:
+        "The link to the download or service page (e.g. link to MF page)"
+        ...
+
+    @property
+    @abstractmethod
+    def pure_link(self) -> str:
+        "The pure link to download from (e.g. pixeldrain API link or MF folder ID)"
+        ...
+
+    @property
+    @abstractmethod
+    def download_service(self) -> DownloadService:
+        ...
+
+    @property
+    @abstractmethod
+    def source_name(self) -> str:
+        """
+        The display name of the source. E.g. `download_service` is torrent,
+        so `source_name` is indexer name.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def files(self) -> List[str]:
+        "List of folders/files that were 'produced' by this download"
+        ...
+
+    @files.setter
+    @abstractmethod
+    def files(self, value: List[str]) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def filename_body(self) -> str:
+        """
+        The body of the file/folder name that the downloaded file(s) should
+        be named as at their (almost) final destination. Only filename, and
+        without extension. E.g. `Iron-Man Volume 02 Issue 003`
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def download_folder(self) -> str:
+        ...
+
+    @property
+    @abstractmethod
+    def title(self) -> str:
+        "Display title of download"
+        ...
+
+    @property
+    @abstractmethod
+    def size(self) -> int:
+        "Total size of download in bytes, or `-1` if unknown"
+        ...
+
+    @property
+    @abstractmethod
+    def state(self) -> DownloadState:
+        ...
+
+    @state.setter
+    @abstractmethod
+    def state(self, value: DownloadState) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def progress(self) -> float:
+        "Progress of download, as a value between `0.0` and `100.0`"
+        ...
+
+    @property
+    @abstractmethod
+    def speed(self) -> float:
+        "Download speed, in bytes per second"
+        ...
+
+    @property
+    @abstractmethod
+    def download_thread(self) -> Union[Thread, None]:
+        ...
+
+    @download_thread.setter
+    @abstractmethod
+    def download_thread(self, value: Thread) -> None:
+        ...
+
+    @abstractmethod
+    def __init__(
+        self,
+        download_link: str,
+
+        volume_id: int,
+        covered_issues: Union[float, Tuple[float, float], None],
+
+        download_service: DownloadService,
+        source_name: str,
+
+        web_link: Union[str, None],
+        web_title: Union[str, None],
+        web_sub_title: Union[str, None],
+
+        forced_match: bool = False,
+        selected_release: Union[dict, None] = None
+    ) -> None:
+        """Prepare the download.
+
+        Args:
+            download_link (str): The link to the download.
+                Could be DDL link, mega link, magnet link, etc.
+
+            volume_id (int): The ID of the volume that the download is for.
+
+            covered_issues (Union[float, Tuple[float, float], None]):
+                The calculated issue number (range) that the download covers,
+                or None if download is for special version.
+
+            download_service (DownloadService): The service type of the download.
+
+            source_name (str): The display name of the source.
+                E.g. indexer name.
+
+            web_link (Union[str, None]): Link to webpage for download.
+
+            web_title (Union[str, None]): Title of webpage (or release) for
+                download.
+
+            web_sub_title (Union[str, None]): Title of sub-section that download
+                falls under (e.g. GC group name).
+
+            forced_match (bool, optional): Whether the download was forcefully
+                added by the user. Try renaming (if setting says so), but use
+                default name if file doesn't match to issues.
+                Defaults to False.
+
+        Raises:
+            IssueNotFound: The download refers to issues that don't exist in the
+                volume, and download is not forced.
+
+            ClientNotWorking: Some problem occured in the client.
+
+            DownloadLinkBroken: The link doesn't work.
+
+            DownloadServiceRateLimitReached: Can't download because the limit of the service
+                is reached.
+        """
+        ...
+
+    @abstractmethod
+    def run(self) -> None:
+        """
+        Start the download.
+
+        Raises:
+            DownloadLinkBroken: The link doesn't work.
+
+            DownloadServiceRateLimitReached: Can't download because the limit of the service
+                is reached.
+        """
+        ...
+
+    @abstractmethod
+    def stop(
+        self,
+        state: DownloadState = DownloadState.CANCELED_STATE
+    ) -> None:
+        """Interrupt the download.
+
+        Args:
+            state (DownloadState, optional): The state to set for the download.
+                Defaults to DownloadState.CANCELED_STATE.
+        """
+        ...
+
+    @abstractmethod
+    def as_dict(self) -> Dict[str, Any]:
+        """Get a dict representing the download.
+
+        Returns:
+            Dict[str, Any]: The dict with all information.
+        """
+        ...
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__}(download_link={self.download_link}; file={self.files[0]}; state={self.state.value}); {id(self)}>'
+
+
+class ExternalDownload(Download):
+    @property
+    @abstractmethod
+    def external_client(self) -> ExternalDownloadClient:
+        ...
+
+    @external_client.setter
+    @abstractmethod
+    def external_client(self, value: ExternalDownloadClient) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def external_id(self) -> Union[str, None]:
+        "The ID/hash of the download in the external client"
+        ...
+
+    @property
+    @abstractmethod
+    def sleep_event(self) -> Event:
+        """
+        A `threading.Event` to use inside the download thread
+        for sleeping in between status checks
+        """
+        ...
+
+    @abstractmethod
+    def __init__(
+        self,
+        download_link: str,
+
+        volume_id: int,
+        covered_issues: Union[float, Tuple[float, float], None],
+
+        download_service: DownloadService,
+        source_name: str,
+
+        web_link: Union[str, None],
+        web_title: Union[str, None],
+        web_sub_title: Union[str, None],
+
+        forced_match: bool = False,
+        external_client: Union[ExternalDownloadClient, None] = None
+    ) -> None:
+        """Prepare the download.
+
+        Args:
+            download_link (str): The link to the download.
+                Could be DDL link, mega link, magnet link, etc.
+
+            volume_id (int): The ID of the volume that the download is for.
+
+            covered_issues (Union[float, Tuple[float, float], None]):
+                The calculated issue number (range) that the download covers,
+                or None if download is for special version.
+
+            download_service (DownloadService): The service type of the download.
+
+            source_name (str): The display name of the source.
+                E.g. indexer name.
+
+            web_link (Union[str, None]): Link to webpage for download.
+
+            web_title (Union[str, None]): Title of webpage (or release) for
+                download.
+
+            web_sub_title (Union[str, None]): Title of sub-section that download
+                falls under (e.g. GC group name).
+
+            forced_match (bool, optional): Whether the download was forcefully
+                added by the user. Try renaming (if setting says so), but use
+                default name if file doesn't match to issues.
+                Defaults to False.
+
+            external_client (Union[ExternalDownloadClient, None], optional):
+                Force an external client instead of letting the download choose
+                one.
+                Defaults to None.
+
+        Raises:
+            IssueNotFound: The download refers to issues that don't exist in the
+                volume, and download is not forced.
+
+            ClientNotWorking: Some problem occured in the client.
+
+            DownloadLinkBroken: The link doesn't work.
+
+            DownloadServiceRateLimitReached: Can't download because the limit of the service
+                is reached.
+        """
+        ...
+
+    @abstractmethod
+    def run(self) -> None:
+        """
+        Start the download.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+
+            CredentialInvalid: Credentials are invalid.
+
+            DownloadLinkBroken: The link doesn't work.
+
+            DownloadServiceRateLimitReached: Can't download because the limit of the service
+                is reached.
+        """
+        ...
+
+    @abstractmethod
+    def update_status(self) -> None:
+        """
+        Update the various variables about the state/progress
+        of the external download.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+        """
+        ...
+
+    @abstractmethod
+    def remove_from_client(self, delete_files: bool) -> None:
+        """Remove the download from the external client.
+
+        Args:
+            delete_files (bool): Delete downloaded files.
+
+        Raises:
+            ClientNotWorking: Can't connect to client.
+            CredentialInvalid: Credentials are invalid.
+        """
+        ...
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__}(download_link={self.download_link}; file={self.files[0]}; state={self.state.value}); {id(self)}>'

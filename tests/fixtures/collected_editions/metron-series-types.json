@@ -1,0 +1,57 @@
+{
+  "provenance": {
+    "provider": "metron",
+    "endpoint": "/api/series_type/",
+    "authenticated_requests": 1,
+    "count": 9,
+    "has_next": false,
+    "retained": [
+      "id",
+      "name"
+    ],
+    "removed": [
+      "modified timestamps",
+      "transport metadata"
+    ],
+    "scope": "Vocabulary only; not evidence of an individual edition's binding"
+  },
+  "results": [
+    {
+      "id": 6,
+      "name": "Annual"
+    },
+    {
+      "id": 12,
+      "name": "Digital Chapter"
+    },
+    {
+      "id": 9,
+      "name": "Graphic Novel"
+    },
+    {
+      "id": 8,
+      "name": "Hardcover"
+    },
+    {
+      "id": 11,
+      "name": "Limited Series"
+    },
+    {
+      "id": 15,
+      "name": "Omnibus"
+    },
+    {
+      "id": 5,
+      "name": "One-Shot"
+    },
+    {
+      "id": 13,
+      "name": "Single Issue"
+    },
+    {
+      "id": 10,
+      "name": "Trade Paperback"
+    }
+  ],
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

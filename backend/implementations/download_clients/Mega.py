@@ -1,0 +1,1270 @@
+# -*- coding: utf-8 -*-
+
+from abc import ABC, abstractmethod
+from base64 import b64decode, b64encode
+from hashlib import pbkdf2_hmac, sha256
+from json import JSONDecodeError, dumps, loads
+from os.path import basename, splitext
+from random import randint
+from re import compile, search
+from time import perf_counter, time
+from typing import (Any, Callable, Dict, Generator,
+                    List, Sequence, Tuple, Type, Union)
+from zipfile import ZIP_DEFLATED, ZipFile
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from requests import Response
+from requests.exceptions import (JSONDecodeError as RequestsJSONDecodeError,
+                                 RetryError)
+from urllib3.exceptions import ProtocolError, TimeoutError
+
+from backend.base.custom_exceptions import (ClientNotWorking,
+                                            CredentialInvalid,
+                                            DownloadLinkBroken,
+                                            DownloadServiceRateLimitReached,
+                                            IssueNotFound)
+from backend.base.definitions import (BaseEnum, BrokenClientReason, Constants,
+                                      CredentialData, CredentialSource,
+                                      DownloadClientIdentifier,
+                                      DownloadService, DownloadState,
+                                      StatusType)
+from backend.base.helpers import Session
+from backend.base.logging import LOGGER
+from backend.implementations.credentials import Credentials
+from backend.implementations.download_client_manager import DownloadClients
+from backend.implementations.download_clients.base import (BaseDirectDownload,
+                                                           safe_download_name)
+from backend.implementations.naming import generate_issue_name
+from backend.implementations.volumes import Volume
+from backend.internals.server import QueueStatusEvent, WebSocket
+from backend.internals.settings import Settings
+from backend.internals.status import StatusHandlers
+
+mega_url_regex = compile(
+    r"https?://(?:www\.)?mega(?:\.co)?\.nz/(?:file/(?P<ID1>[\w^_]+)#(?P<K1>[\w\-,=]+)|folder/(?P<ID2>[\w^_]+)#(?P<K2>[\w\-,=]+)/file/(?P<NID>[\w^_]+)|#!(?P<ID3>[\w^_]+)!(?P<K3>[\w\-,=]+))"
+)
+mega_folder_regex = compile(
+    r"https?://(?:www\.)?mega(?:\.co)?\.nz/folder/(?P<ID>[\w^_]+)#(?P<KEY>[\w,\-=]+)(?:/folder/(?P<SUBDIR>[\w]+))?/?$"
+)
+
+
+# region Crypto
+class MegaCommands(BaseEnum):
+    PRELOGIN = "us0"
+    ANONYMOUS_PRELOGIN = "up"
+    USER_SIGNIN = "us"
+    GET_DL_URL = "g"
+    LIST_FOLDER = "f"
+
+
+class MegaCrypto:
+    @staticmethod
+    def to_bytes(
+        obj: str,
+        encoding: str = "utf-8",
+        errors: str = "strict"
+    ) -> bytes:
+        try:
+            return obj.encode(encoding, errors)
+        except AttributeError:
+            return bytes(obj, encoding)
+
+    @staticmethod
+    def to_str(
+        obj: bytes,
+        encoding: str = "utf-8",
+        errors: str = "strict"
+    ) -> str:
+        try:
+            return obj.decode(encoding, errors)
+        except AttributeError:
+            return str(obj)
+
+    @staticmethod
+    def random_key() -> int:
+        return randint(0, 0xFFFFFFFF)
+
+    @staticmethod
+    def a32_to_bytes(a: Sequence[int]) -> bytes:
+        result = bytearray(len(a) * 4)
+
+        for i in range(len(a) * 4):
+            result[i] = (a[i >> 2] >> (24 - (i & 3) * 8)) & 0xff
+
+        return bytes(result)
+
+    @staticmethod
+    def bytes_to_a32(s: bytes) -> Tuple[int, ...]:
+        a = [0] * ((len(s) + 3) >> 2)
+        for i in range(len(s)):
+            a[i >> 2] |= (s[i] << (24 - (i & 3) * 8))
+
+        for i in range(len(a)):
+            if a[i] & 0x80000000:
+                a[i] = a[i] - 0x100000000
+
+        return tuple(a)
+
+    @staticmethod
+    def a32_to_base64(a: Sequence[int]) -> bytes:
+        return MegaCrypto.base64_encode(MegaCrypto.a32_to_bytes(a))
+
+    @staticmethod
+    def base64_to_a32(s: str) -> Tuple[int, ...]:
+        return MegaCrypto.bytes_to_a32(MegaCrypto.base64_decode(s))
+
+    @staticmethod
+    def base64_decode(data: str) -> bytes:
+        result = MegaCrypto.to_bytes(data, "ascii")
+        #: Add padding, we need a string with a length multiple of 4
+        result += b"=" * (-len(result) % 4)
+        return b64decode(result, b"-_")
+
+    @staticmethod
+    def base64_encode(data: bytes) -> bytes:
+        return b64encode(data, b"-_")
+
+    @staticmethod
+    def cbc_decrypt(data: bytes, key: Sequence[int]) -> bytes:
+        cipher = Cipher(
+            algorithms.AES(MegaCrypto.a32_to_bytes(key)),
+            modes.CBC(b"\0" * 16)
+        )
+        decryptor = cipher.decryptor()
+        return decryptor.update(data) + decryptor.finalize()
+
+    @staticmethod
+    def cbc_encrypt(data: bytes, key: Sequence[int]) -> bytes:
+        cipher = Cipher(
+            algorithms.AES(MegaCrypto.a32_to_bytes(key)),
+            modes.CBC(b"\0" * 16)
+        )
+        encryptor = cipher.encryptor()
+        return encryptor.update(data) + encryptor.finalize()
+
+    @staticmethod
+    def ecb_decrypt(data: bytes, key: Sequence[int]) -> bytes:
+        cipher = Cipher(
+            algorithms.AES(MegaCrypto.a32_to_bytes(key)),
+            modes.ECB()
+        )
+        decryptor = cipher.decryptor()
+        return decryptor.update(data) + decryptor.finalize()
+
+    @staticmethod
+    def ecb_encrypt(data: bytes, key: Sequence[int]) -> bytes:
+        cipher = Cipher(
+            algorithms.AES(MegaCrypto.a32_to_bytes(key)),
+            modes.ECB()
+        )
+        encryptor = cipher.encryptor()
+        return encryptor.update(data) + encryptor.finalize()
+
+    @staticmethod
+    def decrypt_key(data: str, key: Sequence[int]) -> Tuple[int, ...]:
+        """
+        Decrypt an encrypted key ('k' member of a node)
+        """
+        result = MegaCrypto.base64_decode(data)
+        return MegaCrypto.bytes_to_a32(MegaCrypto.ecb_decrypt(result, key))
+
+    @staticmethod
+    def encrypt_key(data: Sequence[int], key: Sequence[int]):
+        """
+        Encrypt a decrypted key.
+        """
+        result = MegaCrypto.a32_to_bytes(data)
+        return MegaCrypto.bytes_to_a32(MegaCrypto.ecb_encrypt(result, key))
+
+    @staticmethod
+    def get_cipher_key(key: Sequence[int]) -> Tuple[
+        Tuple[int, int, int, int],
+        Tuple[int, ...],
+        Tuple[int, ...]
+    ]:
+        """
+        Construct the cipher key from the given data.
+        """
+        k = (
+            key[0] ^ key[4],
+            key[1] ^ key[5],
+            key[2] ^ key[6],
+            key[3] ^ key[7]
+        )
+        iv = (*key[4:6], 0, 0)
+        meta_mac = tuple(key[6:8])
+
+        return k, iv, meta_mac
+
+    @staticmethod
+    def decrypt_attr(data: str, key: Sequence[int]) -> Any:
+        """
+        Decrypt an encrypted attribute (usually 'a' or 'at' member of a node)
+        """
+        dec_data = MegaCrypto.base64_decode(data)
+        if len(key) == 4:
+            k = key
+        else:
+            k, iv, meta_mac = MegaCrypto.get_cipher_key(key)
+        attr = MegaCrypto.cbc_decrypt(dec_data, k)
+
+        #: Data is padded, 0-bytes must be stripped
+        if attr[:6] != b'MEGA{"':
+            return False
+
+        search_result = search(rb"{.+}", attr)
+        if not search_result:
+            return False
+
+        return loads(search_result.group(0))
+
+    @staticmethod
+    def get_chunks(
+        start: int,
+        size: int
+    ) -> Generator[Tuple[int, int], Any, None]:
+        """
+        Calculate chunks for a given encrypted file size.
+        """
+        chunk_start = 0
+        chunk_size = 0x20000
+
+        while chunk_start + chunk_size < size:
+            if chunk_start >= start:
+                yield chunk_start, chunk_size
+            chunk_start += chunk_size
+            if chunk_size < 0x100000:
+                chunk_size += 0x20000
+
+        if chunk_start < size:
+            yield chunk_start, size - chunk_start
+
+    @staticmethod
+    def gen_cash(cash_header_value: str) -> str:
+        """
+        Generate a 4-byte base64 prefix that satisfies the X-Hashcash threshold.
+        """
+        cash = cash_header_value.split(":")
+        token = cash[3]
+        easiness = int(cash[1])
+
+        buffer = bytearray(4 + 262144 * 48)
+        threshold = (((easiness & 63) << 1) + 1) << ((easiness >> 6) * 7 + 3)
+        token_bytes = MegaCrypto.base64_decode(token)
+        token_len = len(token_bytes)
+        if token_len > 48:
+            # If token is longer than 48 bytes just truncate it
+            token_bytes = token_bytes[:48]
+            token_len = 48
+
+        for i in range(262144):
+            offset = 4 + i * 48
+            buffer[offset: offset + token_len] = token_bytes
+
+        while True:
+            for idx in range(4):
+                buffer[idx] = (buffer[idx] + 1) & 0xff
+                if buffer[idx]:
+                    break
+
+            prefix = buffer[0:4]
+            h = int.from_bytes(sha256(buffer).digest()[:4], "big")
+            if h <= threshold:
+                result = MegaCrypto.to_str(
+                    MegaCrypto.base64_encode(bytes(prefix)),
+                    "ascii"
+                ).replace("=", "")
+                return f"1:{token}:{result}"
+
+    class Checksum:
+        """
+        Interface for checking CBC-MAC checksum.
+        """
+
+        def __init__(self, key: Sequence[int]) -> None:
+            k, iv, meta_mac = MegaCrypto.get_cipher_key(key)
+            self.hash = b"\0" * 16
+            self.key = MegaCrypto.a32_to_bytes(k)
+            self.iv = MegaCrypto.a32_to_bytes(iv[0:2] * 2)
+
+            self.AES = Cipher(
+                algorithms.AES(self.key),
+                modes.CBC(self.hash)
+            ).encryptor()
+            return
+
+        def update(self, chunk: bytes) -> None:
+            encryptor = Cipher(
+                algorithms.AES(self.key),
+                modes.CBC(self.iv)
+            ).encryptor()
+
+            hash = b''
+            for j in range(0, len(chunk), 16):
+                block = chunk[j: j + 16].ljust(16, b"\0")
+                hash = encryptor.update(block)
+
+            encryptor.finalize()
+
+            self.hash = self.AES.update(hash)
+            return
+
+        def digest(self) -> Tuple[int, int]:
+            """
+            Return the **binary** (non-printable) CBC-MAC of the message that
+            has been authenticated so far.
+            """
+            d = MegaCrypto.bytes_to_a32(self.hash)
+            return d[0] ^ d[1], d[2] ^ d[3]
+
+
+# region API Client
+class MegaAPIClient:
+    def __init__(
+        self,
+        sid: Union[str, None] = None,
+        node_id: Union[str, None] = None
+    ) -> None:
+        """Prepare Mega client.
+
+        Args:
+            sid (Union[int, None], optional): User session ID.
+                Defaults to None.
+
+            node_id (Union[str, None], optional): ID of file or folder.
+                Defaults to None.
+        """
+        self.id = MegaCrypto.random_key()
+        self.sid = sid
+        self.node_id = node_id
+        return
+
+    def api_request(self, **kwargs) -> Union[Dict[str, Any], int]:
+        get_params: Dict[str, Any] = {"id": self.id}
+
+        if self.sid:
+            get_params["sid"] = self.sid
+
+        if self.node_id:
+            get_params["n"] = self.node_id
+
+        with Session(private=True) as session:
+            response = session.post(
+                Constants.MEGA_API_URL,
+                params=get_params,
+                data=dumps([kwargs]),
+                headers={'User-Agent': Constants.BROWSER_USERAGENT}
+            )
+
+            while (
+                response.status_code == 402
+                and "X-Hashcash" in response.headers
+            ):
+                # Is this OPTIONS request actually required?
+                session.options(
+                    Constants.MEGA_API_URL,
+                    params=get_params,
+                    headers={
+                        'User-Agent': Constants.BROWSER_USERAGENT,
+                        'Access-Control-Request-Headers': 'x-hashcash',
+                        'Access-Control-Request-Method': 'POST'
+                    }
+                )
+
+                cash_header_value = response.headers["X-Hashcash"]
+                new_cash = MegaCrypto.gen_cash(cash_header_value)
+                response = session.post(
+                    Constants.MEGA_API_URL,
+                    params=get_params,
+                    data=dumps([kwargs]),
+                    headers={
+                        'User-Agent': Constants.BROWSER_USERAGENT,
+                        'X-Hashcash': new_cash
+                    }
+                )
+
+            json_response = response.json()
+
+        self.id += 1
+
+        if isinstance(json_response, list):
+            return json_response[0]
+        return json_response
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__}, sid={self.sid}, node_id={self.node_id}>'
+
+
+# region Account
+class MegaAccount:
+    def __init__(
+        self,
+        client: MegaAPIClient,
+        username: Union[str, None] = None,
+        password: Union[str, None] = None
+    ) -> None:
+        """Login and represent a registered or anonymous Mega account.
+
+        Args:
+            client (MegaAPIClient): The client to use for the requests.
+            username (Union[str, None], optional): The username of the account,
+                when logging in with one. Defaults to None.
+            password (Union[str, None], optional): The password of the account,
+                when logging in with one. Defaults to None.
+
+        Raises:
+            ClientNotWorking: Failed to contact Mega.
+            CredentialInvalid: Couldn't log in with the given credentials.
+        """
+        self.client = client
+
+        try:
+            if username and password:
+                self.client.sid = self._login_user(username, password)
+            else:
+                self.client.sid = self._login_anonymous()
+
+        except (RequestsJSONDecodeError, RetryError):
+            raise ClientNotWorking(BrokenClientReason.CONNECTION_ERROR)
+
+        return
+
+    def __get_password_key(self, password):
+        password_key = MegaCrypto.a32_to_bytes(
+            [0x93C467E3, 0x7DB0C7A4, 0xD1BE3F81, 0x0152CB56]
+        )
+        password_a32 = MegaCrypto.bytes_to_a32(
+            MegaCrypto.to_bytes(password, "utf-8")
+        )
+        for c in range(0x10000):
+            for j in range(0, len(password_a32), 4):
+                key = [0, 0, 0, 0]
+                for i in range(4):
+                    if i + j < len(password_a32):
+                        key[i] = password_a32[i + j]
+                password_key = MegaCrypto.cbc_encrypt(password_key, key)
+
+        return MegaCrypto.bytes_to_a32(password_key)
+
+    def __get_user_hash_v1(self, user, password_key):
+        user_a32 = MegaCrypto.bytes_to_a32(
+            MegaCrypto.to_bytes(user, "utf-8")
+        )
+        user_hash = [0, 0, 0, 0]
+        for i in range(len(user_a32)):
+            user_hash[i % 4] ^= user_a32[i]
+
+        user_hash = MegaCrypto.a32_to_bytes(user_hash)
+        for i in range(0x4000):
+            user_hash = MegaCrypto.cbc_encrypt(user_hash, password_key)
+
+        user_hash = MegaCrypto.bytes_to_a32(user_hash)
+
+        return MegaCrypto.to_str(
+            MegaCrypto.a32_to_base64((user_hash[0], user_hash[2])),
+            "ascii"
+        )
+
+    def __mpi_to_int(self, s):
+        """
+        Convert GCRYMPI_FMT_PGP bignum format to integer.
+        """
+        return int(
+            "".join(
+                "{:02x}".format(s[2:][x])
+                for x in range(len(s[2:]))
+            ),
+            16
+        )
+
+    def _login_user(self, user: str, password: str) -> str:
+        # Based on:
+        #   https://github.com/meganz/webclient/blob/2403abfaa06dd5616c7d1801e37b16fef0d96979/js/security.js#L1252
+        LOGGER.debug('Logging into Mega with user account')
+        user = user.lower()
+
+        res = self.client.api_request(
+            a=MegaCommands.PRELOGIN.value,
+            user=user
+        )
+        if isinstance(res, int) or 'e' in res:
+            raise ClientNotWorking(
+                BrokenClientReason.FAILED_PROCESSING_RESPONSE
+            )
+
+        if res["v"] == 1: # v1 account
+            password_key = self.__get_password_key(password)
+            user_hash = self.__get_user_hash_v1(user, password_key)
+
+        elif res["v"] == 2: # v2 account
+            pbkdf = pbkdf2_hmac(
+                hash_name="SHA512",
+                password=MegaCrypto.to_bytes(password, "utf-8"),
+                salt=MegaCrypto.base64_decode(res["s"]),
+                iterations=100_000,
+                dklen=32
+            )
+
+            password_key = MegaCrypto.bytes_to_a32(pbkdf[:16])
+            user_hash = MegaCrypto.to_str(
+                MegaCrypto.base64_encode(pbkdf[16:]),
+                "ascii"
+            ).replace("=", "")
+
+        else:
+            raise ClientNotWorking(BrokenClientReason.VERSION_NOT_SUPPORTED)
+
+        return self._process_login(
+            user=user,
+            user_hash=user_hash,
+            password_key=password_key
+        )
+
+    def _login_anonymous(self) -> str:
+        LOGGER.debug('Logging into Mega anonymously')
+
+        master_key = [MegaCrypto.random_key()] * 4
+        password_key = [MegaCrypto.random_key()] * 4
+        session_self_challenge = [MegaCrypto.random_key()] * 4
+
+        res: Union[str, int] = self.client.api_request(
+            a=MegaCommands.ANONYMOUS_PRELOGIN.value,
+            k=MegaCrypto.to_str(MegaCrypto.a32_to_base64(
+                MegaCrypto.encrypt_key(
+                    master_key, password_key
+                )
+            )),
+            ts=MegaCrypto.to_str(MegaCrypto.base64_encode(
+                MegaCrypto.a32_to_bytes(session_self_challenge)
+                + MegaCrypto.a32_to_bytes(
+                    MegaCrypto.encrypt_key(session_self_challenge, master_key)
+                )
+            )).replace('=', '')
+        ) # type: ignore
+        if isinstance(res, int):
+            raise ClientNotWorking(
+                BrokenClientReason.FAILED_PROCESSING_RESPONSE
+            )
+
+        return self._process_login(
+            user=res,
+            user_hash=None,
+            password_key=password_key
+        )
+
+    def _process_login(
+        self,
+        user: str,
+        user_hash: Union[str, None],
+        password_key: Sequence[int]
+    ) -> str:
+        if user_hash:
+            res = self.client.api_request(
+                a=MegaCommands.USER_SIGNIN.value,
+                user=user,
+                uh=user_hash
+            )
+
+        else:
+            res = self.client.api_request(
+                a=MegaCommands.USER_SIGNIN.value,
+                user=user
+            )
+
+        if isinstance(res, int):
+            if res == -9:
+                raise CredentialInvalid
+
+            raise ClientNotWorking(
+                BrokenClientReason.FAILED_PROCESSING_RESPONSE
+            )
+
+        if 'e' in res:
+            if res['e'] == -9:
+                raise CredentialInvalid
+
+            raise ClientNotWorking(
+                BrokenClientReason.FAILED_PROCESSING_RESPONSE
+            )
+
+        self.master_key = master_key = MegaCrypto.decrypt_key(
+            res["k"],
+            password_key
+        )
+
+        if "tsid" in res:
+            tsid = MegaCrypto.base64_decode(res["tsid"])
+            if (
+                MegaCrypto.a32_to_bytes(
+                    MegaCrypto.encrypt_key(
+                        MegaCrypto.bytes_to_a32(tsid[:16]), master_key
+                    )
+                )
+                == tsid[-16:]
+            ):
+                return res["tsid"]
+
+        elif "csid" in res:
+            privk = MegaCrypto.a32_to_bytes(
+                MegaCrypto.decrypt_key(res["privk"], master_key)
+            )
+            rsa_private_key = [0, 0, 0, 0]
+
+            for i in range(4):
+                l = ((privk[0] * 256 + privk[1] + 7) // 8) + 2
+                if l > len(privk):
+                    raise CredentialInvalid
+                rsa_private_key[i] = self.__mpi_to_int(privk[:l])
+                privk = privk[l:]
+
+            if len(privk) >= 16:
+                raise CredentialInvalid
+            encrypted_sid = self.__mpi_to_int(
+                MegaCrypto.base64_decode(res["csid"])
+            )
+            sid = "{:x}".format(
+                pow(
+                    encrypted_sid,
+                    rsa_private_key[2],
+                    rsa_private_key[0] * rsa_private_key[1],
+                )
+            )
+            sid = "0" * (-len(sid) % 2) + sid
+            sid = bytes([
+                (int(sid[i: i + 2], 16))
+                for i in range(0, len(sid), 2)
+            ])
+            sid = MegaCrypto.to_str(
+                MegaCrypto.base64_encode(sid[:43]),
+                "ascii"
+            ).replace("=", "")
+            return sid
+
+        raise CredentialInvalid
+
+
+# region Validator
+@Credentials.register_validator(CredentialSource.MEGA)
+def mega_login_validator(credential_data: CredentialData) -> CredentialData:
+    MegaAccount(
+        MegaAPIClient(),
+        credential_data.email or '',
+        credential_data.password or ''
+    )
+
+    credential_data.api_key = None
+    credential_data.username = None
+    return credential_data
+
+
+class MegaABC(ABC):
+    size: int
+    progress: float
+    speed: float
+    pure_link: str
+    mega_filename: str
+
+    @abstractmethod
+    def __init__(self, download_link: str) -> None:
+        ...
+
+    @abstractmethod
+    def download(
+        self,
+        filename: str,
+        websocket_updater: Callable[[], Any]
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def stop(self) -> None:
+        ...
+
+
+# region File Downloader
+class Mega(MegaABC):
+    def __init__(self, download_link: str) -> None:
+        self.client = MegaAPIClient()
+        self.download_link = download_link
+        self.__r = None
+
+        self.downloading: bool = False
+        self.progress = 0.0
+        self.speed = 0.0
+
+        self.login(self.client)
+
+        id, key = self._parse_url(download_link)
+        self.client.node_id = id
+        self.__master_key = MegaCrypto.base64_to_a32(key)
+
+        try:
+            res = self.client.api_request(
+                a=MegaCommands.GET_DL_URL.value,
+                g=1,
+                p=id,
+                ssl=1
+            )
+            if (
+                isinstance(res, int)
+                or 'e' in res
+                # Below seems to happens sometimes... When this occurs, files
+                # are inaccessible also in the official also in the official web
+                # app. Strangely, files can come back later.
+                or 'g' not in res
+            ):
+                raise JSONDecodeError('', '', -1)
+
+        except (JSONDecodeError, RetryError):
+            raise DownloadLinkBroken(download_link)
+
+        if res.get('tl', 0): # tl = time left
+            # Download limit reached
+            StatusHandlers().report(
+                StatusType.DOWNLOAD_SERVICE_RATE_LIMIT,
+                DownloadService.MEGA.value
+            )
+            raise DownloadServiceRateLimitReached(DownloadService.MEGA)
+
+        attr = MegaCrypto.decrypt_attr(res["at"], self.__master_key)
+        if not attr:
+            raise ClientNotWorking(
+                BrokenClientReason.FAILED_PROCESSING_RESPONSE
+            )
+
+        self.mega_filename = attr['n']
+        self.size = res["s"]
+        self.pure_link = res["g"]
+
+        return
+
+    @staticmethod
+    def login(client: MegaAPIClient) -> None:
+        cred = Credentials()
+        for mega_cred in (
+            *cred.get_from_source(CredentialSource.MEGA),
+            CredentialData(
+                id=-1,
+                source=CredentialSource.MEGA,
+                username=None,
+                email='',
+                password='',
+                api_key=None
+            )
+        ):
+            auth_token = (
+                cred
+                .auth_tokens.get(CredentialSource.MEGA, {})
+                .get(mega_cred.email or '', (None, 0))
+            )
+            if auth_token[1] > time():
+                client.sid = auth_token[0]
+                break
+
+            try:
+                MegaAccount(
+                    client,
+                    mega_cred.email,
+                    mega_cred.password
+                )
+
+            except CredentialInvalid:
+                continue
+
+            else:
+                cred.auth_tokens.setdefault(CredentialSource.MEGA, {})[
+                    mega_cred.email or ''
+                ] = (client.sid, round(time()) + 3600)
+                break
+
+        else:
+            # Failed to login with creds or anonymous
+            raise ClientNotWorking(BrokenClientReason.ACCESS_DENIED)
+
+        return
+
+    @staticmethod
+    def _parse_url(download_link: str) -> Tuple[str, str]:
+        regex_search = mega_url_regex.search(download_link)
+        if not regex_search:
+            raise DownloadLinkBroken(download_link)
+
+        groups = regex_search.groupdict()
+        id = groups["ID1"] or groups["ID2"] or groups["ID3"]
+        key = groups["K1"] or groups["K2"] or groups["K3"]
+
+        if not (id and key):
+            raise DownloadLinkBroken(download_link)
+
+        return id, key
+
+    def download(
+        self,
+        filename: str,
+        websocket_updater: Callable[[], Any]
+    ) -> None:
+        websocket_updater()
+        self.downloading = True
+        size_downloaded = 0
+
+        k, iv, meta_mac = MegaCrypto.get_cipher_key(
+            self.__master_key
+        )
+        decryptor = Cipher(
+            algorithms.AES(MegaCrypto.a32_to_bytes(k)),
+            modes.CTR(MegaCrypto.a32_to_bytes(iv))
+        ).decryptor()
+        cbc_mac = MegaCrypto.Checksum(self.__master_key)
+
+        start_time = perf_counter()
+        tries_left = Constants.TOTAL_RETRIES
+        with open(filename, 'wb') as f:
+            while tries_left > 0:
+                tries_left -= 1
+
+                with Session(private=True).get(
+                    f'{self.pure_link}/{size_downloaded}-',
+                    stream=True
+                ).raw as r:
+
+                    self.__r = r
+                    for chunk_start, chunk_size in MegaCrypto.get_chunks(
+                        size_downloaded,
+                        self.size
+                    ):
+                        if not self.downloading:
+                            break
+
+                        try:
+                            chunk = r.read(chunk_size)
+                            if chunk and len(chunk) != chunk_size:
+                                raise ProtocolError
+
+                        except (ProtocolError, TimeoutError):
+                            # Connection error, packet loss, etc. Just try again
+                            break
+
+                        if not chunk:
+                            # Download limit reached mid download
+                            StatusHandlers().report(
+                                StatusType.DOWNLOAD_SERVICE_RATE_LIMIT,
+                                DownloadService.MEGA.value
+                            )
+                            raise DownloadServiceRateLimitReached(
+                                DownloadService.MEGA)
+
+                        chunk = decryptor.update(chunk)
+                        f.write(chunk)
+                        cbc_mac.update(chunk)
+
+                        size_downloaded += chunk_size
+                        self.speed = round(
+                            chunk_size / (perf_counter() - start_time),
+                            2
+                        )
+                        self.progress = round(
+                            size_downloaded / self.size * 100,
+                            2
+                        )
+                        start_time = perf_counter()
+                        websocket_updater()
+
+                    else:
+                        # Success
+                        break
+
+                    if not self.downloading:
+                        break
+            else:
+                # Failed to download file
+                raise ClientNotWorking(BrokenClientReason.CONNECTION_ERROR)
+
+        if self.downloading:
+            if cbc_mac.digest() != meta_mac:
+                raise ClientNotWorking(
+                    BrokenClientReason.FAILED_PROCESSING_RESPONSE
+                )
+
+        self.__r = None
+
+        return
+
+    def stop(self) -> None:
+        self.downloading = False
+        if (
+            self.__r is not None
+            and self.__r._fp is not None
+            and not isinstance(self.__r._fp, str)
+            and self.__r._fp.fp is not None
+            and self.__r._fp.fp.raw is not None
+        ):
+            try:
+                self.__r._fp.fp.raw._sock.shutdown(2) # SHUT_RDWR
+            except OSError as e:
+                if e.errno != 9:
+                    raise
+        return
+
+
+# region Folder Downloader
+class MegaFolder(MegaABC):
+    def __init__(self, download_link: str) -> None:
+        self.client = MegaAPIClient()
+        self.download_link = self.pure_link = download_link
+
+        self.downloading: bool = False
+        self.__r = None
+        self.progress = 0.0
+        self.speed = 0.0
+
+        Mega.login(self.client)
+
+        id, key = self._parse_url(download_link)
+        self.client.node_id = id
+        master_key = MegaCrypto.base64_to_a32(key)
+
+        try:
+            res = self.client.api_request(
+                a=MegaCommands.LIST_FOLDER.value,
+                c=1,
+                r=1,
+                ca=1,
+                ssl=1
+            )
+            if (
+                isinstance(res, int)
+                or 'e' in res
+            ):
+                raise JSONDecodeError('', '', -1)
+
+        except (JSONDecodeError, RetryError):
+            raise DownloadLinkBroken(download_link)
+
+        self.files: List[Dict[str, Any]] = []
+        self.mega_filename = ""
+        self.size = 0
+        for node in res['f']:
+            if node['t'] == 1:
+                self.mega_filename = MegaCrypto.decrypt_attr(
+                    node["a"],
+                    MegaCrypto.decrypt_key(
+                        node["k"].split(":")[1],
+                        master_key
+                    )
+                )['n'] + '.zip'
+
+            elif node['t'] == 0 and ":" in node["k"]:
+                node_key = MegaCrypto.decrypt_key(
+                    node["k"].split(":")[1],
+                    master_key
+                )
+                self.files.append({
+                    "node_id": node["h"],
+                    "size": node["s"],
+                    "name": MegaCrypto.decrypt_attr(node["a"], node_key)["n"],
+                    "key": node_key
+                })
+                self.size += node["s"]
+        return
+
+    @staticmethod
+    def _parse_url(folder_link: str) -> Tuple[str, str]:
+        regex_search = mega_folder_regex.search(folder_link)
+        if not regex_search:
+            raise DownloadLinkBroken(folder_link)
+
+        groups = regex_search.groupdict()
+        id = groups["ID"]
+        key = groups["KEY"]
+
+        if not (id and key):
+            raise DownloadLinkBroken(folder_link)
+
+        return id, key
+
+    def download(
+        self,
+        filename: str,
+        websocket_updater: Callable[[], Any]
+    ) -> None:
+        websocket_updater()
+        self.downloading = True
+        size_downloaded = 0
+
+        with ZipFile(filename, 'w', ZIP_DEFLATED) as zip:
+            for file in self.files:
+                k, iv, meta_mac = MegaCrypto.get_cipher_key(
+                    file["key"]
+                )
+                decryptor = Cipher(
+                    algorithms.AES(MegaCrypto.a32_to_bytes(k)),
+                    modes.CTR(MegaCrypto.a32_to_bytes(iv))
+                ).decryptor()
+                cbc_mac = MegaCrypto.Checksum(file["key"])
+
+                try:
+                    res = self.client.api_request(
+                        a=MegaCommands.GET_DL_URL.value,
+                        g=1,
+                        n=file["node_id"],
+                        ssl=1
+                    )
+                    if (
+                        isinstance(res, int)
+                        or 'e' in res
+                        # Below seems to happens sometimes... When this occurs, files
+                        # are inaccessible also in the official also in the official web
+                        # app. Strangely, files can come back later.
+                        or 'g' not in res
+                    ):
+                        raise JSONDecodeError('', '', -1)
+
+                except (JSONDecodeError, RetryError):
+                    raise DownloadLinkBroken(self.download_link)
+
+                if res.get('tl', 0): # tl = time left
+                    # Download limit reached
+                    StatusHandlers().report(
+                        StatusType.DOWNLOAD_SERVICE_RATE_LIMIT,
+                        DownloadService.MEGA.value
+                    )
+                    raise DownloadServiceRateLimitReached(DownloadService.MEGA)
+
+                self.pure_link = res['g']
+                file_size_downloaded = 0
+                start_time = perf_counter()
+                tries_left = Constants.TOTAL_RETRIES
+                with zip.open(file["name"], "w", force_zip64=True) as f:
+                    while tries_left > 0:
+                        tries_left -= 1
+
+                        with Session(private=True).get(
+                            f'{self.pure_link}/{file_size_downloaded}-',
+                            stream=True
+                        ).raw as r:
+
+                            self.__r = r
+                            for chunk_start, chunk_size in MegaCrypto.get_chunks(
+                                file_size_downloaded, file["size"]):
+                                if not self.downloading:
+                                    break
+
+                                try:
+                                    chunk = r.read(chunk_size)
+                                    if chunk and len(chunk) != chunk_size:
+                                        raise ProtocolError
+
+                                except (ProtocolError, TimeoutError):
+                                    # Connection error, packet loss, etc.
+                                    # Just try again
+                                    break
+
+                                if not chunk:
+                                    # Download limit reached mid download
+                                    StatusHandlers().report(
+                                        StatusType.DOWNLOAD_SERVICE_RATE_LIMIT,
+                                        DownloadService.MEGA.value
+                                    )
+                                    raise DownloadServiceRateLimitReached(
+                                        DownloadService.MEGA
+                                    )
+
+                                chunk = decryptor.update(chunk)
+                                f.write(chunk)
+                                cbc_mac.update(chunk)
+
+                                size_downloaded += chunk_size
+                                file_size_downloaded += chunk_size
+                                self.speed = round(
+                                    chunk_size
+                                    /
+                                    (perf_counter() - start_time),
+                                    2
+                                )
+                                self.progress = round(
+                                    size_downloaded / self.size * 100,
+                                    2
+                                )
+                                start_time = perf_counter()
+                                websocket_updater()
+
+                            else:
+                                # Success
+                                break
+
+                            if not self.downloading:
+                                break
+                    else:
+                        # Failed to download file
+                        raise ClientNotWorking(
+                            BrokenClientReason.CONNECTION_ERROR
+                        )
+
+                if self.downloading:
+                    if cbc_mac.digest() != meta_mac:
+                        raise ClientNotWorking(
+                            BrokenClientReason.FAILED_PROCESSING_RESPONSE
+                        )
+                else:
+                    break
+
+        self.__r = None
+
+        return
+
+    def stop(self) -> None:
+        self.downloading = False
+        if (
+            self.__r is not None
+            and self.__r._fp is not None
+            and not isinstance(self.__r._fp, str)
+            and self.__r._fp.fp is not None
+            and self.__r._fp.fp.raw is not None
+        ):
+
+            try:
+                self.__r._fp.fp.raw._sock.shutdown(2) # SHUT_RDWR
+            except OSError as e:
+                if e.errno != 9:
+                    raise
+        return
+
+
+# region File Client
+@DownloadClients.register_client(DownloadClientIdentifier.MEGA)
+class MegaDownload(BaseDirectDownload):
+    _mega_class: Type[MegaABC] = Mega
+
+    @property
+    def size(self) -> int:
+        return self._mega.size
+
+    @property
+    def progress(self) -> float:
+        return self._mega.progress
+
+    @property
+    def speed(self) -> float:
+        return self._mega.speed
+
+    @property
+    def _size(self) -> int:
+        return self._mega.size
+
+    @property
+    def _progress(self) -> float:
+        return self._mega.progress
+
+    @property
+    def _speed(self) -> float:
+        return self._mega.speed
+
+    @property
+    def _pure_link(self) -> str:
+        return self._mega.pure_link
+
+    def __init__(
+        self,
+        download_link: str,
+
+        volume_id: int,
+        covered_issues: Union[float, Tuple[float, float], None],
+
+        download_service: DownloadService,
+        source_name: str,
+
+        web_link: Union[str, None],
+        web_title: Union[str, None],
+        web_sub_title: Union[str, None],
+
+        forced_match: bool = False,
+        selected_release: Union[dict, None] = None
+    ) -> None:
+        LOGGER.debug(
+            'Creating mega download: %s',
+            download_link if selected_release is None else 'selected DDL offering'
+        )
+
+        settings = Settings().sv
+        volume = Volume(volume_id)
+
+        self._download_link = download_link
+        self._volume_id = volume_id
+        self._issue_id = None
+        self.selected_release = selected_release
+        if selected_release is not None:
+            self._issue_id = selected_release.get('issue_id')
+        self._covered_issues = covered_issues
+        self._download_service = download_service
+        self._source_name = source_name
+        self._web_link = web_link
+        self._web_title = web_title
+        self._web_sub_title = web_sub_title
+
+        self._id = None
+        self._state = DownloadState.QUEUED_STATE
+        self._download_thread = None
+        self._download_folder = settings.download_folder
+
+        self._mega = self._mega_class(download_link)
+
+        self._filename_body = ''
+        try:
+            if selected_release is None and isinstance(covered_issues, float):
+                self._issue_id = volume.get_issue_from_number(covered_issues).id
+
+            if selected_release is None and settings.rename_downloaded_files:
+                self._filename_body = generate_issue_name(
+                    volume.get_data(),
+                    covered_issues
+                )
+
+        except IssueNotFound as e:
+            if not forced_match:
+                raise e
+
+        if not self._filename_body:
+            self._filename_body = safe_download_name(self._extract_default_filename_body(
+                response=None
+            ))
+
+        self._title = basename(self._filename_body)
+        self._files = [self._build_filename(response=None)]
+        return
+
+    def _extract_default_filename_body(
+        self,
+        response: Union[Response, None]
+    ) -> str:
+        return splitext(self._mega.mega_filename)[0]
+
+    def _extract_extension(self, response: Union[Response, None]) -> str:
+        return splitext(self._mega.mega_filename)[1]
+
+    def run(self) -> None:
+        self._state = DownloadState.DOWNLOADING_STATE
+        ws = WebSocket()
+        status_event = QueueStatusEvent(self)
+        try:
+            self._mega.download(
+                self.files[0],
+                lambda: ws.emit(status_event)
+            )
+
+        except ClientNotWorking:
+            self._state = DownloadState.FAILED_STATE
+
+        return
+
+    def stop(self,
+        state: DownloadState = DownloadState.CANCELED_STATE
+    ) -> None:
+        self._state = state
+        self._mega.stop()
+        return
+
+
+# region Folder Client
+@DownloadClients.register_client(DownloadClientIdentifier.MEGA_FOLDER)
+class MegaFolderDownload(MegaDownload):
+    _mega_class = MegaFolder

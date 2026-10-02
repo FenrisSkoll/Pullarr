@@ -1,0 +1,96 @@
+{
+  "origin": {
+    "provider": "metron",
+    "series_id": "14110",
+    "removed": "images, creators, account data and unrelated fields; no headers retained"
+  },
+  "series": {
+    "id": 14110,
+    "name": "Army of Darkness Omnibus",
+    "volume": 1,
+    "issue_count": 3,
+    "year_began": 2010,
+    "desc": "Synthetic fixture description. Edition evidence: omnibus.",
+    "alt_names": [],
+    "language": "en",
+    "resource_url": "https://metron.cloud/series/army-of-darkness-omnibus-2010/",
+    "cv_id": 56333,
+    "gcd_id": 94763,
+    "series_type": {
+      "id": 15,
+      "name": "Omnibus"
+    },
+    "publisher": {
+      "id": 21,
+      "name": "Dynamite Entertainment"
+    }
+  },
+  "issue_list": [
+    {
+      "id": 158171,
+      "number": "1",
+      "modified": "2025-12-05T13:01:31.501018-05:00"
+    },
+    {
+      "id": 158173,
+      "number": "2",
+      "modified": "2025-12-05T13:00:43.475631-05:00"
+    },
+    {
+      "id": 158172,
+      "number": "3",
+      "modified": "2026-08-26T15:40:18.046603-04:00"
+    }
+  ],
+  "issues": [
+    {
+      "id": 158171,
+      "number": "1",
+      "title": "Volume 1",
+      "name": [],
+      "desc": "Synthetic fixture description. Edition evidence: omnibus.",
+      "cover_date": "2010-01-01",
+      "store_date": null,
+      "cv_id": 382567,
+      "gcd_id": 1509493,
+      "modified": "2025-12-05T13:01:31.501018-05:00",
+      "series": {
+        "id": 14110,
+        "name": "Army of Darkness Omnibus"
+      }
+    },
+    {
+      "id": 158173,
+      "number": "2",
+      "title": "Volume 2",
+      "name": [],
+      "desc": "Synthetic fixture description. Edition evidence: omnibus.",
+      "cover_date": "2012-05-01",
+      "store_date": "2012-05-02",
+      "cv_id": 400277,
+      "gcd_id": 2526314,
+      "modified": "2025-12-05T13:00:43.475631-05:00",
+      "series": {
+        "id": 14110,
+        "name": "Army of Darkness Omnibus"
+      }
+    },
+    {
+      "id": 158172,
+      "number": "3",
+      "title": "Volume 3",
+      "name": [],
+      "desc": "Synthetic fixture description. Edition evidence: omnibus, collection.",
+      "cover_date": "2013-05-01",
+      "store_date": "2013-05-01",
+      "cv_id": 400198,
+      "gcd_id": 2526315,
+      "modified": "2026-08-26T15:40:18.046603-04:00",
+      "series": {
+        "id": 14110,
+        "name": "Army of Darkness Omnibus"
+      }
+    }
+  ],
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

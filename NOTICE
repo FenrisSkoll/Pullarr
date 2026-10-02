@@ -1,0 +1,14 @@
+Pullarr is a modified derivative of Kapowarr, originally authored by Cas van Tijn
+and Kapowarr contributors (https://github.com/Casvt/Kapowarr).
+Application license: GNU GPL version 3; see LICENSE and retained source notices.
+Pullarr modifications include provider-neutral identity, reviewed organization,
+acquisition, quality/provenance, discovery, archive maintenance and publication
+hardening (2026). This is not an official upstream release.
+
+The public history is a source snapshot, not a claim of sole authorship. Upstream
+copyrights and license terms survive the history boundary. CLU / Clu Comics was
+a GPL-compatible implementation reference; existing file-level notices remain.
+
+Original Pullarr SVG branding and the geometric UI replacement icons are covered
+by the application license. Third-party utilities and libraries are identified
+separately in THIRD_PARTY_NOTICES.md and their supplied licenses.

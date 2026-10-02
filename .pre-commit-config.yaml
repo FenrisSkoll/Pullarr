@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: publication
+        name: Public-file and vendor checks
+        language: system
+        entry: python scripts/public_release_gate.py
+        pass_filenames: false
+      - id: isort
+        name: Import ordering
+        language: system
+        entry: python -m isort --check-only
+        types: [python]

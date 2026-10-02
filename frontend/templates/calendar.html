@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Release Calendar{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/calendar.css') }}">{% endblock %}
+{% block js %}<script src="{{ url_for('static', filename='js/calendar.js') }}" defer></script>{% endblock %}
+{% block main %}
+<main id="calendar">
+ <h1>Release Calendar</h1>
+ <p>Release observations for monitored library issues and accepted monitored Collection publications. Dates may change. Cover dates are not confirmed on-sale dates.</p>
+ <p>Calendar never adds publications, changes monitoring, searches or downloads automatically. In Library means a local volume exists; file ownership and content coverage are separate.</p>
+ <p id="calendar-message" role="status" aria-live="polite"></p>
+ <form id="calendar-filters">
+  <label>Horizon<select id="calendar-horizon"><option value="30">Next 30 days</option><option value="7">Next 7 days</option><option value="90">Next 90 days</option><option value="recent">Past 30 days</option><option value="unknown">TBA / Date Unknown</option><option value="custom">Custom range</option></select></label>
+  <label>From<input id="calendar-from" type="date"></label><label>To<input id="calendar-to" type="date"></label>
+  <label>Context<select id="calendar-scope"><option value="">All interests</option><option value="local">Local library</option><option value="external">External publications</option></select></label>
+  <label>Source<select id="calendar-provider"><option value="">All sources</option><option value="comicvine">ComicVine</option><option value="metron">Metron</option><option value="gcd">GCD</option></select></label>
+  <label>Precision<select id="calendar-precision"><option value="">All precision</option><option value="day">Exact day</option><option value="month">Month only</option><option value="year">Year only</option><option value="unknown">Unknown</option></select></label>
+  <button type="submit">Show releases</button>
+ </form>
+ <section aria-label="Calendar freshness"><p id="calendar-freshness">No Calendar sync yet.</p>
+  <label>Refresh source<select id="calendar-refresh-provider"><option value="all">All configured sources</option><option value="comicvine">ComicVine</option><option value="metron">Metron</option><option value="gcd">GCD</option></select></label>
+  <button id="calendar-refresh" type="button">Refresh Calendar</button>
+  <p>Manual, bounded refresh of known identities only. No catalog crawling. Normal library refresh supplies new canonical issues.</p>
+ </section>
+ <section id="calendar-results" aria-label="Release agenda" aria-live="polite"></section>
+ <dialog id="calendar-dialog" aria-labelledby="calendar-dialog-title"><h2 id="calendar-dialog-title">Release details</h2>
+  <div id="calendar-dialog-body"></div><button id="calendar-close" type="button">Close</button></dialog>
+</main>
+{% endblock %}

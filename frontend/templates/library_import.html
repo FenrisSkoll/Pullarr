@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% from "base.html" import window %}
+{% block title %}Library Import{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/window.css') }}">
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/library_import.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/window.js') }}" defer></script>
+	<script src="{{ url_for('static', filename='js/metadata_search.js') }}" defer></script>
+	<script src="{{ url_for('static', filename='js/library_import.js') }}" defer></script>
+{% endblock %}
+
+{% block pre_build_rows %}
+<tr class="li-result" data-rowid="">
+	<td>
+		<label>
+			<input type="checkbox" title="Whether to import the file" checked>
+		</label>
+	</td>
+	<td class="file-column" title=""></td>
+	<td>
+		<a href="" target="_blank" rel="noopener noreferrer"></a>
+	</td>
+	<td>
+		<button title="Change match">
+			<img src="{{ url_for('static', filename='img/edit.svg') }}" alt="">
+		</button>
+	</td>
+</tr>
+<tr class="search-result">
+	<td>
+		<a target="_blank" rel="noopener noreferrer" href=""></a>
+	</td>
+	<td><button>Select</button></td>
+</tr>
+{% endblock pre_build_rows %}
+
+{% block windows %}
+	{% set edit_cv_content %}
+		<label for="import-metadata-provider">Metadata provider</label>
+		<select id="import-metadata-provider">
+			<option value="all">All metadata providers (uses each available provider's quota)</option>
+			<option value="comicvine" selected>ComicVine</option>
+			<option value="metron" disabled>Metron (configure token in General Settings)</option>
+			<option value="gcd" disabled data-enabled-setting="gcd_enabled">GCD (enable in General Settings)</option>
+		</select>
+		<p id="match-error" role="alert"></p>
+		<form class="search-bar icon-text-color">
+			<input type="text" id="search-input">
+			<button type="submit">
+				<img src="{{url_base}}/static/img/search.svg" alt="">
+			</button>
+		</form>
+		<div class="search-results-container">
+			<table>
+				<thead>
+					<th>Search Result</th>
+					<th>Action</th>
+				</thead>
+				<tbody class="search-results"></tbody>
+			</table>
+		</div>
+	{% endset %}
+
+	{{ window(False, "cv-window", "Edit Metadata Match", edit_cv_content) }}
+{% endblock windows %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>Library Import</h1></div>
+	<div id="start-window">
+		<h2>Scan existing files, review matches, then import</h2>
+		<p>Choose the folders and matching options below. Scanning does not confirm an import.</p>
+		<ul>
+			<li>Review the exact publication and edition. Matching a title and year does not prove that an issue, collected edition or one-shot is the same publication.</li>
+			<li>Automatic ComicVine matching uses provider quota. Keep batches small, or scan without automatic matching and select a provider result manually.</li>
+			<li>Files are not allowed to be directly in the root folder. They have to be in a sub-folder.</li>
+			<li>If each issue has a separate sub-folder, enable 'Apply limit to parent folder' so that the limit is correctly applied.</li>
+		</ul>
+		<table class="fold-table">
+			<tbody>
+				<tr>
+					<td><label for="auto-match-input">Automatically match with ComicVine</label></td>
+					<td><input type="checkbox" id="auto-match-input" checked><p>Uncheck to scan without ComicVine requests and match manually using either provider.</p></td>
+				</tr>
+				<tr>
+					<td><label for="limit-input">Max folders scanned</label></td>
+					<td>
+						<select id="limit-input">
+							<option value="1">1</option>
+							<option value="5">5</option>
+							<option value="20" selected>20</option>
+							<option value="100">100</option>
+							<option value="500">500</option>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<td><label for="folder-input">Apply limit to parent folder</label></td>
+					<td>
+						<select id="folder-input">
+							<option value="true">Yes</option>
+							<option value="false" selected>No</option>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<td><label for="lang-input">Only match english volumes</label></td>
+					<td>
+						<select id="lang-input">
+							<option value="true" selected>Yes</option>
+							<option value="false">No</option>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<td><label for="target-input">Folder(s) to scan</label></td>
+					<td>
+						<select id="target-input">
+							<option value="true">All root folders</option>
+							<option value="false">Specific folder(s)</option>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<td colspan="2">
+						<p class="error hidden" id="folder-filter-error">*Input has to be a folder (pattern) and all matches have to be a root folder or a sub-folder of one</p>
+						<input type="text" id="folder-filter-input" placeholder="Folder(s) to scan (glob patterns supported)">
+					</td>
+				</tr>
+			</tbody>
+		</table>
+		<button id="run-import-button">Scan</button>
+	</div>
+	<div id="loading-window" class="hidden">
+		<h2>Loading...</h2>
+	</div>
+	<div id="no-result-window" class="hidden">
+		<h2>No results</h2>
+		<button class="cancel-button">Go Back</button>
+	</div>
+	<div id="no-cv-window" class="hidden">
+		<h2>Set ComicVine API Key first in the settings</h2>
+		<button class="cancel-button">Go Back</button>
+		<a href="{{url_base}}/settings/general#cv-input">Go to settings</a>
+	</div>
+	<div id="list-window" class="hidden">
+		<p id="import-error" role="alert"></p>
+		<div class="action-container">
+			<button class="cancel-button">Cancel</button>
+			<button
+				id="import-button"
+				title="Add volumes, set volume folder to the folder that the files are in, don't rename the volume folder, don't rename the files. If the volume is already added, move file into volume folder."
+			>Import</button>
+			<button
+				id="import-rename-button"
+				title="Add volumes, move files into automatically generated volume folder (named following the settings), rename files. If the volume is already added, move the file into volume folder and rename."
+			>Import and Rename</button>
+		</div>
+		<p id="rate-limit-banner" class="hidden">
+			Some matches may be missing because the ComicVine API rate limit was reached.
+			Entries with empty Match columns were likely affected.
+		</p>
+		<div class="table-container icon-text-color">
+			<table aria-label="File list">
+				<thead>
+					<th>
+						<label>
+							<input type="checkbox" id="selectall-input" aria-label="Select all entries for importing" checked>
+						</label>
+					</th>
+					<th>File</th>
+					<th>Match</th>
+					<th>Action</th>
+				</thead>
+				<tbody class="proposal-list"></tbody>
+			</table>
+		</div>
+	</div>
+</main>
+{% endblock %}

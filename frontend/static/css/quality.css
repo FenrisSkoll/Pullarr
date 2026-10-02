@@ -1,0 +1,11 @@
+#quality { padding: 1.5rem; max-width: 100%; }
+#quality nav { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
+#quality button, #quality input, #quality select { padding: .5rem; margin: .3rem; }
+#quality label { display: block; margin: .5rem 0; }
+#quality .q-table { overflow-x: auto; max-width: 100%; }
+#quality table { width: 100%; border-collapse: collapse; }
+#quality th, #quality td { padding: .6rem; text-align: left; border-bottom: 1px solid #7776; vertical-align: top; overflow-wrap: anywhere; }
+#quality dialog { max-width: min(52rem, 94vw); max-height: 90vh; overflow: auto; padding: 1.2rem; }
+#quality :focus-visible { outline: 3px solid #4e9fe5; outline-offset: 3px; }
+#quality #q-message { min-height: 1.5em; }
+@media (max-width: 650px) { #quality { padding: .7rem; } #quality table { min-width: 620px; } }

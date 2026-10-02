@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% from "base.html" import icon_button %}
+{% block title %}Media Management Settings{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/settings_mediamanagement.js') }}" defer></script>
+{% endblock %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>Media Management Settings</h1></div>
+	<section class="tool-bar-container" aria-label="Tool bar">
+		<div class="tool-bar">
+			{{ icon_button("save-button", "Save the changes made", "save.svg", "Save", True) }}
+		</div>
+	</section>
+	<form id="settings-form">
+		<div class="settings-container">
+			<h2>Folder Monitoring</h2>
+			<label for="folder-monitor-input">Enable safe library observation</label>
+			<input type="checkbox" id="folder-monitor-input">
+			<p>Disabled by default. Stable additions inside existing managed volumes may receive database associations. Monitoring never moves, renames or writes comic files. Missing files, possible external renames and ambiguous changes retain their existing links for review.</p>
+			<p id="folder-monitor-status" role="status">Loading monitoring health…</p>
+			<button type="button" id="folder-monitor-refresh">Refresh health</button>
+			<button type="button" id="folder-monitor-reconcile">Request reconciliation</button>
+		</div>
+		<div class="settings-container">
+			<h2>File Naming</h2>
+			<p>All naming formats also accept {metadata_provider} (for example, metron) and {provider_id} (the selected source's volume ID, for example, 700). Normal, titleless and Volume As Issue filenames also accept {issue_provider_id} (for example, 701); it is empty for multi-issue files. These external IDs are strings, not local database IDs: use string formatting, not :05d. ComicVine variables still mean genuine ComicVine references and remain empty when absent. Special-version files use volume identity only. Adding these variables does not rename existing files automatically.</p>
+			<table class="fold-table">
+				<tbody>
+					<tr>
+						<th><label for="renaming-input">Rename Downloaded Files</label></th>
+						<td><input type="checkbox" id="renaming-input"></td>
+					</tr>
+					<tr>
+						<th><label for="replace-chars-input">Replace Illegal Characters</label></th>
+						<td>
+							<input type="checkbox" id="replace-chars-input">
+							<p>Instead of removing illegal characters from the filename, replace them smartly with a dash. Depending on the place, spaces might be put before, after or around the dash.</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="volume-folder-naming-input">Volume Folder Naming</label></th>
+						<td>
+							<input type="text" id="volume-folder-naming-input" required spellcheck="false">
+							<p>The naming format for the volume folder.</p>
+							<p>Available variables are: {series_name}, {clean_series_name}, {volume_number}, {comicvine_id}, {year}, {publisher} and {special_version}</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="file-naming-input">File Naming</label></th>
+						<td>
+							<input type="text" id="file-naming-input" required spellcheck="false">
+							<p>The naming format for the file itself.</p>
+							<p>Available variables are: {series_name}, {clean_series_name}, {volume_number}, {comicvine_id}, {year}, {publisher}, {issue_comicvine_id}, {issue_number}, {issue_release_date}, {issue_release_year} and {issue_title}</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="file-naming-empty-input">File Naming For <br>Issues Without Title</label></th>
+						<td>
+							<input type="text" id="file-naming-empty-input" required spellcheck="false">
+							<p>The naming format for the file itself if there is no issue title.</p>
+							<p>Available variables are: {series_name}, {clean_series_name}, {volume_number}, {comicvine_id}, {year}, {publisher}, {issue_comicvine_id}, {issue_number}, {issue_release_date} and {issue_release_year}</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="file-naming-sv-input">File Naming For <br>Special Versions</label></th>
+						<td>
+							<input type="text" id="file-naming-sv-input" required spellcheck="false">
+							<p>The naming format for the file itself (if it's a special version, like a one shot, tpb or hard cover).</p>
+							<p>Available variables are: {series_name}, {clean_series_name}, {volume_number}, {comicvine_id}, {year}, {publisher} and {special_version}</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="file-naming-vai-input">File Naming For <br>"Volume As Issue"</label></th>
+						<td>
+							<input type="text" id="file-naming-vai-input" required spellcheck="false">
+							<p>The naming format for the file itself (if it's a Volume As Issue, so an issue named "Volume N").</p>
+							<p>Available variables are: {series_name}, {clean_series_name}, {volume_number}, {comicvine_id}, {year}, {publisher}, {issue_comicvine_id}, {issue_number}, {issue_release_date}, {issue_release_year} and {issue_title}</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="long-sv-input">Use Long Special Version Labels</label></th>
+						<td>
+							<input type="checkbox" id="long-sv-input">
+							<p>Whether or not to use, for example, 'One-Shot' instead of 'OS'. The term 'TPB' will always stay 'TPB'.</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="issue-padding-input">Issue Padding</label></th>
+						<td>
+							<select id="issue-padding-input">
+								<option value="4">000x</option>
+								<option value="3">00x</option>
+								<option value="2">0x</option>
+								<option value="1">x</option>
+							</select>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="volume-padding-input">Volume Padding</label></th>
+						<td>
+							<select id="volume-padding-input">
+								<option value="3">00x</option>
+								<option value="2">0x</option>
+								<option value="1">x</option>
+							</select>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<h2>Folders</h2>
+			<table class="fold-table">
+				<tbody>
+					<tr>
+						<th><label for="create-vf-input">Create Empty <br>Volume Folders</label></th>
+						<td>
+							<input type="checkbox" id="create-vf-input">
+							<p>Create missing volume folders during file scan.</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="delete-empty-folders-input">Delete Empty Folders</label></th>
+						<td>
+							<input type="checkbox" id="delete-empty-folders-input">
+							<p>Delete empty folders in the volume folder during file scan. If "Create Empty Volume Folders" is disabled and the volume folder is empty, it'll also be deleted.</p>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<h2>File Management</h2>
+			<table class="fold-table">
+				<tbody>
+					<tr>
+						<th><label for="unmonitor-deleted-input">Unmonitor Deleted Issues</label></th>
+						<td>
+							<input type="checkbox" id="unmonitor-deleted-input">
+							<p>Issues deleted from disk are automatically unmonitored.</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="change-file-date-input">Change File Date</label></th>
+						<td>
+							<select id="change-file-date-input">
+								<option value="">Don't Change</option>
+								<option value="issue_release_date">Issue Release Date</option>
+							</select>
+							<p>Set date of file. Save the settings before using the button below.</p>
+							<button type="button" id="mass-edit-file-date" data-identifier="file_date">Apply setting to existing files</button>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="chmod-folder-input">Chmod Folder</label></th>
+						<td>
+							<input type="text" id="chmod-folder-input" spellcheck="false">
+							<p>Permissions applied to the folders and files (without execute bits). Give value in octal (e.g. '755'), or leave empty to disable. Save the settings before using the button below. Only works on Unix systems.</p>
+							<button type="button" id="mass-edit-file-permissions" data-identifier="file_permissions">Apply setting to existing files</button>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="chown-group-input">Chown Group</label></th>
+						<td>
+							<input type="text" id="chown-group-input" spellcheck="false">
+							<p>Ownership group applied to the folders and files. Give group name or ID (e.g. 'media' or '1001'), or leave empty to disable. Save the settings before using the button below. Only works on Unix systems.</p>
+							<button type="button" id="mass-edit-file-ownership" data-identifier="file_ownership">Apply setting to existing files</button>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<h2>Converting</h2>
+			<p>Import-time conversion follows Format Preference. CBR → CBZ changes the container without intentionally recompressing page images. For reviewed existing-library conversion and verification, use <a href="{{ url_base }}/maintenance#archive-maintenance">Archive Maintenance</a>. PDF conversion is not supported.</p>
+			<table class="fold-table">
+				<tbody>
+					<tr>
+						<th><label for="convert-input">Convert/Extract <br>Downloaded Files</label></th>
+						<td>
+							<input type="checkbox" id="convert-input">
+							<p>After a file is downloaded, automatically convert it (if a format preference is set) and/or extract its contents (if it's an archive and the setting below is enabled).</p>
+						</td>
+					</tr>
+					<tr>
+						<th><label for="extract-input">Extract archives <br>containing issues</label></th>
+						<td>
+							<input type="checkbox" id="extract-input">
+							<p>If an archive file has (most often multiple) complete issues inside, then extract the files inside and convert those issue files following the format preference.</p>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<label for="add-convert-input">Format Preference</label>
+			<p>The list below specifies the desired format, in order of preference.</p>
+			<table id="convert-table" class="short-table icon-text-color">
+				<tbody>
+					<tr>
+						<th></th>
+						<td>
+							<select id="add-convert-input"></select>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<h2>Root Folders</h2>
+			<div id="root-folder-container">
+				<table id="root-folder-table" class="icon-text-color">
+					<thead>
+						<tr>
+							<th>Path</th>
+							<th class="number-column">Free Space</th>
+							<th class="number-column">Total Space</th>
+							<th class="action-column">Action</th>
+						</tr>
+					</thead>
+					<tbody id="root-folder-list"></tbody>
+					<tbody>
+						<tr id="add-row" class="hidden">
+							<td>
+								<input type="text" id="folder-input">
+								<p class="error" id="folder-error">*Folder doesn't exist</p>
+								<p class="error" id="folder-in-folder-error">*Folder is in other root folder or download folder</p>
+							</td>
+							<td></td>
+							<td></td>
+							<td><button id="add-folder" type="button">Add</button></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<button type="button" id="toggle-root-folder">Add Root Folder</button>
+		</div>
+	</form>
+</main>
+{% endblock main %}

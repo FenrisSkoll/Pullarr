@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+	<link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/x-icon">
+
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/general.css') }}">
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/page_not_found.css') }}">
+
+	<script>
+		try {
+			if (JSON.parse(localStorage.getItem('kapowarr') || '{}')?.theme === 'dark')
+				document.querySelector(':root').classList.add('dark-mode');
+		} catch { /* Default theme for invalid legacy preferences. */ }
+	</script>
+
+	<title>Page not found · Pullarr</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pullarr.css') }}">
+</head>
+<body class="auth-page">
+	<main><img src="{{url_base}}/static/img/favicon.svg" width="56" height="56" alt="Pullarr"><h1>Page not found</h1><p>This page is unavailable. Return to your library to continue.</p><a href="{{url_base}}/">Return to Library</a></main>
+</body>
+</html>

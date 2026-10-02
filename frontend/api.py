@@ -1,0 +1,2386 @@
+# -*- coding: utf-8 -*-
+
+from asyncio import run
+from datetime import datetime
+from io import BytesIO
+from os import remove
+from os.path import basename, splitext
+from typing import Any, Dict, List, Tuple, Union
+
+from flask import (Blueprint, after_this_request,
+                   current_app, request, send_file)
+
+from backend.base.custom_exceptions import (InvalidDatabaseFile,
+                                            InvalidKeyValue, KeyNotFound)
+from backend.base.definitions import (BlocklistReason, BlocklistReasonID,
+                                      CredentialData, CredentialSource,
+                                      DownloadService, DownloadType, FileMatch,
+                                      IndexerClientField,
+                                      InvalidDatabaseReason, KapowarrException,
+                                      LibraryFilter, LibrarySorting,
+                                      MonitorScheme, SpecialVersion, StartType,
+                                      StatusType, VolumeData)
+from backend.base.files import folder_path
+from backend.base.helpers import hash_credential
+from backend.base.logging import LOGGER, get_log_file_contents
+from backend.features.download_queue import (DownloadHandler,
+                                             delete_download_history,
+                                             get_download_history)
+from backend.features.library_import import (import_library,
+                                             propose_library_import)
+from backend.features.mass_edit import MassEditorActionManager
+from backend.features.search_full import manual_search
+from backend.features.tasks import (TaskHandler, delete_task_history,
+                                    get_task_history)
+from backend.implementations.blocklist import (add_to_blocklist,
+                                               delete_blocklist,
+                                               delete_blocklist_entry,
+                                               get_blocklist,
+                                               get_blocklist_entry)
+from backend.implementations.conversion import preview_mass_convert
+from backend.implementations.converters import ConvertersManager
+from backend.implementations.credentials import Credentials
+from backend.implementations.external_client_manager import ExternalClients
+from backend.implementations.file_matching import (get_file_matching,
+                                                   set_file_matching)
+from backend.implementations.indexer_client_manager import IndexerClients
+from backend.implementations.metadata.persistence import ProviderVolumeIdentity
+from backend.implementations.metadata.registry import (PROVIDERS,
+                                                       get_search_provider)
+from backend.implementations.naming import (generate_volume_folder_name,
+                                            preview_mass_rename)
+from backend.implementations.remote_mapping import RemoteMappings
+from backend.implementations.root_folders import RootFolders
+from backend.implementations.volumes import Library, delete_issue_file
+from backend.internals.db import get_db
+from backend.internals.db_backup_import import (create_database_copy,
+                                                get_backup, get_backups,
+                                                import_db, import_db_backup)
+from backend.internals.db_models import FilesDB
+from backend.internals.server import Server, StartTypeHandlers
+from backend.internals.settings import Settings, get_about_data
+from backend.internals.status import StatusHandlers
+from frontend.metadata import (issue_identity_result,
+                               legacy_volume_search_result, metadata_requested,
+                               qualified_volume_search_result,
+                               require_metadata_access,
+                               volume_identity_results)
+
+api = Blueprint('api', __name__)
+
+
+def return_api(
+    result: Any,
+    error: Union[str, None] = None,
+    code: int = 200
+) -> Tuple[Dict[str, Any], int]:
+    return {'error': error, 'result': result}, code
+
+
+def error_handler(method) -> Any:
+    """Used as decodator. Catches the errors that can occur in the endpoint and returns the correct api error
+    """
+    def wrapper(*args, **kwargs):
+        try:
+            return method(*args, **kwargs)
+
+        except KapowarrException as e:
+            return return_api(**e.api_response)
+
+    wrapper.__name__ = method.__name__
+    return wrapper
+
+
+def extract_key(request, key: str, check_existence: bool = True) -> Any:
+    """Extract and format a value of a parameter from a request
+
+    Args:
+        request (Request): The request from which to get the values.
+        key (str): The key of which to get and format the value.
+        check_existence (bool, optional): Require the key to be given in the request. Defaults to True.
+
+    Raises:
+        KeyNotFound: The key is not found in the request.
+        InvalidKeyValue: The value of a key is invalid.
+        TaskNotFound: The task was not found
+
+    Returns:
+        Any: The formatted value of the key.
+    """
+    value: Any = request.values.get(key)
+    if check_existence and value is None:
+        raise KeyNotFound(key)
+
+    if value is not None:
+        # Check value
+        if key in ('volume_id', 'issue_id'):
+            try:
+                value = int(value)
+                if key == 'volume_id':
+                    Library.get_volume(value)
+                else:
+                    Library.get_issue(value)
+            except (ValueError, TypeError):
+                raise InvalidKeyValue(key, value)
+
+        elif key == 'api_key':
+            if not value or value != Settings().sv.api_key:
+                raise InvalidKeyValue(key, value)
+
+        elif key == 'sort':
+            try:
+                value = LibrarySorting[value.upper()]
+            except KeyError:
+                raise InvalidKeyValue(key, value)
+
+        elif key == 'filter':
+            try:
+                value = LibraryFilter[value.upper()] if value else None
+            except KeyError:
+                raise InvalidKeyValue(key, value)
+
+        elif key in (
+            'root_folder_id', 'root_folder',
+            'offset', 'limit', 'index'
+        ):
+            try:
+                value = int(value)
+            except (ValueError, TypeError):
+                raise InvalidKeyValue(key, value)
+
+        elif key in ('monitor', 'delete_folder', 'rename_files', 'only_english',
+                    'limit_parent_folder', 'force_match'):
+            if value == 'true':
+                value = True
+            elif value == 'false':
+                value = False
+            else:
+                raise InvalidKeyValue(key, value)
+
+        elif key in ('query', 'folder_filter'):
+            if not value:
+                raise InvalidKeyValue(key, value)
+
+    else:
+        # Default value
+        if key == 'sort':
+            value = LibrarySorting.TITLE
+
+        elif key == 'filter':
+            value = None
+
+        elif key == 'monitor':
+            value = True
+
+        elif key == 'delete_folder':
+            value = False
+
+        elif key == 'offset':
+            value = 0
+
+        elif key == 'rename_files':
+            value = False
+
+        elif key == 'limit':
+            value = 20
+
+        elif key == 'only_english':
+            value = True
+
+        elif key == 'limit_parent_folder':
+            value = False
+
+        elif key == 'force_match':
+            value = False
+
+    return value
+
+
+# region Authentication
+def auth(method):
+    """Used as decorator and, if applied to route, restricts the route to authorized users only
+    """
+    def wrapper(*args, **kwargs):
+        if not request.path.endswith('/cover'):
+            LOGGER.debug(f'{request.method} {request.path}')
+
+        try:
+            extract_key(request, 'api_key')
+        except (KeyNotFound, InvalidKeyValue):
+            ip = request.environ.get(
+                'HTTP_X_FORWARDED_FOR',
+                request.remote_addr
+            )
+            LOGGER.warning(f'Unauthorised request from {ip}')
+            return return_api({}, 'ApiKeyInvalid', 401)
+
+        StartTypeHandlers.diffuse_timer(StartType.RESTART_HOSTING_CHANGES)
+        StartTypeHandlers.diffuse_timer(StartType.RESTART_DB_CHANGES)
+
+        result = method(*args, **kwargs)
+
+        if result[1] > 300:
+            LOGGER.debug(
+                f'{request.method} {request.path} {result[1]} {result[0]}')
+
+        return result
+
+    wrapper.__name__ = method.__name__
+    return wrapper
+
+
+@api.route('/auth', methods=['POST'])
+def api_auth():
+    settings = Settings().get_settings()
+
+    ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+
+    if settings.auth_password:
+        username_correct = True
+        if settings.auth_username:
+            given_username = request.get_json().get('username') or ''
+            hashed_username = hash_credential(
+                settings.auth_salt,
+                given_username
+            )
+            username_correct = hashed_username == settings.auth_username
+
+        given_password = request.get_json().get('password') or ''
+        hashed_password = hash_credential(
+            settings.auth_salt,
+            given_password
+        )
+        password_correct = hashed_password == settings.auth_password
+
+        if not (username_correct and password_correct):
+            LOGGER.warning(f'Login attempt failed from {ip}')
+            return return_api({}, 'PasswordInvalid', 401)
+
+    LOGGER.info(f'Login attempt successful from {ip}')
+    return return_api({'api_key': settings.api_key})
+
+
+@api.route('/auth/check', methods=['POST'])
+@error_handler
+@auth
+def api_auth_check():
+    return return_api({})
+
+
+@api.route('/public', methods=['GET'])
+@error_handler
+def api_public():
+    settings = Settings().get_settings()
+
+    if settings.auth_username and settings.auth_password:
+        authentication_method = 2
+    elif settings.auth_password:
+        authentication_method = 1
+    else:
+        authentication_method = 0
+
+    result = {
+        'authentication_method': authentication_method
+    }
+
+    return return_api(result)
+
+
+# region System
+@api.route('/system/about', methods=['GET'])
+@error_handler
+@auth
+def api_about():
+    return return_api(get_about_data())
+
+
+@api.route('/system/status', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_status_checks():
+    if request.method == 'GET':
+        return return_api(StatusHandlers().get_all())
+
+    elif request.method == 'DELETE':
+        status_type = extract_key(
+            request, 'type', check_existence=False
+        )
+        if status_type:
+            StatusHandlers().clear(StatusType(status_type))
+        else:
+            StatusHandlers().clear_all()
+        return return_api({})
+
+
+@api.route('/system/logs', methods=['GET'])
+@error_handler
+@auth
+def api_logs():
+    sio = get_log_file_contents()
+
+    return send_file(
+        BytesIO(sio.getvalue().encode('utf-8')),
+        mimetype="application/octet-stream",
+        download_name=f'Pullarr_log_{datetime.now().strftime("%Y_%m_%d_%H_%M")}.txt'
+    ), 200
+
+
+@api.route('/system/tasks', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_tasks():
+    task_handler = TaskHandler()
+
+    if request.method == 'GET':
+        tasks = task_handler.get_all()
+        return return_api(tasks)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        if not isinstance(data, dict):
+            raise InvalidKeyValue(value=data)
+
+        TaskClass = TaskHandler.get_task_class(data.get('cmd', ''))
+
+        kwargs = {}
+        if TaskClass.action in (
+            'refresh_and_scan',
+            'auto_search', 'auto_search_issue',
+            'mass_rename', 'mass_rename_issue',
+            'mass_convert', 'mass_convert_issue'
+        ):
+            volume_id = data.get('volume_id')
+            if not volume_id or not isinstance(volume_id, int):
+                raise InvalidKeyValue('volume_id', volume_id)
+            kwargs['volume_id'] = volume_id
+
+        if TaskClass.action in (
+            'auto_search_issue',
+            'mass_rename_issue',
+            'mass_convert_issue'
+        ):
+            issue_id = data.get('issue_id')
+            if not issue_id or not isinstance(issue_id, int):
+                raise InvalidKeyValue('issue_id', issue_id)
+            kwargs['issue_id'] = issue_id
+
+        if TaskClass.action in (
+            'mass_rename', 'mass_rename_issue',
+            'mass_convert', 'mass_convert_issue'
+        ):
+            filepath_filter = data.get('filepath_filter')
+            if not (
+                filepath_filter is None
+                or isinstance(filepath_filter, list)
+            ):
+                raise InvalidKeyValue('filepath_filter', filepath_filter)
+            kwargs['filepath_filter'] = filepath_filter or []
+
+        if TaskClass.action == 'update_all':
+            allow_skipping = data.get('allow_skipping', True)
+            if not isinstance(allow_skipping, bool):
+                raise InvalidKeyValue('allow_skipping', allow_skipping)
+            kwargs['allow_skipping'] = allow_skipping
+
+        task_instance = TaskClass(**kwargs)
+        result = task_handler.add(task_instance)
+        return return_api({'id': result}, code=201)
+
+
+@api.route('/system/tasks/history', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_task_history():
+    if request.method == 'GET':
+        offset = extract_key(request, 'offset', False)
+        tasks = get_task_history(offset)
+        return return_api(tasks)
+
+    elif request.method == 'DELETE':
+        delete_task_history()
+        return return_api({})
+
+
+@api.route('/system/tasks/planning', methods=['GET', 'PUT'])
+@error_handler
+@auth
+def api_task_planning():
+    th = TaskHandler()
+
+    if request.method == 'GET':
+        result = th.get_task_planning()
+        return return_api(result)
+
+    elif request.method == 'PUT':
+        data = request.get_json()
+        if not isinstance(data, dict):
+            raise InvalidKeyValue(value=data)
+        if 'task_name' not in data:
+            raise KeyNotFound('task_name')
+        if 'schedule' not in data:
+            raise KeyNotFound('schedule')
+        if not isinstance(data['task_name'], str):
+            raise InvalidKeyValue('task_name', data['task_name'])
+        if not isinstance(data['schedule'], str):
+            raise InvalidKeyValue('schedule', data['schedule'])
+
+        th.update_task_schedule(data["task_name"], data["schedule"])
+
+        result = th.get_task_planning()
+        return return_api(result)
+
+
+@api.route('/system/tasks/<int:task_id>', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_task(task_id: int):
+    task_handler = TaskHandler()
+
+    if request.method == 'GET':
+        task = task_handler.get_one(task_id)
+        return return_api(task)
+
+    elif request.method == 'DELETE':
+        task_handler.remove(task_id)
+        return return_api({})
+
+
+@api.route('/system/power/shutdown', methods=['POST'])
+@error_handler
+@auth
+def api_shutdown():
+    Server().shutdown()
+    return return_api({})
+
+
+@api.route('/system/power/restart', methods=['POST'])
+@error_handler
+@auth
+def api_restart():
+    Server().restart()
+    return return_api({})
+
+
+# region Database Backup
+@api.route('/system/database', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_database():
+    if request.method == "GET":
+        filepath = create_database_copy(folder_path('db'))
+
+        @after_this_request
+        def remove_file(response):
+            remove(filepath)
+            return response
+
+        return send_file(
+            filepath,
+            mimetype="application/x-sqlite3",
+            download_name=basename(filepath)
+        ), 200
+
+    elif request.method == "POST":
+        if "file" not in request.files:
+            raise KeyNotFound("file")
+
+        db_file = request.files["file"]
+        if not (db_file.filename and splitext(db_file.filename)[1] == ".db"):
+            raise InvalidDatabaseFile(
+                db_file.filename or '',
+                InvalidDatabaseReason.NOT_KAPOWARR_DB
+            )
+
+        if "copy_hosting_settings" not in request.form:
+            raise KeyNotFound("copy_hosting_settings")
+
+        if not request.form["copy_hosting_settings"] in ("true", "false"):
+            raise InvalidKeyValue(
+                "copy_hosting_settings",
+                request.form["copy_hosting_settings"]
+            )
+
+        copy_hosting_settings = request.form["copy_hosting_settings"] == "true"
+
+        save_path = folder_path("db", "Kapowarr_upload.db")
+        db_file.save(save_path)
+
+        import_db(save_path, copy_hosting_settings)
+        return return_api({})
+
+
+@api.route('/system/database/backups', methods=['GET'])
+@error_handler
+@auth
+def api_backups():
+    return return_api(get_backups())
+
+
+@api.route('/system/database/backups/<int:b_idx>', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_backup(b_idx: int):
+    if request.method == "GET":
+        filepath = get_backup(b_idx)['filepath']
+        return send_file(
+            filepath,
+            mimetype="application/x-sqlite3",
+            download_name=basename(filepath)
+        ), 200
+
+    elif request.method == "POST":
+        data = request.get_json()
+
+        if not isinstance(data, dict):
+            raise InvalidKeyValue(value=data)
+
+        if 'copy_hosting_settings' not in data:
+            raise KeyNotFound("copy_hosting_settings")
+
+        if not isinstance(data["copy_hosting_settings"], bool):
+            raise InvalidKeyValue(
+                "copy_hosting_settings",
+                data["copy_hosting_settings"]
+            )
+
+        import_db_backup(b_idx, data['copy_hosting_settings'])
+        return return_api({})
+
+
+# region Settings
+@api.route('/foldermonitor', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_folder_monitor():
+    from backend.features.folder_monitor import (monitoring_status,
+                                                 request_reconciliation)
+    from backend.internals.db import DBConnection
+
+    enabled = Settings().sv.folder_monitoring
+    if request.method == 'POST':
+        if not enabled:
+            return return_api({}, 'monitoring_disabled', 409)
+        request_reconciliation(DBConnection.default_file)
+        return return_api({'requested': True}, code=202)
+    result = monitoring_status(DBConnection.default_file)
+    result['enabled'] = enabled
+    runtime = current_app.extensions.get('folder_monitor_runtime')
+    result['runtime'] = {'worker_alive': bool(runtime and runtime.thread.is_alive()),
+                         'error': runtime.error if runtime else None}
+    return return_api(result)
+
+
+@api.route('/settings', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_settings():
+    settings = Settings()
+    if request.method == 'GET':
+        result = settings.get_public_settings().todict()
+        return return_api(result)
+
+    elif request.method == 'PUT':
+        data = request.get_json()
+
+        hosting_changes = any(
+            s in data
+            and data[s] is not None
+            and data[s] != getattr(settings.sv, s)
+            for s in ('host', 'port', 'url_base')
+        )
+        proxy_changes = any(
+            s in data
+            and data[s] != getattr(settings.sv, s)
+            for s in (
+                'proxy_type', 'proxy_host', 'proxy_port',
+                'proxy_username', 'proxy_password', 'proxy_ignored_addresses'
+            )
+        )
+
+        if hosting_changes:
+            settings.backup_hosting_settings()
+
+        settings.update(data, from_public=True)
+
+        if hosting_changes:
+            Server().restart(StartType.RESTART_HOSTING_CHANGES)
+        elif proxy_changes:
+            Server().restart()
+
+        return return_api(settings.get_public_settings().todict())
+
+    elif request.method == 'DELETE':
+        data = request.get_json()
+
+        reset_keys = data.get('reset_keys')
+        if not (
+            isinstance(reset_keys, list)
+            and all((
+                isinstance(k, str)
+                for k in reset_keys
+            ))
+        ):
+            raise InvalidKeyValue('reset_keys', reset_keys)
+
+        hosting_changes = any(
+            s in data
+            and data[s] is not None
+            and data[s] != getattr(settings.sv, s)
+            for s in ('host', 'port', 'url_base')
+        )
+        proxy_changes = any(
+            s in data
+            and data[s] != getattr(settings.sv, s)
+            for s in (
+                'proxy_type', 'proxy_host', 'proxy_port',
+                'proxy_username', 'proxy_password', 'proxy_ignored_addresses'
+            )
+        )
+
+        if hosting_changes:
+            settings.backup_hosting_settings()
+
+        for reset_key in reset_keys:
+            settings.reset(reset_key, from_public=True)
+
+        if hosting_changes:
+            Server().restart(StartType.RESTART_HOSTING_CHANGES)
+        elif proxy_changes:
+            Server().restart()
+
+        return return_api(settings.get_public_settings().todict())
+
+
+@api.route('/settings/api_key', methods=['POST'])
+@error_handler
+@auth
+def api_settings_api_key():
+    settings = Settings()
+    settings.generate_api_key()
+    return return_api(settings.get_public_settings().todict())
+
+
+@api.route('/settings/availableformats', methods=['GET'])
+@error_handler
+@auth
+def api_settings_available_formats():
+    result = list(ConvertersManager.get_available_formats())
+    return return_api(result)
+
+
+@api.route('/rootfolder', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_rootfolder():
+    root_folders = RootFolders()
+
+    if request.method == 'GET':
+        result = [
+            rf.todict()
+            for rf in root_folders.get_all()
+        ]
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data: dict = request.get_json()
+        folder = data.get('folder')
+        if folder is None:
+            raise KeyNotFound('folder')
+        root_folder = root_folders.add(folder).todict()
+        return return_api(root_folder, code=201)
+
+
+@api.route('/rootfolder/<int:id>', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_rootfolder_id(id: int):
+    root_folders = RootFolders()
+
+    if request.method == 'GET':
+        root_folder = root_folders.get_one(id).todict()
+        return return_api(root_folder)
+
+    elif request.method == 'PUT':
+        folder: Union[str, None] = request.get_json().get('folder')
+        if not folder:
+            raise KeyNotFound('folder')
+        root_folders.rename(id, folder)
+        return return_api({})
+
+    elif request.method == 'DELETE':
+        root_folders.delete(id)
+        return return_api({})
+
+
+@api.route('/remotemapping', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_remote_mappings():
+    remote_mappings = RemoteMappings
+
+    if request.method == 'GET':
+        return return_api(remote_mappings.get_all())
+
+    elif request.method == 'POST':
+        data: dict = request.get_json()
+
+        external_download_client_id = data.get('external_download_client_id')
+        remote_path = data.get('remote_path')
+        local_path = data.get('local_path')
+
+        if (
+            not isinstance(external_download_client_id, int)
+            or external_download_client_id < 1
+        ):
+            raise InvalidKeyValue(
+                'external_download_client_id',
+                external_download_client_id
+            )
+
+        if not isinstance(remote_path, str) or not remote_path:
+            raise InvalidKeyValue('remote_path', remote_path)
+
+        if not isinstance(local_path, str) or not local_path:
+            raise InvalidKeyValue('local_path', local_path)
+
+        result = remote_mappings.add(
+            external_download_client_id,
+            remote_path,
+            local_path
+        ).get()
+        return return_api(result, code=201)
+
+
+@api.route('/remotemapping/<int:id>', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_remote_mapping(id: int):
+    remote_mapping = RemoteMappings.get_one(id)
+
+    if request.method == 'GET':
+        return return_api(remote_mapping.get())
+
+    elif request.method == 'PUT':
+        data: dict = request.get_json()
+
+        external_download_client_id = data.get('external_download_client_id')
+        remote_path = data.get('remote_path')
+        local_path = data.get('local_path')
+
+        if not (
+            external_download_client_id is None
+            or (
+                isinstance(external_download_client_id, int)
+                and external_download_client_id >= 1
+            )
+        ):
+            raise InvalidKeyValue(
+                'external_download_client_id',
+                external_download_client_id
+            )
+
+        if not (
+            remote_path is None
+            or (
+                isinstance(remote_path, str)
+                and remote_path
+            )
+        ):
+            raise InvalidKeyValue('remote_path', remote_path)
+
+        if not (
+            local_path is None
+            or (
+                isinstance(local_path, str)
+                and local_path
+            )
+        ):
+            raise InvalidKeyValue('local_path', local_path)
+
+        result = remote_mapping.update(
+            external_download_client_id,
+            remote_path,
+            local_path
+        )
+        return return_api(result, code=201)
+
+    elif request.method == 'DELETE':
+        remote_mapping.delete()
+        return return_api({})
+
+
+# region Indexers
+@api.route('/release-sources', methods=['GET', 'POST'])
+@api.route('/release-sources/<string:source_id>', methods=['PUT', 'DELETE'])
+@error_handler
+@auth
+def api_release_sources(source_id=None):
+    from backend.base.collections import CollectionError
+    from backend.base.release_search import SearchError, SourceFailure
+    from backend.internals.release_sources import (delete_source,
+                                                   load_sources, save_source)
+    from frontend.collections_api import body, query
+
+    try:
+        query(())
+        if request.method == 'GET':
+            return return_api([c.preview() for c in load_sources()])
+        if request.method == 'DELETE':
+            if request.content_length:
+                body(())
+            delete_source(source_id)
+            return return_api({})
+        if request.content_length is None or request.content_length > 65536:
+            raise SourceFailure(SearchError.CONFIGURATION)
+        return return_api(save_source(body(('name','url','api_key','mode','enabled','priority','categories'), exact=False), source_id).preview())
+    except SourceFailure as error:
+        return return_api({'code': error.code.value}, 'ReleaseSourceError', 400)
+    except (CollectionError, ValueError, TypeError, UnicodeError, RecursionError):
+        return return_api({'code': 'configuration'}, 'ReleaseSourceError', 400)
+
+
+@api.route('/release-sources/<string:source_id>/test', methods=['POST'])
+@error_handler
+@auth
+def api_release_source_test(source_id):
+    from backend.base.collections import CollectionError
+    from backend.base.release_search import SearchError, SourceFailure
+    from backend.implementations.release_search import check_source
+    from backend.internals.release_sources import load_sources
+    from frontend.collections_api import body, query
+
+    try:
+        query(())
+        if request.content_length:
+            body(())
+        config = next((c for c in load_sources() if c.key == source_id), None)
+        if config is None:
+            raise SourceFailure(SearchError.CONFIGURATION)
+        return return_api(check_source(config))
+    except SourceFailure as error:
+        return return_api({'code': error.code.value}, 'ReleaseSourceError', 400)
+    except (CollectionError, ValueError, TypeError, UnicodeError, RecursionError):
+        return return_api({'code': 'configuration'}, 'ReleaseSourceError', 400)
+
+
+@api.route('/indexers', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_indexers():
+    if request.method == 'GET':
+        result = IndexerClients.get_all_data()
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data: dict = request.get_json()
+        data = {
+            k: data.get(k)
+            for k in (
+                'download_type', 'client_type',
+                *IndexerClientField._value2member_map_
+            )
+        }
+
+        if not isinstance(data["download_type"], int):
+            raise InvalidKeyValue("download_type", data["download_type"])
+        try:
+            data["download_type"] = DownloadType(data["download_type"])
+        except ValueError:
+            raise InvalidKeyValue("download_type", data["download_type"])
+
+        result = IndexerClients.add(**data).get_indexer_data()
+        return return_api(result, code=201)
+
+
+@api.route('/indexers/options', methods=['GET'])
+@error_handler
+@auth
+def api_indexers_options():
+    result = {
+        dt.value: {
+            ct: {
+                "required_tokens": [rt.value for rt in client.required_tokens],
+                "allow_multiple_instances": client.allow_multiple_instances
+            }
+            for ct, client in v.items()
+        }
+        for dt, v in IndexerClients.clients.items()
+    }
+    return return_api(result)
+
+
+@api.route('/indexers/test', methods=['POST'])
+@error_handler
+@auth
+def api_indexers_test():
+    data: dict = request.get_json()
+    data = {
+        k: data[k]
+        for k in (
+            'download_type', 'client_type',
+            *IndexerClientField._value2member_map_
+        )
+        if k in data
+    }
+
+    if 'download_type' not in data:
+        raise KeyNotFound('download_type')
+    if 'client_type' not in data:
+        raise KeyNotFound('client_type')
+    if 'url' not in data:
+        raise KeyNotFound('url')
+
+    if not isinstance(data["download_type"], int):
+        raise InvalidKeyValue("download_type", data["download_type"])
+    try:
+        data["download_type"] = DownloadType(data["download_type"])
+    except ValueError:
+        raise InvalidKeyValue("download_type", data["download_type"])
+
+    result = IndexerClients.test(**data)
+    return return_api(result)
+
+
+@api.route('/indexers/<int:id>', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_indexer(id: int):
+    if request.method == 'GET':
+        client = IndexerClients.get_client(id)
+        result = client.get_indexer_data()
+        return return_api(result)
+
+    elif request.method == 'PUT':
+        client = IndexerClients.get_client(id)
+        data: dict = request.get_json()
+        data = {
+            k: data.get(k)
+            for k in IndexerClientField._value2member_map_
+        }
+        client.update_indexer(data)
+        return return_api(client.get_indexer_data())
+
+    elif request.method == 'DELETE':
+        IndexerClients.get_client(id).delete_indexer()
+        return return_api({})
+
+
+# region Library Import
+@api.route('/acquisition-intakes', methods=['GET'])
+@api.route('/acquisition-intakes/<string:identifier>', methods=['GET'])
+@error_handler
+@auth
+def api_acquisition_intakes(identifier=None):
+    from backend.internals.acquisition_intakes import IntakeStore
+    from backend.internals.db import DBConnection
+    store = IntakeStore(DBConnection.default_file)
+    try:
+        if identifier:
+            return return_api(store.preview(identifier))
+        try:
+            offset = int(request.args.get('offset', '0'))
+        except ValueError:
+            return return_api({}, 'InvalidOffset', 400)
+        if not 0 <= offset <= 1000000:
+            return return_api({}, 'InvalidOffset', 400)
+        rows = store.db.execute('SELECT id FROM acquisition_intakes ORDER BY created_at DESC,id LIMIT 100 OFFSET ?', (offset,))
+        return return_api([store.preview(row[0]) for row in rows])
+    except KeyError:
+        return return_api({'code': 'not_found'}, error='IntakeNotFound', code=404)
+    finally:
+        store.close()
+
+
+@api.route('/acquisition-intakes/<string:identifier>/retry', methods=['POST'])
+@error_handler
+@auth
+def api_retry_intake(identifier):
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.internals.acquisition_intakes import IntakeStore
+    from backend.internals.db import DBConnection
+    store = IntakeStore(DBConnection.default_file)
+    try:
+        store.retry(identifier)
+        return return_api(store.preview(identifier))
+    except (IntakeFailure, KeyError):
+        return return_api({'code': 'retry_unavailable'}, error='IntakeActionUnavailable', code=409)
+    finally:
+        store.close()
+
+
+@api.route('/acquisition-path-mappings', methods=['GET', 'POST'])
+@api.route('/acquisition-path-mappings/<string:identifier>', methods=['PUT', 'DELETE'])
+@error_handler
+@auth
+def api_intake_mappings(identifier=None):
+    from dataclasses import asdict
+
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.internals.acquisition_intakes import IntakeStore
+    from backend.internals.db import DBConnection
+    from backend.internals.intake_configuration import save_mapping
+    store = IntakeStore(DBConnection.default_file)
+    try:
+        if request.method == 'GET':
+            return return_api([asdict(m) for m in store.mappings()])
+        if request.method == 'DELETE':
+            with store.transaction():
+                store.db.execute('DELETE FROM acquisition_path_mappings WHERE id=?', (identifier,))
+            return return_api({})
+        return return_api(save_mapping(store, request.get_json(silent=True), identifier))
+    except IntakeFailure as error:
+        return return_api({'code': error.code.value}, error='IntakeConfiguration', code=400)
+    finally:
+        store.close()
+
+
+@api.route('/acquisition-intakes/<identifier>/artifacts/<artifact>/job', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_intake_job(identifier, artifact):
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.base.organization_job import OrganizationError
+    from backend.features.acquisition_intake import act_on_linked_job
+    from backend.internals.db import DBConnection
+    data = request.get_json(silent=True) if request.method == 'POST' else {}
+    if not isinstance(data, dict) or set(data) - {'action'}:
+        return return_api({}, 'InvalidJobAction', 400)
+    action = data.get('action') if request.method == 'POST' else 'inspect'
+    if action not in ('inspect', 'reconcile', 'resume'):
+        return return_api({}, 'InvalidJobAction', 400)
+    try:
+        return return_api(act_on_linked_job(DBConnection.default_file, identifier, artifact, action))
+    except (IntakeFailure, OrganizationError, KeyError):
+        return return_api({}, 'OrganizationReviewRequired', 409)
+
+
+@api.route('/libraryimport/preview', methods=['POST'])
+@api.route('/volumes/<int:volume_id>/organization-scan', methods=['POST'])
+@api.route('/local-organization/<identifier>/apply', methods=['POST'])
+@error_handler
+@auth
+def api_local_organization(volume_id=None, identifier=None):
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.base.organization_job import OrganizationError
+    from backend.features.local_organization import (apply_preview,
+                                                     import_preview,
+                                                     scan_preview)
+    from backend.internals.db import DBConnection
+    try:
+        if identifier is not None:
+            result = apply_preview(DBConnection.default_file, identifier)
+        elif volume_id is not None:
+            result = scan_preview(DBConnection.default_file, volume_id)
+        else:
+            rename = request.args.get('rename_files', 'false')
+            if rename not in ('true', 'false'):
+                return return_api({}, 'InvalidRenamePolicy', 400)
+            result = import_preview(DBConnection.default_file, request.get_json(silent=True), rename == 'true')
+        return return_api(result)
+    except (IntakeFailure, OrganizationError):
+        return return_api({}, 'OrganizationReviewRequired', 409)
+
+
+@api.route('/libraryimport', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_library_import():
+    if request.method == 'GET':
+        folder_filter = extract_key(
+            request,
+            'folder_filter',
+            check_existence=False
+        )
+        limit = extract_key(
+            request,
+            'limit',
+            check_existence=False
+        )
+        only_english = extract_key(
+            request,
+            'only_english',
+            check_existence=False
+        )
+        limit_parent_folder = extract_key(
+            request,
+            'limit_parent_folder',
+            check_existence=False
+        )
+        auto_match = request.args.get('auto_match', 'true')
+        if auto_match not in ('true', 'false'):
+            raise InvalidKeyValue('auto_match', auto_match)
+        result = propose_library_import(
+            folder_filter,
+            limit,
+            limit_parent_folder,
+            only_english,
+            auto_match == 'true'
+        )
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        rename_files = extract_key(request, 'rename_files', False)
+
+        # The importer validates both legacy CV and explicit provider forms.
+        import_library(data, rename_files)
+        return return_api({}, code=201)
+
+
+# region Library + Volumes
+@api.route('/settings/metron/test', methods=['POST'])
+@error_handler
+@auth
+def api_metron_test():
+    from backend.base.definitions import Constants
+    from backend.implementations.metadata.metron_client import (MetronClient,
+                                                                MetronError)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        raise MetronError('credentials')
+    token = data.get('metron_api_token', Constants.CREDENTIAL_REPLACEMENT)
+    if token == Constants.CREDENTIAL_REPLACEMENT:
+        token = Settings().sv.metron_api_token
+    if not isinstance(token, str):
+        raise MetronError('credentials')
+    MetronClient(token.strip()).get('series/', {'id': 1})
+    return return_api({'provider': 'metron', 'valid': True})
+
+
+@api.route('/settings/gcd/test', methods=['POST'])
+@error_handler
+@auth
+def api_gcd_test():
+    from backend.base.definitions import Constants
+    from backend.implementations.metadata.gcd_budget import GcdBudget
+    from backend.implementations.metadata.gcd_client import GcdClient, GcdError
+    data = request.get_json() or {}
+    if not isinstance(data, dict) or set(data) - {'username', 'password'}:
+        raise GcdError('credentials')
+    username = data.get('username', Settings().sv.gcd_username)
+    password = data.get('password', '')
+    if password in ('', Constants.CREDENTIAL_REPLACEMENT):
+        password = Settings().sv.gcd_password
+    budget = GcdBudget(bool(username and password))
+    client = GcdClient(username=username, password=password, charge=budget.charge,
+                       preflight=budget.preflight, limited=budget.limited)
+    try:
+        result = client.get('series/', {'page': 1})
+        if not isinstance(result.get('results'), list) or type(result.get('count')) is not int:
+            raise GcdError('malformed')
+    finally:
+        client.close()
+    return return_api({'provider': 'gcd', 'valid': True, 'authenticated': bool(username)})
+
+
+@api.route('/settings/gcd/catalog', methods=['GET'])
+@error_handler
+@auth
+def api_catalog_status():
+    from backend.features.catalog_graph import status
+    return return_api(status())
+
+
+@api.route('/settings/gcd/catalog/<action>', methods=['POST'])
+@error_handler
+@auth
+def api_catalog_action(action):
+    from backend.features.catalog_graph import operate
+    if action not in ('test', 'sync') or set(request.args) - {'api_key'} or request.get_json(silent=True) not in (None, {}):
+        raise InvalidKeyValue('action', 'Use the saved catalog configuration')
+    return return_api(operate(sync=action == 'sync'))
+
+
+@api.route('/issues/<int:id>/ownership', methods=['GET'])
+@api.route('/volumes/<int:id>/ownership', methods=['GET'])
+@error_handler
+@auth
+def api_ownership(id):
+    from backend.internals.issue_ownership import load_ownership
+    if '/volumes/' in request.path:
+        Library.get_volume(id)
+        values = load_ownership(get_db(), volume_id=id)
+    else:
+        Library.get_issue(id).get_volume_id()
+        values = load_ownership(get_db(), issue_ids=(id,))
+    return return_api({'schema': 'issue-ownership/v1', 'issues': list(values.values())})
+
+
+@api.route('/issues/<int:id>/contents', methods=['GET'])
+@error_handler
+@auth
+def api_collected_contents(id):
+    from backend.base.content_claims import ContentConflict
+    from backend.internals.content_claims import contents
+    Library.get_issue(id).get_volume_id()
+    offset = request.args.get('offset', '0')
+    if not offset.isascii() or not offset.isdigit() or len(offset) > 7:
+        raise InvalidKeyValue('offset', 'Expected content page offset')
+    try:
+        return return_api(contents(get_db(), id, offset=int(offset)))
+    except ContentConflict as error:
+        return return_api({'reason': str(error)}, 'ContentConflict', 409)
+
+
+@api.route('/issues/<int:id>/contents/<action>', methods=['POST'])
+@error_handler
+@auth
+def api_content_action(id, action):
+    from backend.base.content_claims import ContentConflict
+    from backend.features.collected_contents import action as operate
+    Library.get_issue(id).get_volume_id()
+    if set(request.args) - {'api_key'}:
+        raise InvalidKeyValue('action', 'Content actions accept exact IDs in the JSON body only')
+    try:
+        return return_api(operate(get_db(), id, action, request.get_json(silent=True)))
+    except ContentConflict as error:
+        return return_api({'reason': str(error)}, 'ContentConflict', 409)
+
+
+@api.route('/content-claims/<id>', methods=['GET'])
+@error_handler
+@auth
+def api_content_claim(id):
+    from backend.base.content_claims import ContentConflict
+    from backend.features.collected_contents import identifier
+    from backend.internals.content_claims import claim_history
+    try:
+        return return_api(claim_history(get_db(), identifier(id)))
+    except ContentConflict as error:
+        return return_api({'reason': str(error)}, 'ContentConflict', 409)
+
+
+@api.route('/content-claims/<id>/<action>', methods=['POST'])
+@api.route('/content-coverage/<id>/<action>', methods=['POST'])
+@error_handler
+@auth
+def api_content_retire(id, action):
+    from backend.base.content_claims import ContentConflict
+    from backend.features.collected_contents import identifier
+    from backend.internals.content_claims import retire, retirement_preview
+    body = request.get_json(silent=True)
+    if (action not in ('retire-preview', 'retire') or not isinstance(body, dict)
+            or set(body) - {'preview_token'} or set(request.args) - {'api_key'}):
+        raise InvalidKeyValue('action', 'Expected explicit retirement action')
+    coverage = '/content-coverage/' in request.path
+    try:
+        identifier(id)
+        if action == 'retire-preview':
+            return return_api(retirement_preview(get_db(), id, coverage=coverage))
+        retire(get_db(), id, identifier(body.get('preview_token')), coverage=coverage)
+        return return_api({'retired': id})
+    except ContentConflict as error:
+        return return_api({'reason': str(error)}, 'ContentConflict', 409)
+
+
+@api.route('/issues/<int:id>/reprints', methods=['GET'])
+@api.route('/issues/<int:id>/catalog-stories', methods=['GET'])
+@error_handler
+@auth
+def api_issue_reprints(id):
+    from backend.internals.reprint_graph import issue_graph, issue_stories
+    Library.get_issue(id).get_volume_id()
+    offset = request.args.get('offset', '0')
+    if not offset.isascii() or not offset.isdigit() or len(offset) > 9:
+        raise InvalidKeyValue('offset', 'Expected graph page offset')
+    loader = issue_stories if request.path.endswith('/catalog-stories') else issue_graph
+    return return_api(loader(get_db(), id, int(offset)))
+
+
+@api.route('/issues/<int:id>/bibliography', methods=['GET'])
+@error_handler
+@auth
+def api_issue_bibliography(id: int):
+    from backend.internals.bibliography import detail
+    issue = Library.get_issue(id)
+    issue.get_volume_id()  # Check local existence; no provider request.
+    selected = request.args.get('set_id')
+    if selected is not None and (not selected.isascii() or not selected.isdigit() or len(selected) > 18):
+        raise InvalidKeyValue('set_id', 'Expected local observation-set ID')
+    try:
+        return return_api(detail(get_db(), id, int(selected) if selected is not None else None))
+    except ValueError:
+        raise InvalidKeyValue('set_id', 'Unknown issue-owned observation set') from None
+
+
+@api.route('/volumes/<int:id>/bibliography', methods=['GET'])
+@error_handler
+@auth
+def api_volume_bibliography(id: int):
+    from backend.internals.bibliography import summaries
+    Library.get_volume(id)
+    return return_api(dict(schema='issue-bibliography-summary/v1',
+                           issues=list(summaries(get_db(), id).values())))
+
+
+@api.route('/settings/gcd/credentials', methods=['DELETE'])
+@error_handler
+@auth
+def api_gcd_clear_credentials():
+    # Explicit removal is distinct from a blank password edit (preserve).
+    get_db().execute("UPDATE config SET value='' WHERE key IN ('gcd_username','gcd_password')")
+    Settings().clear_cache()
+    return return_api({'cleared': True})
+
+
+@api.route('/volumes/search', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_volumes_search():
+    if request.method == 'GET':
+        query = extract_key(request, 'query')
+        provider = request.args.get('provider')
+        if provider == 'all':
+            from backend.features.metadata_search import (aggregate_response,
+                                                          aggregated_search)
+            year = request.args.get('year')
+            if year is not None:
+                if not year.isdecimal() or not 1 <= int(year) <= 9999:
+                    raise InvalidKeyValue('year', 'Expected year 1–9999')
+                year = int(year)
+            return return_api(aggregate_response(query, run(aggregated_search(query, year)),
+                qualified_volume_search_result, year))
+        if provider is not None and provider not in PROVIDERS:
+            raise InvalidKeyValue('provider', provider)
+        # The no-provider legacy route retains its exact CV shape and call.
+        try:
+            instance = get_search_provider() if provider is None else get_search_provider(provider)
+        except TypeError:
+            from backend.implementations.metadata.errors import \
+                MetadataProviderError
+            raise MetadataProviderError(provider or 'comicvine', 'unsupported_capability') from None
+        search_results = run(instance.search_volumes(query))
+        serialize = legacy_volume_search_result if provider is None else qualified_volume_search_result
+        return return_api([
+            serialize(result) for result in search_results
+        ])
+
+    elif request.method == 'POST':
+        data: Dict[str, Any] = request.get_json()
+        for key in (
+            'comicvine_id',
+            'title', 'year', 'volume_number',
+            'publisher'
+        ):
+            if key not in data:
+                raise KeyNotFound(key)
+
+        vd = VolumeData(
+            id=0,
+            comicvine_id=data['comicvine_id'],
+            title=data['title'],
+            alt_title=data['title'],
+            year=data['year'],
+            publisher=data['publisher'],
+            volume_number=data['volume_number'],
+            description="",
+            site_url="",
+            monitored=True,
+            monitor_new_issues=True,
+            root_folder=1,
+            folder="",
+            custom_folder=False,
+            special_version=SpecialVersion(data.get('special_version')),
+            special_version_locked=False,
+            last_cv_fetch=0
+        )
+
+        # This is an unpersisted search-result preview, not a runtime DB lookup.
+        # Legacy preview requests describe ComicVine only; explicit sources do
+        # not borrow the optional CV cross-reference as their selected identity.
+        from backend.internals.provider_identity import (
+            NamingIdentityContext, VolumeMetadataIdentity)
+        preview_identity = None
+        if 'provider' in data or 'provider_id' in data:
+            provider, provider_id = data.get('provider'), data.get('provider_id')
+            if not isinstance(provider, str) or provider not in PROVIDERS:
+                raise InvalidKeyValue('provider', provider)
+            if not isinstance(provider_id, str) or not provider_id:
+                raise InvalidKeyValue('provider_id', provider_id)
+            preview_identity = NamingIdentityContext(
+                VolumeMetadataIdentity(0, provider, provider_id, None), {})
+        elif data['comicvine_id'] is not None:
+            preview_identity = NamingIdentityContext(
+                VolumeMetadataIdentity(0, 'comicvine', str(data['comicvine_id']), None), {})
+        folder = generate_volume_folder_name(vd, preview_identity)
+        return return_api({'folder': folder})
+
+
+@api.route('/volumes', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_volumes():
+    if request.method == 'GET':
+        query = extract_key(request, 'query', False)
+        sort = extract_key(request, 'sort', False)
+        filter = extract_key(request, 'filter', False)
+        if 'limit' in request.args or 'offset' in request.args:
+            from frontend.metadata import rich_issues_requested
+            for key in request.args:
+                if key not in ('api_key', 'sort', 'filter', 'query', 'limit', 'offset', 'metadata', 'issue_facts'):
+                    raise InvalidKeyValue(key, 'Unknown library page query key')
+                if len(request.args.getlist(key)) != 1:
+                    raise InvalidKeyValue(key, 'Duplicate query key')
+            limit = extract_key(request, 'limit', False)
+            rich_issues_requested()
+            offset = extract_key(request, 'offset', False)
+            if not 1 <= limit <= 100 or not 0 <= offset <= 1000000:
+                raise InvalidKeyValue('limit', 'Library page: limit 1–100, offset 0–1000000')
+            if query and len(query) > 500:
+                raise InvalidKeyValue('query', 'Library query exceeds 500 characters')
+            volumes = Library.get_public_volumes(sort, filter, limit=limit, offset=offset, query=query or '')
+        elif query:
+            volumes = Library.search(query, sort, filter)
+        else:
+            volumes = Library.get_public_volumes(sort, filter)
+
+        return return_api(volume_identity_results(volumes, metadata_requested()))
+
+    elif request.method == 'POST':
+        data: dict = request.get_json()
+
+        comicvine_id = data.get('comicvine_id')
+        qualified_request = 'provider' in data or 'provider_id' in data
+        qualified_response = metadata_requested() or qualified_request
+        identity = None
+        if qualified_request:
+            provider, provider_id = data.get('provider'), data.get('provider_id')
+            if not isinstance(provider, str) or provider not in PROVIDERS:
+                raise InvalidKeyValue('provider', provider)
+            if not isinstance(provider_id, str) or not provider_id:
+                raise InvalidKeyValue('provider_id', provider_id)
+            if comicvine_id is not None and (provider != 'comicvine' or str(comicvine_id) != provider_id):
+                raise InvalidKeyValue('comicvine_id', comicvine_id)
+            identity = ProviderVolumeIdentity(provider, provider_id)
+        elif comicvine_id is None:
+            raise KeyNotFound('comicvine_id')
+
+        root_folder_id = data.get('root_folder_id')
+        if root_folder_id is None:
+            raise KeyNotFound('root_folder_id')
+
+        monitor = data.get('monitor', True)
+        if not isinstance(monitor, bool):
+            raise InvalidKeyValue('monitor', monitor)
+
+        monitoring_scheme = data.get('monitoring_scheme') or "all"
+        try:
+            monitoring_scheme = MonitorScheme(monitoring_scheme)
+        except ValueError:
+            raise InvalidKeyValue("monitoring_scheme", monitoring_scheme)
+
+        monitor_new_issues = data.get('monitor_new_issues', True)
+        if not isinstance(monitor_new_issues, bool):
+            raise InvalidKeyValue('monitor_new_issues', monitor_new_issues)
+
+        volume_folder = data.get('volume_folder') or None
+
+        auto_search = data.get('auto_search', True)
+        if not isinstance(auto_search, bool):
+            raise InvalidKeyValue('auto_search', auto_search)
+
+        special_version = data.get('special_version') or None
+        if special_version == 'auto':
+            sv = None
+        else:
+            try:
+                sv = SpecialVersion(special_version)
+            except ValueError:
+                raise InvalidKeyValue('special_version', special_version)
+
+        add = Library.add_metadata if qualified_request else Library.add
+        volume_id = add(
+            identity if qualified_request else comicvine_id,
+            root_folder_id,
+            monitor,
+            monitoring_scheme,
+            monitor_new_issues,
+            volume_folder,
+            sv,
+            auto_search,
+            **({'legacy_default_classification': True} if special_version is None else {})
+        )
+        from frontend.metadata import rich_issues_requested
+        volume_info = Library.get_volume(volume_id).get_public_data(rich_issues=rich_issues_requested())
+        return return_api(volume_identity_results([volume_info], qualified_response)[0], code=201)
+
+
+@api.route('/volumes/stats', methods=['GET'])
+@error_handler
+@auth
+def api_volumes_stats():
+    result = Library.get_stats()
+    return return_api(result)
+
+
+@api.route('/volumes/<int:id>/classification', methods=['GET'])
+@error_handler
+@auth
+def api_volume_classification(id: int):
+    from backend.features.classification_details import classification_details
+    evaluate = request.args.get('evaluate', 'false')
+    if evaluate not in ('true', 'false'):
+        raise InvalidKeyValue('evaluate', evaluate)
+    return return_api(classification_details(id, evaluate == 'true'))
+
+
+@api.route('/volumes/<int:id>', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_volume(id: int):
+    volume = Library.get_volume(id)
+    qualified = metadata_requested()
+    require_metadata_access(id, qualified)
+
+    if request.method == 'GET':
+        from frontend.metadata import rich_issues_requested
+        volume_info = volume.get_public_data(rich_issues=rich_issues_requested())
+        return return_api(volume_identity_results([volume_info], qualified)[0])
+
+    elif request.method == 'PUT':
+        edit_info: Dict[str, Any] = request.get_json()
+
+        if 'root_folder' in edit_info:
+            volume.change_root_folder(edit_info['root_folder'])
+
+        if 'volume_folder' in edit_info:
+            volume.change_volume_folder(edit_info['volume_folder'])
+
+        if 'monitoring_scheme' in edit_info:
+            try:
+                monitoring_scheme = MonitorScheme(
+                    edit_info['monitoring_scheme']
+                )
+
+            except ValueError:
+                raise InvalidKeyValue(
+                    'monitoring_scheme',
+                    edit_info['monitoring_scheme']
+                )
+
+            volume.apply_monitor_scheme(monitoring_scheme)
+
+        volume.update({
+            k: v
+            for k, v in edit_info.items()
+            if k not in ('root_folder', 'volume_folder', 'monitoring_scheme')
+        })
+        return return_api(None)
+
+    elif request.method == 'DELETE':
+        delete_folder = extract_key(request, 'delete_folder')
+        volume.delete(delete_folder=delete_folder)
+        return return_api({})
+
+
+@api.route('/volumes/<int:id>/cover', methods=['GET'])
+@error_handler
+@auth
+def api_volume_cover(id: int):
+    cover = Library.get_volume(id).get_cover()
+    return send_file(
+        cover,
+        mimetype='image/jpeg'
+    ), 200
+
+
+@api.route('/issues/<int:id>', methods=['GET', 'PUT'])
+@error_handler
+@auth
+def api_issues(id: int):
+    issue = Library.get_issue(id)
+    qualified = metadata_requested()
+    from frontend.metadata import rich_issues_requested
+    if rich_issues_requested():
+        from backend.implementations.issue_transport import rich_issue_rows
+        parent = get_db().execute('SELECT volume_id FROM issues WHERE id=?', (id,)).fetchone()[0]
+        require_metadata_access(parent, qualified)
+        if request.method == 'PUT':
+            data = request.get_json()
+            monitored = data.get('monitored')
+            if type(monitored) is not bool:
+                raise InvalidKeyValue('monitored', monitored)
+            issue.update({'monitored': monitored})
+        rows = rich_issue_rows(parent)
+        volume = Library.get_volume(parent).get_data()
+        result = volume_identity_results([dict(id=parent, title=volume.title,
+            special_version=volume.special_version.value, issue_count=len(rows),
+            issues=[r for r in rows if r['id'] == id])], True)[0]['issues'][0]
+        return return_api(result)
+    require_metadata_access(issue.get_data().volume_id, qualified)
+
+    if request.method == 'GET':
+        result = issue.get_data()
+        return return_api(issue_identity_result(result, qualified))
+
+    elif request.method == 'PUT':
+        edit_info: dict = request.get_json()
+        monitored = edit_info.get('monitored')
+        if monitored is not None:
+            issue.update({'monitored': monitored})
+
+        result = issue.get_data()
+        return return_api(issue_identity_result(result, qualified))
+
+
+# region Manual File Match
+@api.route('/volumes/<int:id>/manualmatch', methods=['GET', 'PUT'])
+@error_handler
+@auth
+def api_manual_match(id: int):
+    Library.get_volume(id)
+
+    if request.method == 'GET':
+        result = get_file_matching(id)
+        return return_api(result)
+
+    elif request.method == 'PUT':
+        file_matching_changes = request.get_json()
+        if not isinstance(file_matching_changes, list):
+            raise InvalidKeyValue('body', file_matching_changes)
+
+        entry_types = FileMatch.__annotations__
+        for entry in file_matching_changes:
+            if not isinstance(entry, dict):
+                raise InvalidKeyValue('body', file_matching_changes)
+            if not all(
+                key in entry_types
+                and (
+                    (
+                        isinstance(value, list)
+                        and all(isinstance(i_id, int) for i_id in value)
+                    )
+                    if entry_types[key] == List[int] else
+                    isinstance(value, entry_types[key])
+                )
+                for key, value in entry.items()
+            ):
+                raise InvalidKeyValue('body', file_matching_changes)
+
+        set_file_matching(id, file_matching_changes)
+
+        return return_api({})
+
+
+# region Renaming
+@api.route('/volumes/<int:id>/rename', methods=['GET'])
+@error_handler
+@auth
+def api_rename(id: int):
+    Library.get_volume(id)
+    all_namings = preview_mass_rename(id)[0]
+    only_renamings = {
+        before: after
+        for before, after in all_namings.items()
+        if before != after
+    }
+    return return_api(only_renamings)
+
+
+@api.route('/issues/<int:id>/rename', methods=['GET'])
+@error_handler
+@auth
+def api_rename_issue(id: int):
+    volume_id = Library.get_issue(id).get_data().volume_id
+    all_namings = preview_mass_rename(volume_id, id)[0]
+    only_renamings = {
+        before: after
+        for before, after in all_namings.items()
+        if before != after
+    }
+    return return_api(only_renamings)
+
+
+# region File Conversion
+@api.route('/volumes/<int:id>/convert', methods=['GET'])
+@error_handler
+@auth
+def api_convert(id: int):
+    Library.get_volume(id)
+    result = preview_mass_convert(id)
+    return return_api(result)
+
+
+@api.route('/issues/<int:id>/convert', methods=['GET'])
+@error_handler
+@auth
+def api_convert_issue(id: int):
+    volume_id = Library.get_issue(id).get_data().volume_id
+    result = preview_mass_convert(volume_id, id)
+    return return_api(result)
+
+
+# region Search + Download
+@api.route('/volumes/<int:id>/release-search', methods=['POST'])
+@error_handler
+@auth
+def api_volume_release_search(id: int):
+    Library.get_volume(id)
+    return _unified_search(id)
+
+
+@api.route('/issues/<int:id>/release-search', methods=['POST'])
+@error_handler
+@auth
+def api_issue_release_search(id: int):
+    volume_id = Library.get_issue(id).get_volume_id()
+    return _unified_search(volume_id, id)
+
+
+def _unified_search(volume_id, issue_id=None):
+    from backend.base.download_job import DownloadFailure
+    from backend.base.organization_job import OrganizationError
+    from backend.base.release_search import SourceFailure
+    from backend.features.wanted_automation import WantedAutomation
+    from backend.implementations.direct_download_source import DDLError
+    from backend.implementations.organization_filesystem import execution_gate
+    from backend.internals.db import DBConnection
+    from backend.internals.wanted import WantedConflict
+
+    service = WantedAutomation(DBConnection.default_file)
+    try:
+        with execution_gate(service.store.path + '.wanted'):
+            return return_api(service.search_manual(volume_id, issue_id))
+    except (DDLError, DownloadFailure, SourceFailure, WantedConflict, OrganizationError):
+        return return_api({'reason': 'search_unavailable'}, error='ReleaseSearchFailure', code=409)
+    finally:
+        service.close()
+
+
+@api.route('/release-search/<search_id>/<selection_id>', methods=['POST'])
+@error_handler
+@auth
+def api_select_release(search_id, selection_id):
+    from backend.base.download_job import DownloadFailure
+    from backend.base.organization_job import OrganizationError
+    from backend.base.release_search import SourceFailure
+    from backend.features.wanted_automation import WantedAutomation
+    from backend.implementations.direct_download_source import DDLError
+    from backend.implementations.organization_filesystem import execution_gate
+    from backend.internals.db import DBConnection
+    from backend.internals.wanted import WantedConflict
+
+    data = request.get_json(silent=True)
+    if (not isinstance(data, dict) or set(data) - {'action', 'force', 'offering_id'}
+            or data.get('action') not in ('download', 'block', 'unblock') or type(data.get('force', False)) is not bool
+            or ('offering_id' in data and not isinstance(data['offering_id'], str))):
+        return return_api({'reason': 'invalid_action'}, error='ReleaseSelectionFailure', code=400)
+    service = WantedAutomation(DBConnection.default_file)
+    try:
+        with execution_gate(service.store.path + '.wanted'):
+            session = service.searches.lookup(search_id, selection_id)
+            evaluation = session.selections[selection_id]
+            if data['action'] in ('block', 'unblock'):
+                service.searches.revalidate(session)
+                candidate = evaluation.candidate
+                if candidate.candidate_id in session.ddl_ids:
+                    if data['action'] == 'block':
+                        session.ddl.block(session.ddl_search, session.ddl_ids[candidate.candidate_id])
+                    else:
+                        selected = session.ddl.sessions[session.ddl_search].selections[session.ddl_ids[candidate.candidate_id]]
+                        get_db().execute('DELETE FROM blocklist WHERE COALESCE(download_link,web_link)=?', (selected.raw['link'],))
+                    # Legacy blocklist uses the request connection; release its
+                    # write transaction before recording source-neutral policy.
+                    get_db().connection.commit()
+                with service.store.transaction():
+                    if data['action'] == 'block':
+                        service.store.db.execute('INSERT INTO wanted_blocks VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING',
+                            (candidate.source.kind.value, candidate.source.key, candidate.candidate_id, 'operator', service.store.clock()))
+                    else:
+                        service.store.db.execute('DELETE FROM wanted_blocks WHERE source_kind=? AND source_key=? AND candidate_id=?',
+                            (candidate.source.kind.value, candidate.source.key, candidate.candidate_id))
+                return return_api({'state': 'blocked' if data['action'] == 'block' else 'unblocked'})
+            return return_api(service.grab(session, evaluation, automatic=False,
+                force=data.get('force', False), offering_id=data.get('offering_id')))
+    except (DDLError, DownloadFailure, SourceFailure, WantedConflict, OrganizationError):
+        return return_api({'reason': 'selection_stopped_research_or_inspect_wanted'}, error='ReleaseSelectionFailure', code=409)
+    finally:
+        service.close()
+
+
+@api.route('/direct-download-search/<search_id>/<selection_id>', methods=['POST'])
+@error_handler
+@auth
+def api_select_direct_download(search_id: str, selection_id: str):
+    from backend.features.direct_downloads import MANUAL_DDL
+    from backend.implementations.direct_download_source import DDLError
+
+    data = request.get_json(silent=True)
+    if (not isinstance(data, dict) or set(data) - {'action', 'force', 'offering_id'}
+            or data.get('action') not in ('download', 'block')
+            or type(data.get('force', False)) is not bool
+            or ('offering_id' in data and not isinstance(data['offering_id'], str))):
+        # Do not echo client payloads, which may contain arbitrary URLs/secrets.
+        return return_api({'reason': 'invalid_action'}, error='DirectDownloadFailure', code=400)
+    try:
+        if data['action'] == 'block':
+            return return_api(MANUAL_DDL.block(search_id, selection_id))
+        return return_api(MANUAL_DDL.select(search_id, selection_id,
+            force=data.get('force', False), offering_id=data.get('offering_id')))
+    except DDLError as error:
+        return return_api({'reason': error.code}, error='DirectDownloadFailure', code=409)
+
+
+@api.route('/volumes/<int:id>/manualsearch', methods=['GET'])
+@error_handler
+@auth
+def api_volume_manual_search(id: int):
+    Library.get_volume(id)
+    result = manual_search(id)
+    return return_api(result)
+
+
+@api.route('/volumes/<int:id>/download', methods=['POST'])
+@error_handler
+@auth
+def api_volume_download(id: int):
+    Library.get_volume(id)
+    data = request.get_json()
+
+    if not isinstance(data, dict):
+        raise InvalidKeyValue("body", data)
+
+    if "link" not in data:
+        raise KeyNotFound("link")
+    if not isinstance(data["link"], str):
+        raise InvalidKeyValue("link", data["link"])
+
+    if "force_match" not in data:
+        raise KeyNotFound("force_match")
+    if not isinstance(data["force_match"], bool):
+        raise InvalidKeyValue("force_match", data["force_match"])
+
+    if "indexer_id" not in data:
+        raise KeyNotFound("indexer_id")
+    if not isinstance(data["indexer_id"], int):
+        raise InvalidKeyValue("indexer_id", data["indexer_id"])
+
+    result = DownloadHandler().add(
+        data["link"],
+        indexer_id=data["indexer_id"],
+        volume_id=id,
+        issue_id=None,
+        force_match=data["force_match"]
+    )
+    return return_api(result, code=201)
+
+
+@api.route('/issues/<int:id>/manualsearch', methods=['GET'])
+@error_handler
+@auth
+def api_issue_manual_search(id: int):
+    volume_id = Library.get_issue(id).get_data().volume_id
+    result = manual_search(
+        volume_id,
+        id
+    )
+    return return_api(result)
+
+
+@api.route('/issues/<int:id>/download', methods=['POST'])
+@error_handler
+@auth
+def api_issue_download(id: int):
+    volume_id = Library.get_issue(id).get_data().volume_id
+    data = request.get_json()
+
+    if not isinstance(data, dict):
+        raise InvalidKeyValue("body", data)
+
+    if "link" not in data:
+        raise KeyNotFound("link")
+    if not isinstance(data["link"], str):
+        raise InvalidKeyValue("link", data["link"])
+
+    if "force_match" not in data:
+        raise KeyNotFound("force_match")
+    if not isinstance(data["force_match"], bool):
+        raise InvalidKeyValue("force_match", data["force_match"])
+
+    if "indexer_id" not in data:
+        raise KeyNotFound("indexer_id")
+    if not isinstance(data["indexer_id"], int):
+        raise InvalidKeyValue("indexer_id", data["indexer_id"])
+
+    result = DownloadHandler().add(
+        data["link"],
+        indexer_id=data["indexer_id"],
+        volume_id=volume_id,
+        issue_id=id,
+        force_match=data["force_match"]
+    )
+    return return_api(result, code=201)
+
+
+@api.route('/activity/queue', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_downloads():
+    download_handler = DownloadHandler()
+
+    if request.method == 'GET':
+        result = download_handler.get_all()
+        return return_api(result)
+
+    elif request.method == 'DELETE':
+        download_handler.remove_all()
+        return return_api({})
+
+
+@api.route(
+    '/activity/queue/<int:download_id>',
+    methods=['GET', 'PUT', 'DELETE']
+)
+@error_handler
+@auth
+def api_delete_download(download_id: int):
+    download_handler = DownloadHandler()
+
+    if request.method == 'GET':
+        result = download_handler.get_one(download_id).as_dict()
+        return return_api(result)
+
+    elif request.method == 'PUT':
+        index: int = extract_key(request, 'index')
+        download_handler.set_queue_location(download_id, index)
+        return return_api({})
+
+    elif request.method == 'DELETE':
+        data: Dict[str, Any] = request.get_json(silent=True) or {}
+        blocklist = data.get('blocklist', False)
+        if not isinstance(blocklist, bool):
+            raise InvalidKeyValue('blocklist', blocklist)
+
+        download_handler.remove(download_id, blocklist)
+        return return_api({})
+
+
+@api.route('/activity/history', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_download_history():
+    if request.method == 'GET':
+        volume_id: int = extract_key(request, 'volume_id', False)
+        issue_id: int = extract_key(request, 'issue_id', False)
+        offset: int = extract_key(request, 'offset', False)
+        result = get_download_history(
+            volume_id, issue_id,
+            offset
+        )
+        return return_api(result)
+
+    elif request.method == 'DELETE':
+        delete_download_history()
+        return return_api({})
+
+
+@api.route('/activity/folder', methods=['DELETE'])
+@error_handler
+@auth
+def api_empty_download_folder():
+    DownloadHandler().empty_download_folder()
+    return return_api({})
+
+
+# region Blocklist
+@api.route('/blocklist', methods=['GET', 'POST', 'DELETE'])
+@error_handler
+@auth
+def api_blocklist():
+    if request.method == 'GET':
+        offset = extract_key(request, 'offset', False)
+
+        blocklist = get_blocklist(offset)
+        result = [
+            b.todict()
+            for b in blocklist
+        ]
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        if not isinstance(data, dict):
+            raise InvalidKeyValue(value=data)
+
+        web_link = data.get('web_link')
+        if not (web_link and isinstance(web_link, str)):
+            raise InvalidKeyValue('web_link', web_link)
+
+        web_title = data.get('web_title')
+        if not (
+            web_title is None
+            or web_title
+                and isinstance(web_title, str)
+        ):
+            raise InvalidKeyValue('web_title', web_title)
+
+        web_sub_title = data.get('web_sub_title')
+        if not (
+            web_sub_title is None
+            or web_sub_title
+                and isinstance(web_sub_title, str)
+        ):
+            raise InvalidKeyValue('web_sub_title', web_sub_title)
+
+        download_link = data.get('download_link')
+        if not (
+            download_link is None
+            or download_link
+                and isinstance(download_link, str)
+        ):
+            raise InvalidKeyValue('download_link', download_link)
+
+        download_service = data.get('download_service')
+        if not (
+            download_service is None
+            or download_service
+                and isinstance(download_service, str)
+        ):
+            raise InvalidKeyValue('download_service', download_service)
+
+        if not data.get('download_service'):
+            download_service = None
+        else:
+            try:
+                download_service = DownloadService(data['download_service'])
+            except ValueError:
+                raise InvalidKeyValue(
+                    'download_service', data['download_service']
+                )
+
+        volume_id = data.get('volume_id')
+        if not (volume_id and isinstance(volume_id, int)):
+            raise InvalidKeyValue('volume_id', volume_id)
+
+        issue_id = data.get('issue_id')
+        if not (
+            issue_id is None
+            or issue_id
+                and isinstance(issue_id, int)
+        ):
+            raise InvalidKeyValue('issue_id', issue_id)
+
+        try:
+            reason = BlocklistReason[
+                BlocklistReasonID(data.get('reason_id')).name
+            ]
+
+        except ValueError:
+            raise InvalidKeyValue('reason_id', data.get('reason_id'))
+
+        result = add_to_blocklist(
+            web_link=web_link,
+            web_title=web_title,
+            web_sub_title=web_sub_title,
+            download_link=download_link,
+            download_service=download_service,
+            volume_id=volume_id,
+            issue_id=issue_id,
+            reason=reason
+        ).todict()
+        return return_api(result, code=201)
+
+    elif request.method == 'DELETE':
+        delete_blocklist()
+        return return_api({})
+
+
+@api.route('/blocklist/<int:id>', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_blocklist_entry(id: int):
+    if request.method == 'GET':
+        result = get_blocklist_entry(id).todict()
+        return return_api(result)
+
+    elif request.method == 'DELETE':
+        delete_blocklist_entry(id)
+        return return_api({})
+
+
+# region Credentials
+@api.route('/credentials', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_credentials():
+    cred = Credentials()
+
+    if request.method == 'GET':
+        result = [
+            c.todict(hide_password=True)
+            for c in cred.get_all()
+        ]
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        if not isinstance(data, dict):
+            raise InvalidKeyValue(value=data)
+
+        if 'source' not in data:
+            raise KeyNotFound('source')
+
+        try:
+            source = CredentialSource(
+                data["source"]
+            )
+
+        except ValueError:
+            raise InvalidKeyValue('source', data["source"])
+
+        result = cred.add(CredentialData(
+            id=-1,
+            source=source,
+            username=data.get("username"),
+            email=data.get("email"),
+            password=data.get("password"),
+            api_key=data.get("api_key")
+        ))
+        return return_api(result.todict(hide_password=True), code=201)
+
+
+@api.route('/credentials/<int:id>', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_credential(id: int):
+    cred = Credentials()
+    if request.method == 'GET':
+        result = cred.get_one(id).todict(hide_password=True)
+        return return_api(result)
+
+    elif request.method == 'DELETE':
+        cred.delete(id)
+        return return_api({})
+
+
+# region External Clients
+@api.route('/externalclients', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_external_clients():
+    if request.method == 'GET':
+        result = ExternalClients.get_clients()
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data: dict = request.get_json()
+        data = {
+            k: data.get(k)
+            for k in (
+                'download_type', 'client_type',
+                'title', 'enabled',
+                'base_url',
+                'username', 'password', 'api_token'
+            )
+        }
+
+        if not isinstance(data["download_type"], int):
+            raise InvalidKeyValue("download_type", data["download_type"])
+        try:
+            data["download_type"] = DownloadType(data["download_type"])
+        except ValueError:
+            raise InvalidKeyValue("download_type", data["download_type"])
+
+        result = ExternalClients.add(**data).get_client_data()
+        return return_api(result, code=201)
+
+
+@api.route('/externalclients/options', methods=['GET'])
+@error_handler
+@auth
+def api_external_clients_keys():
+    result = {
+        dt.value: {
+            ct: [rt.value for rt in client.required_tokens]
+            for ct, client in v.items()
+        }
+        for dt, v in ExternalClients.clients.items()
+    }
+    return return_api(result)
+
+
+@api.route('/externalclients/test', methods=['POST'])
+@error_handler
+@auth
+def api_external_clients_test():
+    data: dict = request.get_json()
+    data = {
+        k: data.get(k)
+        for k in (
+            'download_type', 'client_type', 'base_url',
+            'username', 'password', 'api_token'
+        )
+    }
+
+    if not isinstance(data["download_type"], int):
+        raise InvalidKeyValue("download_type", data["download_type"])
+    try:
+        data["download_type"] = DownloadType(data["download_type"])
+    except ValueError:
+        raise InvalidKeyValue("download_type", data["download_type"])
+
+    result = ExternalClients.test(**data)
+    return return_api(result)
+
+
+@api.route('/externalclients/<int:id>', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_external_client(id: int):
+    if request.method == 'GET':
+        client = ExternalClients.get_client(id)
+        result = client.get_client_data()
+        return return_api(result)
+
+    elif request.method == 'PUT':
+        client = ExternalClients.get_client(id)
+        data: dict = request.get_json()
+        data = {
+            k: data.get(k)
+            for k in (
+                'title', 'enabled', 'base_url',
+                'username', 'password', 'api_token'
+            )
+        }
+        client.update_client(data)
+        return return_api(client.get_client_data())
+
+    elif request.method == 'DELETE':
+        ExternalClients.delete_client(id)
+        return return_api({})
+
+
+@api.route('/sab-clients', methods=['GET', 'POST'])
+@api.route('/sab-clients/<client_id>', methods=['PUT', 'DELETE'])
+@error_handler
+@auth
+def api_sab_clients(client_id=None):
+    from backend.base.download_job import DownloadFailure
+    from backend.internals.sab_clients import (delete_sab_client,
+                                               load_sab_clients,
+                                               save_sab_client)
+    try:
+        if request.method == 'GET':
+            return return_api([c.preview() for c in load_sab_clients()])
+        if request.method == 'DELETE':
+            delete_sab_client(client_id)
+            return return_api({})
+        if not request.content_length or request.content_length > 65536:
+            return return_api({'code': 'configuration'}, error='sab_configuration', code=400)
+        config = save_sab_client(request.get_json(), client_id)
+        return return_api(config.preview(), code=201 if request.method == 'POST' else 200)
+    except DownloadFailure as exc:
+        return return_api({'code': exc.code.value}, error='sab_configuration', code=400)
+
+
+@api.route('/sab-clients/<client_id>/test', methods=['POST'])
+@error_handler
+@auth
+def api_sab_test(client_id):
+    from backend.base.download_job import DownloadErrorCode, DownloadFailure
+    from backend.implementations.sabnzbd import SABClient
+    from backend.internals.sab_clients import load_sab_clients
+    try:
+        config = next((c for c in load_sab_clients() if c.key == client_id), None)
+        if config is None:
+            raise DownloadFailure(DownloadErrorCode.CONFIGURATION)
+        return return_api(SABClient(config).check())
+    except DownloadFailure as exc:
+        return return_api({'code': exc.code.value}, error='sab_test_failed', code=400)
+
+
+@api.route('/sab-downloads', methods=['GET'])
+@error_handler
+@auth
+def api_sab_downloads():
+    from backend.internals.db import DBConnection
+    from backend.internals.download_jobs import DownloadStore
+    store = DownloadStore(DBConnection.default_file)
+    try:
+        rows = store.db.execute('SELECT id FROM acquisition_downloads ORDER BY created_at DESC,id LIMIT 100').fetchall()
+        return return_api([store.preview(row[0]) for row in rows])
+    finally:
+        store.close()
+
+
+# region Mass Editor
+@api.route('/masseditor', methods=['POST'])
+@error_handler
+@auth
+def api_mass_editor():
+    data = request.get_json()
+    if not isinstance(data, dict):
+        raise InvalidKeyValue('body', data)
+    if 'action' not in data:
+        raise KeyNotFound('action')
+    if 'volume_ids' not in data:
+        raise KeyNotFound('volume_ids')
+
+    action: str = data['action']
+    volume_ids: Union[List[int], Any] = data['volume_ids']
+    args: Dict[str, Any] = data.get('args', {})
+
+    if not (
+        isinstance(volume_ids, list)
+        and all(isinstance(v, int) for v in volume_ids)
+    ):
+        raise InvalidKeyValue('volume_ids', volume_ids)
+
+    if not isinstance(args, dict):
+        raise InvalidKeyValue('args', args)
+
+    MassEditorActionManager.run_action(
+        action, volume_ids, **args
+    )
+    return return_api({})
+
+
+from frontend.maintenance_api import register as register_maintenance_api
+from frontend.provider_switch_api import \
+    register as register_provider_switch_api
+# region Files
+from frontend.wanted_api import register as register_wanted_api
+
+register_wanted_api(api, auth, error_handler, return_api)
+register_provider_switch_api(api, auth, error_handler, return_api)
+register_maintenance_api(api, auth, error_handler, return_api)
+from frontend.archive_maintenance_api import register as register_archive_api
+
+register_archive_api(api, auth, error_handler, return_api)
+from frontend.collections_api import register as register_collections_api
+
+register_collections_api(api, auth, error_handler, return_api)
+
+from frontend.calendar_api import register as register_calendar_api
+
+register_calendar_api(api, auth, error_handler, return_api)
+
+from frontend.reading_orders_api import register as register_reading_orders_api
+
+register_reading_orders_api(api, auth, error_handler, return_api)
+
+from frontend.quality_api import register as register_quality_api
+
+register_quality_api(api, auth, error_handler, return_api)
+
+from frontend.discovery_api import register as register_discovery_api
+
+register_discovery_api(api, auth, error_handler, return_api)
+
+from frontend.managed_clients_api import \
+    register as register_managed_clients_api
+
+register_managed_clients_api(api, auth, error_handler, return_api)
+
+
+@api.route('/files/<int:f_id>', methods=['GET', 'DELETE'])
+@error_handler
+@auth
+def api_files(f_id: int):
+    if request.method == 'GET':
+        result = FilesDB.fetch(file_id=f_id)[0]
+        return return_api(result)
+
+    elif request.method == 'DELETE':
+        delete_issue_file(f_id)
+        return return_api({})

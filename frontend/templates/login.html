@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta id="url_base" data-value="{{url_base}}">
+
+	<link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/x-icon">
+
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/general.css') }}">
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+	<script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+	<script src="{{ url_for('static', filename='js/login.js') }}" defer></script>
+
+	<title>Sign in · Pullarr</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pullarr.css') }}">
+</head>
+<body class="auth-page">
+	<div id="text-container">
+		<img src="{{url_base}}/static/img/favicon.svg" width="56" height="56" alt="">
+		<h1>Pullarr</h1>
+		<p>Sign in to your comic library.</p>
+	</div>
+	<noscript>
+		WARNING: This web-UI does not work without JavaScript.
+	</noscript>
+	<form id="login-form" class="hidden">
+		<p id="error-message" class="error hidden" role="alert">Credentials not accepted. Check your details and try again.</p>
+		<div class="input-container">
+			<label for="username-input">Username</label>
+			<input type="text" id="username-input" autocomplete="username" aria-label="Username" placeholder="Username" autofocus required>
+		</div>
+		<div class="input-container">
+			<label for="password-input">Password</label>
+			<input type="password" id="password-input" autocomplete="current-password" aria-label="Password" placeholder="Password" required>
+		</div>
+		<button type="submit">Sign in</button>
+	</form>
+</body>
+</html>

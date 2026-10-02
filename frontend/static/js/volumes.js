@@ -1,0 +1,404 @@
+const library_els = {
+	pages: {
+		loading: document.querySelector('#loading-library'),
+		empty: document.querySelector('#empty-library'),
+		view: document.querySelector('#library-container'),
+	},
+	views: {
+		list: document.querySelector('#list-library'),
+		table: document.querySelector('#table-library'),
+	},
+	view_options: {
+		sort: document.querySelector('#sort-button'),
+		view: document.querySelector('#view-button'),
+		filter: document.querySelector('#filter-button')
+	},
+	task_buttons: {
+		update_all: document.querySelector('#updateall-button')
+	},
+	search: {
+		clear: document.querySelector('#clear-search'),
+		container: document.querySelector('#search-container'),
+		input: document.querySelector('#search-input')
+	},
+	stats: {
+		volume_count: document.querySelector('#volume-count'),
+		volume_monitored_count: document.querySelector('#volume-monitored-count'),
+		volume_unmonitored_count: document.querySelector('#volume-unmonitored-count'),
+		issue_count: document.querySelector('#issue-count'),
+		issue_download_count: document.querySelector('#issue-download-count'),
+		file_count: document.querySelector('#file-count'),
+		total_file_size: document.querySelector('#total-file-size')
+	},
+	mass_edit: {
+		bar: document.querySelector('.action-bar'),
+		button: document.querySelector('#massedit-button'),
+		toggle: document.querySelector('#massedit-toggle'),
+		select_all: document.querySelector('#selectall-input'),
+		cancel: document.querySelector('#cancel-massedit'),
+		progress: document.querySelector("#massedit-progress")
+	}
+};
+
+const pre_build_els = {
+	list_entry: document.querySelector('.pre-build-els .list-entry'),
+	table_entry: document.querySelector('.pre-build-els .table-entry')
+};
+
+function showLibraryPage(el) {
+	hide(Object.values(library_els.pages), [el]);
+};
+
+class LibraryEntry {
+	constructor(id, api_key) {
+		this.id = id;
+		this.api_key = api_key;
+		this.list_entry = library_els.views.list.querySelector(`.vol-${id}`);
+		this.table_entry = library_els.views.table.querySelector(`.vol-${id}`);
+	};
+
+	setMonitored(monitored) {
+		sendAPI('PUT', `/volumes/${this.id}`, this.api_key, {}, {
+			monitored: monitored
+		})
+		.then(response => {
+			const monitored_button = this.table_entry.querySelector('.table-monitored');
+			monitored_button.onclick = e => new LibraryEntry(this.id, this.api_key)
+				.setMonitored(!monitored);
+
+			if (monitored) {
+				this.list_entry.setAttribute('monitored', '');
+				setIcon(monitored_button, icons.monitored, 'Monitored');
+
+			} else {
+				this.list_entry.removeAttribute('monitored');
+				setIcon(monitored_button, icons.unmonitored, 'Unmonitored');
+			};
+		});
+	};
+
+	getProgress() {
+		return this.list_entry.querySelector('.list-prog-num').innerText
+			.split("/")
+			.map(n => parseInt(n));
+	};
+
+	setProgressBar(
+		downloaded_count,
+		total_count
+	) {
+		downloaded_count = Math.min(downloaded_count, total_count);
+
+		const progress = downloaded_count / total_count * 100;
+		const list_bar = this.list_entry.querySelector('.list-prog-bar'),
+			table_bar = this.table_entry.querySelector('.table-prog-bar');
+
+		this.list_entry.querySelector('.list-prog-num').innerText =
+		this.table_entry.querySelector('.table-prog-num').innerText =
+			`${downloaded_count}/${total_count}`;
+
+		list_bar.style.width =
+		table_bar.style.width =
+			`${progress}%`;
+
+		if (progress === 100)
+			list_bar.style.backgroundColor =
+			table_bar.style.backgroundColor =
+				'var(--success-color)';
+
+		else if (this.list_entry.hasAttribute('monitored'))
+			list_bar.style.backgroundColor =
+			table_bar.style.backgroundColor =
+				'var(--accent-color)';
+
+		else
+			list_bar.style.backgroundColor =
+			table_bar.style.backgroundColor =
+				'var(--error-color)';
+
+		return;
+	};
+};
+
+function populateLibrary(volumes, api_key) {
+	library_els.views.list.querySelectorAll('.list-entry').forEach(
+		e => e.remove()
+	);
+	library_els.views.table.innerHTML = '';
+	const space_taker = document.querySelector('.space-taker');
+
+	const list_fragment = document.createDocumentFragment(),
+		table_fragment = document.createDocumentFragment();
+
+	volumes.forEach(volume => {
+		const list_entry = pre_build_els.list_entry.cloneNode(true),
+			table_entry = pre_build_els.table_entry.cloneNode(true);
+
+		// Label
+		list_entry.ariaLabel = table_entry.ariaLabel =
+			`View the volume ${volume.title} (${volume.year}) Volume ${volume.volume_number}`;
+
+		// ID
+		list_entry.classList.add(`vol-${volume.id}`);
+		table_entry.classList.add(`vol-${volume.id}`);
+		table_entry.dataset.id = volume.id;
+
+		// Link
+		list_entry.href =
+		table_entry.querySelector('.table-link').href =
+			`${url_base}/volumes/${volume.id}`;
+
+		// Cover
+		list_entry.querySelector('.list-img').src =
+			`${url_base}/api/volumes/${volume.id}/cover?api_key=${api_key}`;
+
+		// Title
+		const list_title = list_entry.querySelector('.list-title');
+		list_title.innerText =
+		list_title.title =
+			`${volume.title} (${volume.year})`;
+		table_entry.querySelector('.table-link').innerText =
+			volume.title;
+
+		// Year
+		table_entry.querySelector('.table-year').innerText =
+			volume.year;
+
+		// Volume Number
+		list_entry.querySelector('.list-volume').innerText =
+		table_entry.querySelector('.table-volume').innerText =
+			`Volume ${volume.volume_number}`;
+
+		// Monitored
+		const library_entry = new LibraryEntry(volume.id, api_key);
+		library_entry.list_entry = list_entry;
+		library_entry.table_entry = table_entry;
+
+		const monitored_button = table_entry.querySelector('.table-monitored');
+		monitored_button.onclick = e => library_entry
+			.setMonitored(!volume.monitored);
+		if (volume.monitored) {
+			list_entry.setAttribute('monitored', '');
+			setIcon(monitored_button, icons.monitored, 'Monitored');
+		} else
+			setIcon(monitored_button, icons.unmonitored, 'Unmonitored');
+
+		// Progress Bar
+		library_entry.setProgressBar(
+			volume.issues_downloaded_monitored,
+			volume.issue_count_monitored
+		);
+
+		// Add to view
+		list_fragment.appendChild(list_entry)
+		table_fragment.appendChild(table_entry);
+	});
+
+	library_els.views.list.insertBefore(list_fragment, space_taker);
+	library_els.views.table.appendChild(table_fragment);
+};
+
+let libraryOffset = 0, libraryGeneration = 0;
+function fetchLibrary(api_key, keepPage = false) {
+	if (!keepPage) libraryOffset = 0;
+	const generation = ++libraryGeneration;
+	library_els.mass_edit.progress.innerText = '';
+	showLibraryPage(library_els.pages.loading);
+
+	const params = {
+		sort: library_els.view_options.sort.value,
+		filter: library_els.view_options.filter.value,
+		limit: 50,
+		offset: libraryOffset
+	};
+	const query = library_els.search.input.value;
+	if (query !== '')
+		params.query = query;
+
+	fetchAPI('/volumes', api_key, params)
+	.then(json => {
+		if (generation !== libraryGeneration) return;
+		document.querySelector('#library-previous').disabled = libraryOffset === 0;
+		document.querySelector('#library-next').disabled = json.result.length < 50;
+		document.querySelector('#library-page').textContent = `Page ${Math.floor(libraryOffset / 50) + 1} · up to 50 volumes`;
+		document.querySelector('#library-error').textContent = '';
+		library_els.mass_edit.select_all.checked = false;
+		if (json.result.length === 0) {
+			showLibraryPage(library_els.pages.empty);
+		} else {
+			populateLibrary(json.result, api_key);
+			showLibraryPage(library_els.pages.view);
+		};
+	}).catch(() => {
+		if (generation !== libraryGeneration) return;
+		showLibraryPage(library_els.pages.empty);
+		document.querySelector('#library-error').textContent = 'Unable to load this library page. Retry or change the filters.';
+	});
+};
+
+function searchLibrary() {
+	usingApiKey().then(api_key => fetchLibrary(api_key));
+};
+
+function clearSearch(api_key) {
+	library_els.search.input.value = '';
+	fetchLibrary(api_key);
+};
+
+function fetchStats(api_key) {
+	fetchAPI('/volumes/stats', api_key)
+	.then(json => {
+		library_els.stats.volume_count.innerText = json.result.volumes;
+		library_els.stats.volume_monitored_count.innerText = json.result.monitored;
+		library_els.stats.volume_unmonitored_count.innerText = json.result.unmonitored;
+		library_els.stats.issue_count.innerText = json.result.issues;
+		library_els.stats.issue_download_count.innerText = json.result.downloaded_issues;
+		library_els.stats.file_count.innerText = json.result.files;
+		library_els.stats.total_file_size.innerText =
+			json.result.total_file_size > 0
+			? convertSize(json.result.total_file_size, 2)
+			: '0 MB';
+	});
+};
+
+//
+// Mass Edit
+//
+function runAction(api_key, action, args={}) {
+
+	const volume_ids = [...library_els.views.table.querySelectorAll(
+		'input[type="checkbox"]:checked'
+	)].map(v => parseInt(v.parentNode.parentNode.dataset.id))
+	if (!volume_ids.length) return;
+	if (action === 'delete' && !window.confirm(`Delete ${volume_ids.length} selected volumes from this page? ${args.delete_folder ? 'Their folders and files will also be deleted.' : 'Their folders and files will be kept.'}`)) return;
+	showLibraryPage(library_els.pages.loading);
+
+	sendAPI('POST', '/masseditor', api_key, {}, {
+		'volume_ids': volume_ids,
+		'action': action,
+		'args': args
+	})
+	.then(response => {
+		library_els.mass_edit.select_all.checked = false;
+		fetchLibrary(api_key);
+	});
+};
+
+// code run on load
+
+const lib_options = getLocalStorage('lib_sorting', 'lib_view', 'lib_filter');
+library_els.view_options.sort.value = lib_options.lib_sorting;
+library_els.view_options.view.value = lib_options.lib_view;
+library_els.view_options.filter.value = lib_options.lib_filter;
+
+usingApiKey()
+.then(api_key => {
+	fetchLibrary(api_key);
+	fetchStats(api_key);
+	document.querySelector('#library-previous').onclick = () => {
+		libraryOffset = Math.max(0, libraryOffset - 50); fetchLibrary(api_key, true);
+	};
+	document.querySelector('#library-next').onclick = () => {
+		libraryOffset += 50; fetchLibrary(api_key, true);
+	};
+	document.querySelector('#library-retry').onclick = () => fetchLibrary(api_key, true);
+
+	library_els.search.clear.onclick =
+		e => clearSearch(api_key);
+
+	library_els.task_buttons.update_all.onclick =
+		e => sendAPI('POST', '/system/tasks', api_key, {}, {
+			'cmd': 'update_all',
+			'allow_skipping': false
+		});
+
+	library_els.view_options.sort.onchange = e => {
+		setLocalStorage({'lib_sorting': library_els.view_options.sort.value});
+		fetchLibrary(api_key);
+	};
+	library_els.view_options.view.onchange =
+		e => setLocalStorage({'lib_view': library_els.view_options.view.value});
+	library_els.view_options.filter.onchange = e => {
+		setLocalStorage({'lib_filter': library_els.view_options.filter.value});
+		fetchLibrary(api_key);
+	};
+
+    library_els.mass_edit.button.onclick =
+    library_els.mass_edit.cancel.onclick =
+        e => {
+            const toggle = library_els.mass_edit.toggle;
+            if (toggle.hasAttribute('checked'))
+                toggle.removeAttribute('checked');
+            else {
+                const select = document.querySelector('select[name="root_folder_id"]');
+                if (select.querySelector('option') === null) {
+                    fetchAPI('/rootfolder', api_key)
+                    .then(json => {
+                        json.result.forEach(rf => {
+                            const entry = document.createElement('option');
+                            entry.value = rf.id;
+                            entry.innerText = rf.folder;
+                            select.appendChild(entry);
+                        });
+                        toggle.setAttribute('checked', '');
+                    });
+                } else
+                    toggle.setAttribute('checked', '');
+            }
+        };
+	library_els.mass_edit.bar.querySelectorAll('.action-divider > button[data-action]').forEach(
+		b => b.onclick = e => runAction(api_key, e.target.dataset.action)
+	);
+	library_els.mass_edit.bar.querySelector('button[data-action="delete"]').onclick =
+		e => runAction(
+			api_key,
+			e.target.dataset.action,
+			{
+				'delete_folder': document.querySelector(
+					'select[name="delete_folder"]'
+				).value === "true"
+			}
+		);
+	library_els.mass_edit.bar.querySelector('button[data-action="root_folder"]').onclick =
+		e => runAction(
+			api_key,
+			e.target.dataset.action,
+			{
+				'root_folder_id': parseInt(document.querySelector(
+					'select[name="root_folder_id"]'
+				).value)
+			}
+		);
+	library_els.mass_edit.bar.querySelector('button[data-action="monitoring_scheme"]').onclick =
+		e => runAction(
+			api_key,
+			e.target.dataset.action,
+			{
+				'monitoring_scheme': document.querySelector(
+					'select[name="monitoring_scheme"]'
+				).value
+			}
+		);
+
+	socket.on(
+		'downloaded_status',
+		data => {
+			const inst = new LibraryEntry(data.volume_id, api_key);
+			if (inst.list_entry === null)
+				return;
+			const new_progress = inst.getProgress();
+			new_progress[0] += data.downloaded_issues.length
+							- data.not_downloaded_issues.length;
+			inst.setProgressBar(new_progress[0], new_progress[1])
+		}
+	);
+	// Socket is init after API key so wait for that like this
+	socket.on(
+		'mass_editor_status',
+		data => library_els.mass_edit.progress.innerText = `${data.current_item}/${data.total_items}`
+	);
+});
+library_els.search.container.action = 'javascript:searchLibrary();';
+library_els.mass_edit.select_all.onchange =
+	e => library_els.views.table.querySelectorAll('input[type="checkbox"]')
+			.forEach(c => c.checked = library_els.mass_edit.select_all.checked);

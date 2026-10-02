@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% from "base.html" import icon_button %}
+{% block title %}Library{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/volumes.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/volumes.js') }}" defer></script>
+{% endblock %}
+
+{% block pre_build_els %}
+	<a href="" class="list-entry" aria-label="">
+		<img class="list-img" src="" alt="" loading="lazy">
+		<div class="list-prog-container">
+			<div class="list-prog-bar"></div>
+			<div class="list-prog-num"></div>
+		</div>
+		<h2 class="list-title" title=""></h2>
+		<p class="list-volume"></p>
+		<p class="list-monitored">Monitored</p>
+		<p class="list-unmonitored">Unmonitored</p>
+	</a>
+{% endblock %}
+
+{% block pre_build_rows %}
+	<tr class="table-entry" aria-label="">
+		<td>
+			<input type="checkbox" aria-label="Select volume for mass edit">
+		</td>
+		<td>
+			<a class="table-link" href=""></a>
+		</td>
+		<td class="table-year"></td>
+		<td class="table-volume"></td>
+		<td>
+			<div class="table-prog-container">
+				<div class="table-prog-bar"></div>
+				<div class="table-prog-num"></div>
+			</div>
+		</td>
+		<td class="table-monitored-container">
+			<button class="table-monitored">
+			</button>
+		</td>
+	</tr>
+{% endblock %}
+
+{% block right_side_header %}
+	<form id="search-container" class="icon-dark-color" aria-label="Search bar">
+		<button type="submit" id="start-search" aria-label="Start search">
+			<img src="{{url_base}}/static/img/search.svg" alt="">
+		</button>
+		<input type="text" id="search-input" placeholder="Search" aria-label="Search input">
+		<button type="button" id="clear-search" aria-label="Clear search">
+			<img src="{{url_base}}/static/img/cancel.svg" alt="">
+		</button>
+	</form>
+{% endblock %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>Library</h1><p>Manage, monitor and organize your comic library.</p></div>
+	<input type="checkbox" id="massedit-toggle" class="hidden">
+	<section class="tool-bar-container" aria-label="Tool bar">
+		<div class="tool-bar">
+			{{ icon_button(
+				"updateall-button",
+				"Trigger a 'refresh and scan' for all volumes",
+				"refresh.svg",
+				"Update All"
+			) }}
+			{{ icon_button(
+				"massedit-button",
+				"Start mass-editing the volumes",
+				"edit.svg",
+				"Mass Edit"
+			) }}
+		</div>
+		<div class="tool-bar">
+			<select id="filter-button" aria-label="Apply a filter">
+				<option value="">No Filter</option>
+				<option value="wanted">Wanted</option>
+				<option value="monitored">Monitored</option>
+			</select>
+			<select id="view-button" aria-label="Change the view">
+				<option value="posters">Posters</option>
+				<option value="table">Table</option>
+			</select>
+			<select id="sort-button" aria-label="Sort the list of volumes">
+				<option value="title">Title</option>
+				<option value="volume_number">Volume Number</option>
+				<option value="year">Year</option>
+				<option value="recently_added">Recently Added</option>
+				<option value="recently_released">Recently Released</option>
+				<option value="publisher">Publisher</option>
+                <option value="wanted">Wanted</option>
+			</select>
+		</div>
+	</section>
+	<div id="loading-library" class="loading-screen">
+		<h2>Loading...</h2>
+		<p id="massedit-progress"></p>
+		<noscript>
+			WARNING: This web-UI does not work without JavaScript.
+		</noscript>
+	</div>
+	<div id="empty-library" class="loading-screen hidden">
+		<h2>Library is empty</h2>
+	</div>
+	<div id="library-container" class="hidden">
+		<div id="list-library">
+			<div class="space-taker"></div>
+		</div>
+		<div id="table-container">
+			<section class="action-bar" aria-label="Action Bar">
+                <div class="action-divider">
+                    <button id="cancel-massedit">Quit</button>
+                </div>
+				<div class="action-divider">
+					<div class="option-container">
+						<button data-action="delete">Delete</button>
+						<select name="delete_folder" id="delete-folder-input" aria-label="Keep or delete the volume folder">
+							<option value="true">Delete Volume Folder</option>
+							<option value="false" selected>Keep Volume Folder</option>
+						</select>
+					</div>
+					<div class="option-container">
+						<button data-action="root_folder">Set Root Folder</button>
+						<select name="root_folder_id" id="rf-id-input" aria-label="Set the root folder for the selected volumes">
+                        </select>
+					</div>
+				</div>
+				<div class="action-divider">
+					<button data-action="rename">Rename</button>
+					<button data-action="convert">Convert</button>
+                    <button data-action="unmonitor">Unmonitor</button>
+                    <button data-action="monitor">Monitor</button>
+				</div>
+				<div class="action-divider">
+					<div class="option-container">
+						<button data-action="monitoring_scheme">Apply Monitoring Scheme</button>
+						<select name="monitoring_scheme" id="monitoring-scheme-input" aria-label="Apply a monitoring scheme for the selected volumes">
+							<option value="all" selected>All</option>
+							<option value="missing">Missing</option>
+							<option value="none">None</option>
+						</select>
+					</div>
+				</div>
+				<div class="action-divider">
+                    <button data-action="update">Refresh & Scan</button>
+                    <button data-action="search">Auto Search</button>
+				</div>
+			</section>
+
+			<table>
+				<thead>
+					<tr>
+						<th>
+							<input type="checkbox" id="selectall-input" aria-label="Select all volumes for mass edit">
+						</th>
+						<th>Volume Title</th>
+						<th>Year</th>
+						<th>Volume</th>
+						<th>Progress</th>
+						<th>Monitored</th>
+					</tr>
+				</thead>
+				<tbody id="table-library"></tbody>
+			</table>
+		</div>
+		<footer id="lib-stats" aria-label="Library statistics">
+			<table>
+				<tbody>
+					<tr>
+						<th>Volumes</th>
+						<td id="volume-count"></td>
+					</tr>
+					<tr>
+						<th>Monitored</th>
+						<td id="volume-monitored-count"></td>
+					</tr>
+					<tr>
+						<th>Unmonitored</th>
+						<td id="volume-unmonitored-count"></td>
+					</tr>
+				</tbody>
+			</table>
+			<table>
+				<tbody>
+					<tr>
+						<th>Issues</th>
+						<td id="issue-count"></td>
+					</tr>
+					<tr>
+						<th>Issues downloaded</th>
+						<td id="issue-download-count"></td>
+					</tr>
+				</tbody>
+			</table>
+			<table>
+				<tbody>
+					<tr>
+						<th>Files</th>
+						<td id="file-count"></td>
+					</tr>
+					<tr>
+						<th>Total file size</th>
+						<td id="total-file-size"></td>
+					</tr>
+				</tbody>
+			</table>
+		</footer>
+	</div>
+	<nav class="page-turner" aria-label="Library pages">
+		<button id="library-previous" disabled>Previous</button>
+		<span id="library-page" role="status">Page 1 · up to 50 volumes</span>
+		<button id="library-next" disabled>Next</button>
+		<button id="library-retry">Refresh page</button>
+	</nav>
+	<p id="library-error" role="alert"></p>
+	<p>Mass edit selects volumes on the current page only.</p>
+</main>
+{% endblock main %}

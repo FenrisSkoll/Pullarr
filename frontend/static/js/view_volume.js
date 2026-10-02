@@ -1,0 +1,970 @@
+const ViewEls = {
+	views: {
+		loading: document.querySelector('#loading-screen'),
+		main: document.querySelector('main')
+	},
+	pre_build: {
+		issue_entry: document.querySelector('.pre-build-els .issue-entry'),
+		manual_search: document.querySelector('.pre-build-els .search-entry'),
+		rename_before: document.querySelector('.pre-build-els .rename-before'),
+		rename_after: document.querySelector('.pre-build-els .rename-after'),
+		manage: document.querySelector('.pre-build-els .manage-entry'),
+		match: document.querySelector('.pre-build-els .match-entry'),
+		files_entry: document.querySelector('.pre-build-els .files-entry'),
+		general_files_entry: document.querySelector('.pre-build-els .general-files-entry')
+	},
+	vol_data: {
+		monitor: document.querySelector('#volume-monitor'),
+		title: document.querySelector('.volume-title-monitored > h2'),
+		cover: document.querySelector('.volume-info > img'),
+		tags: document.querySelector('#volume-tags'),
+		path: document.querySelector('#volume-path'),
+		description: document.querySelector('#volume-description'),
+		mobile_description: document.querySelector('#volume-description-mobile')
+	},
+	vol_edit: {
+		monitor: document.querySelector('#monitored-input'),
+		monitor_new_issues: document.querySelector('#monitor-issues-input'),
+		monitoring_scheme: document.querySelector('#monitoring-scheme-input'),
+		root_folder: document.querySelector('#root-folder-input'),
+		volume_folder: document.querySelector('#volumefolder-input'),
+		special_version: document.querySelector('#specialoverride-input')
+	},
+	tool_bar: {
+		refresh: document.querySelector('#refresh-button'),
+		auto_search: document.querySelector('#autosearch-button'),
+		manual_search: document.querySelector('#manualsearch-button'),
+		rename: document.querySelector('#rename-button'),
+		convert: document.querySelector('#convert-button'),
+		manage: document.querySelector('#manage-button'),
+		files: document.querySelector('#files-button'),
+		edit: document.querySelector('#edit-button'),
+		delete: document.querySelector('#delete-button')
+	},
+	issues_list: document.querySelector('#issues-list')
+};
+
+const enqueueFailureReasonMap = {
+    webpage_broken: "Webpage unavailable",
+    no_matches: "No links found on webpage that match to volume and are not blocklisted",
+    no_working_links: "All download links found on the webpage are broken",
+    only_rate_limited_links: "All working download links on the webpage are from rate limited services",
+
+    link_broken: "Download link broken",
+    link_rate_limited: "Download link rate limited"
+}
+
+//
+// Filling data
+//
+class IssueEntry {
+	constructor(id, api_key, row_entry=null) {
+		this.id = id;
+		this.api_key = api_key;
+		if (row_entry !== null)
+			this.entry = row_entry;
+		else
+			this.entry = ViewEls.issues_list.querySelector(`tr[data-id="${id}"]`);
+
+		this.monitored = this.entry.querySelector('.issue-monitored button');
+		this.issue_number = this.entry.querySelector('.issue-number');
+		this.title = this.entry.querySelector('.issue-title');
+		this.date = this.entry.querySelector('.issue-date');
+		this.status = this.entry.querySelector('.issue-status');
+		this.auto_search = this.entry.querySelector('.action-column :nth-child(1)');
+		this.manual_search = this.entry.querySelector('.action-column :nth-child(2)');
+		this.convert = this.entry.querySelector('.action-column :nth-child(3)');
+	};
+
+	setMonitorIcon() {
+		if (this.monitored.dataset.monitored === 'true') {
+			setIcon(
+				this.monitored,
+				icons.monitored,
+				'Issue is monitored. Click to unmonitor.'
+			);
+		} else {
+			setIcon(
+				this.monitored,
+				icons.unmonitored,
+				'Issue is umonitored. Click to monitor.'
+			);
+		};
+	};
+
+	toggleMonitored() {
+		const monitored = this.monitored.dataset.monitored !== 'true';
+		sendAPI('PUT', `/issues/${this.id}`, this.api_key, {}, {
+			'monitored': monitored
+		})
+		.then(response => {
+			this.monitored.dataset.monitored = monitored;
+			this.setMonitorIcon();
+		});
+	};
+
+	setDownloaded(downloaded) {
+		if (downloaded) {
+			// Downloaded
+			setImage(this.status, images.check, 'Issue is downloaded');
+            this.status.classList.remove('error');
+            this.status.classList.add('success');
+		} else {
+			// Not downloaded
+			setImage(this.status, images.cancel, 'Issue is not downloaded');
+            this.status.classList.remove('success');
+            this.status.classList.add('error');
+		};
+	};
+};
+
+function fillTable(issues, api_key) {
+	ViewEls.issues_list.innerHTML = '';
+
+	for (i = issues.length - 1; i >= 0; i--) {
+		const obj = issues[i];
+
+		const entry = ViewEls.pre_build.issue_entry.cloneNode(true);
+		entry.dataset.id = obj.id;
+		ViewEls.issues_list.appendChild(entry);
+
+		const inst = new IssueEntry(obj.id, api_key, entry);
+
+		// ARIA
+		inst.entry.ariaLabel = `Issue ${obj.issue_number}`;
+
+		// Monitored
+		inst.monitored.dataset.monitored = obj.monitored;
+		inst.monitored.dataset.id = obj.id;
+		inst.monitored.onclick = e => inst.toggleMonitored();
+		inst.setMonitorIcon();
+
+		// Issue number
+		inst.issue_number.innerText = obj.issue_number;
+
+		// Title
+		if (obj.display_title != null) {
+			inst.title.innerText = obj.display_title;
+		} else {
+			inst.title.innerText = obj.title;
+		};
+		inst.title.onclick = e => showIssueInfo(obj.id, api_key);
+
+		// Release date
+		inst.date.innerText = obj.date_display ?? obj.date ?? '';
+
+		// Download status
+		inst.setDownloaded(obj.files.length);
+
+		// Actions
+		inst.auto_search.onclick = e => autosearchIssue(obj.id, api_key);
+		inst.manual_search.onclick = e => showManualSearch(api_key, obj.id);
+		inst.convert.onclick = e => showConvert(api_key, obj.id);
+	};
+};
+
+function fillPage(data, api_key) {
+	const switchLink = document.getElementById('provider-switch-link');
+	if (switchLink) {
+		switchLink.href = `${url_base}/volumes/${data.id}/provider-switch`;
+		switchLink.textContent = `Switch metadata provider / history (current: ${data.metadata_source?.provider || 'comicvine'})`;
+	}
+	if (data.special_version_locked)
+		ViewEls.vol_edit.special_version.value = data.special_version || '';
+	else {
+		ViewEls.vol_edit.special_version.value = 'auto';
+		const sv_name = ViewEls.vol_edit.special_version
+			.querySelector(`option[value='${data.special_version || ''}']`)
+			.innerText;
+		ViewEls.vol_edit.special_version
+			.querySelector("option[value='auto']")
+			.innerText += ` (${sv_name})`;
+	};
+
+	// Cover
+	ViewEls.vol_data.cover.src = `${url_base}/api/volumes/${data.id}/cover?api_key=${api_key}`;
+
+	// Monitored state
+	ViewEls.vol_edit.monitor_new_issues.value = data.monitor_new_issues;
+	const monitor = ViewEls.vol_data.monitor;
+	monitor.dataset.monitored = data.monitored;
+	monitor.onclick = e => toggleMonitored(api_key);
+	if (data.monitored)
+		// Volume is monitored
+		setIcon(monitor, icons.monitored, 'Volume is monitored. Click to unmonitor.');
+	else
+		// Volume is unmonitored
+		setIcon(monitor, icons.unmonitored, 'Volume is unmonitored. Click to monitor.');
+
+	// Title
+	ViewEls.vol_data.title.innerText = data.title;
+	document.querySelector('main h1').textContent = data.title;
+	document.title = `${data.title} · Pullarr`;
+
+	// Tags
+	const tags = ViewEls.vol_data.tags;
+	if (data.metadata_snapshot?.retained_missing_issue_ids?.length) {
+		const warning = document.createElement('p');
+		warning.textContent = `${data.metadata_snapshot.retained_missing_issue_ids.length} local issue(s) absent from the latest provider snapshot. Retained for review.`;
+		tags.appendChild(warning);
+	}
+	if (data.year !== null) {
+		const year = document.createElement('p');
+		year.innerText = data.year;
+		tags.appendChild(year);
+	}
+	const volume_number = document.createElement('p');
+	volume_number.innerText = `Volume ${data.volume_number || 1}`;
+	tags.appendChild(volume_number);
+	const special_version = document.createElement('p');
+	special_version.innerText = data.special_version?.toUpperCase() || 'Normal volume';
+	tags.appendChild(special_version);
+	const total_size = document.createElement('p');
+	total_size.innerText = data.total_size > 0 ? convertSize(data.total_size, 1) : '0 MB';
+	tags.appendChild(total_size);
+	if (data.site_url !== "") {
+		const link = document.createElement('a');
+		link.href = data.site_url;
+		link.innerText = "link";
+		tags.appendChild(link);
+	};
+
+	// Path
+	const path = ViewEls.vol_data.path;
+	path.innerText = data.folder;
+	path.dataset.root_folder = data.root_folder;
+	path.dataset.volume_folder = data.volume_folder;
+
+	// Descriptions
+	ViewEls.vol_data.description.textContent = data.description;
+	ViewEls.vol_data.mobile_description.textContent = data.description;
+
+	// fill issue lists
+	fillTable(data.issues, api_key);
+	refreshIssueOwnership(api_key);
+	fillIssueMatchTable(data.issues);
+
+	mapButtons(volume_id);
+
+	hide([ViewEls.views.loading], [ViewEls.views.main]);
+
+	const table = document.querySelector('#files-window tbody');
+	table.innerHTML = '';
+	data.general_files.forEach(gf => {
+		const entry = ViewEls.pre_build.general_files_entry.cloneNode(true);
+
+        const short_f = gf.filepath.slice(
+			gf.filepath.indexOf(data.volume_folder)
+			+ data.volume_folder.length
+			+ 1
+		);
+		const file_name = entry.querySelector('.gf-filepath');
+		file_name.innerText = short_f;
+		file_name.title = gf.filepath;
+
+        entry.querySelector('.gf-type').innerText = gf.file_type;
+        entry.querySelector('.gf-size').innerText = convertSize(gf.size, 1);
+        entry.querySelector('.gf-delete button').onclick = e =>
+            sendAPI("DELETE", `/files/${gf.id}`, api_key)
+            .then(response => entry.remove());
+
+        table.appendChild(entry);
+	});
+};
+
+//
+// Actions
+//
+function toggleMonitored(api_key) {
+	const monitored = ViewEls.vol_data.monitor.dataset.monitored !== 'true';
+	sendAPI('PUT', `/volumes/${volume_id}`, api_key, {}, {
+		monitored: monitored
+	})
+	.then(response => {
+		ViewEls.vol_data.monitor.dataset.monitored = monitored;
+		if (monitored)
+			setIcon(
+				ViewEls.vol_data.monitor,
+				icons.monitored,
+				'Volume is monitored. Click to unmonitor.'
+			);
+		else
+			setIcon(
+				ViewEls.vol_data.monitor,
+				icons.unmonitored,
+				'Volume is unmonitored. Click to monitor.'
+			);
+	});
+};
+
+//
+// Tasks
+//
+function refreshVolume(api_key) {
+	const button_info = task_to_button[`refresh_and_scan#${volume_id}`];
+	const icon = button_info.button.querySelector('img');
+	const previousIcon = icon.src;
+	icon.src = button_info.loading_icon;
+	icon.classList.add('spinning');
+
+	sendAPI('POST', `/volumes/${volume_id}/organization-scan`, api_key)
+	.then(async response => {
+		if (!response.ok) throw response;
+		const preview = (await response.json()).result;
+		const lines = preview.plans.map(plan => `${plan.status}: ${plan.source}\nVolume ${plan.volume_id}; issues ${JSON.stringify(plan.issue_ids)}\nEffects: ${JSON.stringify(plan.effects)}\n${JSON.stringify(plan.diagnostics)}`);
+		if (window.confirm(`Local scan preview: no provider refresh, move, rename or missing-file removal.\n\n${lines.join('\n\n')}\n\nApply ready additive associations?`)) {
+			const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
+			if (!applied.ok) throw applied;
+		}
+	})
+	.catch(() => window.alert('Scan requires review. No missing-file cleanup was performed.'))
+	.finally(() => { icon.classList.remove('spinning'); icon.src = previousIcon; });
+};
+
+function autosearchVolume(api_key) {
+	const button_info = task_to_button[`auto_search#${volume_id}`];
+	const icon = button_info.button.querySelector('img');
+	icon.src = button_info.loading_icon;
+	icon.classList.add('spinning');
+
+	sendAPI('POST', '/system/tasks', api_key, {}, {
+		cmd: 'auto_search',
+		volume_id: volume_id
+	});
+};
+
+function autosearchIssue(issue_id, api_key) {
+	const button_info = task_to_button[`auto_search_issue#${volume_id}#${issue_id}`];
+	const icon = button_info.button.querySelector('img');
+	icon.src = button_info.loading_icon;
+	icon.classList.add('spinning');
+
+	sendAPI('POST', '/system/tasks', api_key, {}, {
+		cmd: 'auto_search_issue',
+		volume_id: volume_id,
+		issue_id: issue_id
+	});
+};
+
+//
+// Manual search
+//
+function showManualSearch(api_key, issue_id=null) {
+    const message = document.querySelector('#searching-message');
+    const table = document.querySelector('#search-result-table');
+    const tbody = table.querySelector('tbody');
+    tbody.replaceChildren();
+    message.textContent = 'Searching…';
+    hide([table], [message]);
+    showWindow('manual-search-window');
+    const url = issue_id ? `/issues/${issue_id}/release-search` : `/volumes/${volume_id}/release-search`;
+    const action = async (searchId, selectionId, data) => {
+        try {
+            const response = await sendAPI('POST', `/release-search/${searchId}/${selectionId}`, api_key, {}, data);
+            const json = await response.json();
+            return json.result;
+        } catch (response) {
+            if (typeof response?.json !== 'function') throw new Error('Request unavailable');
+            const json = await response.json();
+            throw new Error(json.result?.reason || 'Request unavailable');
+        }
+    };
+    sendAPI('POST', url, api_key, {}, {})
+    .then(response => response.json())
+    .then(json => {
+        renderManualDDL(tbody, json.result, action);
+        hide([message], [table]);
+    })
+    .catch(() => { message.textContent = 'Search unavailable. Check source configuration and try again.'; });
+}
+
+
+//
+// Renaming
+//
+function showRename(api_key, issue_id=null) {
+	document.querySelector('#selectall-input').checked = true;
+
+	const rename_button = document.querySelector('#submit-rename');
+	let url;
+	if (issue_id === null) {
+		// Preview volume rename
+		url = `/volumes/${volume_id}/rename`;
+		rename_button.dataset.issue_id = '';
+	} else {
+		// Preview issue rename
+		url = `/issues/${issue_id}/rename`;
+		rename_button.dataset.issue_id = issue_id;
+	};
+	fetchAPI(url, api_key)
+	.then(json => {
+		const empty_message = document.querySelector('#rename-window .empty-rename-message'),
+			table_container = document.querySelector('#rename-window .rename-preview'),
+			table = table_container.querySelector('tbody');
+		table.innerHTML = '';
+
+		if (!Object.keys(json.result).length) {
+			hide([table_container, rename_button], [empty_message]);
+		} else {
+			hide([empty_message], [table_container, rename_button]);
+			Object.entries(json.result).forEach(mapping => {
+				const before_row = ViewEls.pre_build.rename_before.cloneNode(true);
+				table.appendChild(before_row);
+				const after_row = ViewEls.pre_build.rename_after.cloneNode(true);
+				table.appendChild(after_row);
+
+				before_row.querySelector('td:last-child').innerText = mapping[0];
+				after_row.querySelector('td:last-child').innerText = mapping[1];
+			});
+		};
+		showWindow('rename-window');
+	});
+};
+
+function toggleAllRenames() {
+	const checked = document.querySelector('#selectall-input').checked;
+	document.querySelectorAll(
+		'#rename-window tbody input[type="checkbox"]'
+	).forEach(e => e.checked = checked);
+};
+
+function renameVolume(api_key, issue_id=null) {
+	const checkboxes = [...document.querySelectorAll(
+		'#rename-window tbody input[type="checkbox"]'
+	)];
+
+	if (checkboxes.every(e => !e.checked)) {
+		closeWindow();
+		return;
+	};
+
+	const data = {
+		cmd: 'mass_rename',
+		volume_id: volume_id,
+		filepath_filter:
+			checkboxes
+				.filter(e => e.checked)
+				.map(e => e
+					.parentNode
+					.parentNode
+					.querySelector('td:last-child')
+					.innerText
+				)
+	};
+	if (issue_id !== null) {
+		data.cmd = 'mass_rename_issue';
+		data.issue_id = issue_id;
+	};
+
+	sendAPI('POST', '/system/tasks', api_key, {}, data)
+	.then(response => closeWindow());
+};
+
+//
+// Converting
+//
+function loadConvertPreference(api_key) {
+	const el = document.querySelector('#convert-preference');
+	if (el.innerHTML !== '')
+		return;
+
+	fetchAPI('/settings', api_key)
+	.then(json => {
+		const pref = [
+			'source',
+			...json.result.format_preference,
+			'no conversion'
+		].join(' - ');
+		el.textContent = pref;
+		el.ariaLabel = `The format preference is the following: ${pref}`
+	});
+};
+
+function showConvert(api_key, issue_id=null) {
+	document.querySelector('#selectall-convert-input').checked = true;
+	loadConvertPreference(api_key);
+
+	const convert_button = document.querySelector('#submit-convert');
+	let url;
+	if (issue_id === null) {
+		// Preview issue conversion
+		url = `/volumes/${volume_id}/convert`;
+		convert_button.dataset.issue_id = '';
+	} else {
+		// Preview issue conversion
+		url = `/issues/${issue_id}/convert`;
+		convert_button.dataset.issue_id = issue_id;
+	};
+
+	fetchAPI(url, api_key)
+	.then(json => {
+		const empty_rename = document.querySelector('#convert-window .empty-rename-message'),
+			table_container = document.querySelector('#convert-window table');
+		const table = table_container.querySelector('tbody');
+		table.innerHTML = '';
+
+		if (!Object.keys(json.result).length) {
+			hide([table_container, convert_button], [empty_rename]);
+
+		} else {
+			hide([empty_rename], [table_container, convert_button]);
+			Object.entries(json.result).forEach(mapping => {
+				const before_row = ViewEls.pre_build.rename_before.cloneNode(true);
+				table.appendChild(before_row);
+				const after_row = ViewEls.pre_build.rename_after.cloneNode(true);
+				table.appendChild(after_row);
+
+				before_row.querySelector('td:last-child').innerText = mapping[0];
+				after_row.querySelector('td:last-child').innerText = mapping[1];
+			});
+		};
+		showWindow('convert-window');
+	});
+};
+
+function toggleAllConverts() {
+	const checked = document.querySelector('#selectall-convert-input').checked;
+	document.querySelectorAll(
+		'#convert-window tbody input[type="checkbox"]'
+	).forEach(e => e.checked = checked);
+};
+
+function convertVolume(api_key, issue_id=null) {
+	const checkboxes = [...document.querySelectorAll(
+		'#convert-window tbody input[type="checkbox"]'
+	)];
+
+	if (checkboxes.every(e => !e.checked)) {
+		closeWindow();
+		return;
+	};
+
+	const data = {
+		cmd: 'mass_convert',
+		volume_id: volume_id,
+		filepath_filter:
+			checkboxes
+				.filter(e => e.checked)
+				.map(e => e
+					.parentNode
+					.parentNode
+					.querySelector('td:last-child')
+					.innerText
+				)
+	};
+	if (issue_id !== null) {
+		data.cmd = 'mass_convert_issue';
+		data.issue_id = issue_id;
+	};
+
+	sendAPI('POST', '/system/tasks', api_key, {}, data)
+	.then(response => closeWindow());
+};
+
+//
+// Manage Issues
+//
+const manageIdToFilepath = {};
+let managed_issues = [];
+let managed_issues_changes = {};
+
+function _issuesCoveredByMapping(mapping, no_match_is_tbd=false) {
+	let mapping_value = '';
+	if (mapping.general_file)
+		mapping_value += 'General File';
+
+	else if (mapping.issue_ids.length >= 1)
+		mapping_value += document.querySelector(
+			`#issue-match-table tr[data-issue_id="${mapping.issue_ids[0]}"] td:nth-child(2)`
+		).innerText;
+
+	if (mapping.issue_ids.length > 1)
+		mapping_value += ' - ' + document.querySelector(
+			`#issue-match-table tr[data-issue_id="${mapping.issue_ids[mapping.issue_ids.length - 1]}"] td:nth-child(2)`
+		).innerText;
+
+	if (no_match_is_tbd && !mapping_value)
+		mapping_value += 'TBD';
+
+	if (mapping.forced_match)
+		mapping_value += ' (Forced)';
+
+	return mapping_value;
+}
+
+function showManageIssues(api_key) {
+	managed_issues_changes = {};
+	managed_issues = [];
+	document.querySelector('#selectall-manage-input').checked = false;
+	const table = document.querySelector('#manage-issues-table tbody'),
+		volume_folder = ViewEls.vol_data.path.dataset.volume_folder;
+	table.querySelectorAll('tr:not(:first-child)').forEach(e => e.remove());
+
+	fetchAPI(`/volumes/${volume_id}/manualmatch`, api_key)
+	.then(json => {
+		json.result.forEach((mapping, idx) => {
+			const entry = ViewEls.pre_build.manage.cloneNode(true);
+			entry.dataset.manage_id = idx;
+			manageIdToFilepath[idx] = mapping.filepath;
+
+            const short_f = mapping.filepath.slice(
+                mapping.filepath.indexOf(volume_folder)
+                + volume_folder.length
+                + 1
+            );
+			entry.querySelector('td:nth-child(2)').innerText = short_f;
+			entry.querySelector('td:nth-child(2)').title = mapping.filepath;
+
+			entry.querySelector('td:nth-child(3)').innerText = _issuesCoveredByMapping(mapping);
+
+			table.appendChild(entry);
+		});
+	});
+
+	showWindow('manage-window');
+};
+
+function toggleAllManages() {
+	const checked = document.querySelector('#selectall-manage-input').checked;
+	document.querySelectorAll(
+		'#manage-window tbody input[type="checkbox"]'
+	).forEach(e => e.checked = checked);
+};
+
+function submitManagedIssues(api_key) {
+	sendAPI('PUT', `/volumes/${volume_id}/manualmatch`, api_key, {},
+		Object.values(managed_issues_changes)
+	)
+	.then(response => window.location.reload());
+};
+
+function fillIssueMatchTable(issues) {
+	const table = document.querySelector('#issue-match-table tbody');
+	issues.forEach(issue => {
+		const entry = ViewEls.pre_build.match.cloneNode(true);
+
+		entry.dataset.issue_id = issue.id;
+		entry.querySelector('input').onchange = e => handleIssueMatchCheckboxes(e);
+		entry.querySelector('td:nth-child(2)').innerText = issue.issue_number;
+		entry.querySelector('td:nth-child(3)').innerText = issue.title;
+		entry.querySelector('td:nth-child(4)').innerText = issue.date_display ?? issue.date ?? '';
+
+		table.appendChild(entry);
+	});
+};
+
+function showMatchIssue() {
+	managed_issues = [...document.querySelectorAll(
+		'#manage-issues-table tbody tr:has(input[type="checkbox"]:checked)'
+	)].map(el => parseInt(el.dataset.manage_id));
+
+	if (!managed_issues.length)
+		return;
+
+	setIssueMatchCheckboxes(false);
+	showWindow('match-window');
+};
+
+function setIssueMatchCheckboxes(checked) {
+	document.querySelector('#selectall-match-input').checked = checked;
+	document.querySelectorAll(
+		'#match-window tbody > tr:nth-child(n + 4) input[type="checkbox"]'
+	).forEach(e => e.checked = checked);
+}
+
+function handleIssueMatchCheckboxes(e) {
+	const checkbox = e.target;
+
+	if (checkbox !== document.activeElement)
+		// Checkbox is not being altered by user
+		return;
+
+	const row = checkbox.parentElement.parentElement,
+		autoMatch = document.querySelector('#auto-match-entry input'),
+		generalFileMatch = document.querySelector('#general-file-match-entry input');
+
+	if (checkbox.id === "selectall-match-input") {
+		// Select All toggled
+		setIssueMatchCheckboxes(checkbox.checked);
+		autoMatch.checked = false;
+		generalFileMatch.checked = false;
+	}
+	else if (row.dataset.issue_id === "") {
+		// Auto match
+		setIssueMatchCheckboxes(false);
+		generalFileMatch.checked = false;
+	}
+	else if (row.dataset.issue_id === "-1") {
+		// General match
+		setIssueMatchCheckboxes(false);
+		autoMatch.checked = false;
+	}
+	else {
+		// Issue match
+		autoMatch.checked = false;
+		generalFileMatch.checked = false;
+	}
+};
+
+function processIssueMatch() {
+	const selectedIssues = [...document.querySelectorAll(
+		'#issue-match-table tbody > tr:has(input[type="checkbox"]:checked)'
+	)].map(row => row.dataset.issue_id)
+
+	if (!selectedIssues.length)
+		return;
+
+	managed_issues.forEach(manageId => {
+		let data;
+		if (selectedIssues[0] == "") {
+			// Auto match
+			data = {
+				filepath: manageIdToFilepath[manageId],
+				issue_ids: [],
+				general_file: false,
+				forced_match: false
+			};
+		}
+		else if (selectedIssues[0] == "-1") {
+			// General file
+			data = {
+				filepath: manageIdToFilepath[manageId],
+				issue_ids: [],
+				general_file: true,
+				forced_match: true
+			};
+		}
+		else {
+			// Issue match
+			data = {
+				filepath: manageIdToFilepath[manageId],
+				issue_ids: selectedIssues.map(i => parseInt(i)),
+				general_file: false,
+				forced_match: true
+			};
+		};
+
+		managed_issues_changes[manageId] = data;
+		document.querySelector(
+			`#manage-issues-table tbody > tr[data-manage_id="${manageId}"] td:last-child`
+		).innerText = _issuesCoveredByMapping(data, no_match_is_tbd=true);
+	});
+	document.querySelector('#selectall-manage-input').checked = false;
+	showWindow('manage-window');
+};
+
+//
+// Editing
+//
+function showEdit(api_key) {
+	const volume_root_folder = parseInt(ViewEls.vol_data.path.dataset.root_folder),
+	volume_folder = ViewEls.vol_data.path.dataset.volume_folder;
+
+	fetchAPI('/rootfolder', api_key)
+	.then(json => {
+		ViewEls.vol_edit.root_folder.innerHTML = '';
+		json.result.forEach(root_folder => {
+			const entry = document.createElement('option');
+			entry.value = root_folder.id;
+			entry.innerText = root_folder.folder;
+			if (root_folder.id === volume_root_folder) {
+				entry.setAttribute('selected', 'true');
+			};
+			ViewEls.vol_edit.root_folder.appendChild(entry);
+		});
+		showWindow('edit-window');
+	});
+	ViewEls.vol_edit.monitor.value = ViewEls.vol_data.monitor.dataset.monitored;
+	ViewEls.vol_edit.monitoring_scheme.value = '';
+	ViewEls.vol_edit.volume_folder.value = volume_folder;
+};
+
+function editVolume() {
+	showLoadWindow('edit-window');
+
+	const data = {
+		'monitored': ViewEls.vol_edit.monitor.value === 'true',
+		'monitor_new_issues': ViewEls.vol_edit.monitor_new_issues.value === 'true',
+		'root_folder': parseInt(ViewEls.vol_edit.root_folder.value),
+		'volume_folder': ViewEls.vol_edit.volume_folder.value
+	};
+
+	if (ViewEls.vol_edit.monitoring_scheme.value !== '')
+		data['monitoring_scheme'] = ViewEls.vol_edit.monitoring_scheme.value;
+
+	const so = document.querySelector('#specialoverride-input').value;
+
+	data['special_version_locked'] = so !== 'auto';
+	if (so !== 'auto')
+		data['special_version'] = so || null;
+
+	usingApiKey()
+	.then(api_key => {
+		sendAPI('PUT', `/volumes/${volume_id}`, api_key, {}, data)
+		.then(response => window.location.reload());
+	});
+};
+
+//
+// Deleting
+//
+function deleteVolume() {
+	const downloading_error = document.querySelector('#volume-downloading-error'),
+		tasking_error = document.querySelector('#volume-tasking-error'),
+		delete_folder = document.querySelector('#delete-folder-input').value;
+
+	hide([downloading_error, tasking_error]);
+	usingApiKey()
+	.then(api_key => {
+		sendAPI('DELETE', `/volumes/${volume_id}`, api_key, {delete_folder: delete_folder})
+		.then(response => {
+			window.location.href = `${url_base}/`;
+		})
+		.catch(e => e.json().then(j => {
+			if (j.error === "TaskForVolumeRunning")
+				hide([downloading_error], [tasking_error]);
+			else if (j.error === "VolumeDownloadedFor")
+				hide([tasking_error], [downloading_error]);
+			else
+				console.log(j);
+		}));
+	});
+};
+
+//
+// Issue info
+//
+function showIssueInfo(issue_id, api_key) {
+	setupCollectedContents(issue_id, api_key);
+	setupReprints(issue_id, api_key);
+	const bibliography = document.querySelector('#issue-bibliography');
+	const content = document.querySelector('#issue-bibliography-content');
+	bibliography.open = false;
+	bibliography.dataset.issueId = String(issue_id);
+	content.replaceChildren();
+	let loaded = false;
+	let requestNumber = 0;
+	const loadBibliography = async (setId = null) => {
+		const currentRequest = ++requestNumber;
+		try {
+			const response = await fetchAPI(`/issues/${issue_id}/bibliography`, api_key,
+				setId === null ? {} : {set_id: setId});
+			if (bibliography.dataset.issueId !== String(issue_id) || currentRequest !== requestNumber) return;
+			renderBibliography(content, response.result, loadBibliography);
+		} catch (_) {
+			if (bibliography.dataset.issueId === String(issue_id) && currentRequest === requestNumber) {
+				content.textContent = 'Bibliography unavailable. Reopen to retry.';
+				loaded = false;
+			}
+		}
+	};
+	bibliography.ontoggle = () => {
+		if (bibliography.open && !loaded) { loaded = true; loadBibliography(); }
+	};
+	document.querySelector('#issue-rename-selector').dataset.issue_id = issue_id;
+	fetchAPI(`/issues/${issue_id}`, api_key)
+	.then(json => {
+		document.querySelector('#issue-info-title').innerText =
+			`${json.result.title} - #${json.result.issue_number} - ${json.result.date_display ?? json.result.date ?? ''}`;
+		document.querySelector('#issue-info-desc').textContent = json.result.description;
+		const files_table = document.querySelector('#issue-files-list');
+		files_table.innerHTML = '';
+		json.result.files.forEach(f => {
+            const entry = ViewEls.pre_build.files_entry.cloneNode(true);
+
+            const vf = ViewEls.vol_data.path.dataset.volume_folder;
+            const short_f = f.filepath.slice(
+                f.filepath.indexOf(vf)
+                + vf.length
+                + 1
+            );
+            entry.querySelector('.f-filepath').innerText = short_f;
+            entry.querySelector('.f-filepath').title = f.filepath;
+
+            entry.querySelector('.f-size').innerText = convertSize(f.size, 1);
+            entry.querySelector('.f-delete button').onclick = e =>
+                sendAPI("DELETE", `/files/${f.id}`, api_key)
+                .then(response => entry.remove());
+
+            files_table.appendChild(entry);
+		});
+		showWindow('issue-info-window');
+	});
+};
+
+function showInfoWindow(window) {
+	hide(
+		[...document.querySelectorAll(
+			`#issue-info-window > div:nth-child(2) > div:not(#issue-info-selectors)`
+		)],
+		[document.querySelector(`#${window}`)]
+	);
+};
+
+// code run on load
+
+usingApiKey()
+.then(api_key => {
+	ClassificationDetails.setup(volume_id, api_key);
+	fetchAPI(`/volumes/${volume_id}`, api_key)
+	.then(json => fillPage(json.result, api_key))
+	.catch(e => {
+		if (e.status === 404)
+			window.location.href = `${url_base}/`
+		else
+			console.log(e);
+	});
+
+	ViewEls.tool_bar.refresh.onclick = e => refreshVolume(api_key);
+	ViewEls.tool_bar.auto_search.onclick = e => autosearchVolume(api_key);
+	ViewEls.tool_bar.manual_search.onclick = e => showManualSearch(api_key);
+	ViewEls.tool_bar.rename.onclick = e => showRename(api_key);
+	ViewEls.tool_bar.convert.onclick = e => showConvert(api_key);
+	ViewEls.tool_bar.manage.onclick = e => showManageIssues(api_key);
+	ViewEls.tool_bar.edit.onclick = e => showEdit(api_key);
+
+	document.querySelector('#submit-rename').onclick =
+	e => renameVolume(api_key, parseInt(e.target.dataset.issue_id) || null);
+
+	document.querySelector('#submit-convert').onclick =
+	e => convertVolume(api_key, parseInt(e.target.dataset.issue_id) || null);
+
+	document.querySelector('#issue-rename-selector').onclick =
+	e => showRename(api_key, parseInt(e.target.dataset.issue_id));
+
+	document.querySelector('#submit-manage-issues').onclick =
+	e => submitManagedIssues(api_key);
+
+	socket.on(
+		'downloaded_status',
+		data => {
+			if (data.volume_id !== volume_id)
+				return;
+			data.downloaded_issues.forEach(
+				issue_id => new IssueEntry(issue_id, api_key).setDownloaded(true)
+			);
+			data.not_downloaded_issues.forEach(
+				issue_id => new IssueEntry(issue_id, api_key).setDownloaded(false)
+			);
+			refreshIssueOwnership(api_key);
+		}
+	);
+});
+
+ViewEls.tool_bar.files.onclick = e => showWindow('files-window');
+ViewEls.tool_bar.delete.onclick = e => showWindow('delete-window');
+
+document.querySelector('#issue-info-selector').onclick = e => showInfoWindow('issue-info');
+document.querySelector('#issue-files-selector').onclick = e => showInfoWindow('issue-files');
+document.querySelector('#selectall-input').onchange = e => toggleAllRenames();
+document.querySelector('#selectall-convert-input').onchange = e => toggleAllConverts();
+document.querySelector('#selectall-manage-input').onchange = e => toggleAllManages();
+document.querySelector('#show-issue-match').onclick = e => showMatchIssue();
+document.querySelector('#selectall-match-input').onchange = e => handleIssueMatchCheckboxes(e);
+document.querySelector('#auto-match-entry input').onchange = e => handleIssueMatchCheckboxes(e);
+document.querySelector('#general-file-match-entry input').onchange = e => handleIssueMatchCheckboxes(e);
+document.querySelector('#cancel-match-issues').onclick = e => showWindow('manage-window');
+document.querySelector('#submit-match-issues').onclick = e => processIssueMatch();
+
+document.querySelector('#edit-form').action = 'javascript:editVolume();';
+document.querySelector('#delete-form').action = 'javascript:deleteVolume();';

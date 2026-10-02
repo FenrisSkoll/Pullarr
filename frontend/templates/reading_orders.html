@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Reading Orders{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/reading_orders.css') }}">{% endblock %}
+{% block js %}<script src="{{ url_for('static', filename='js/reading_orders.js') }}" defer></script>{% endblock %}
+{% block main %}
+<main id="reading-orders">
+ <h1>Reading Orders</h1>
+ <p>Exact issue sequences across publications. Repeated issues are allowed. Content represented by a collected edition is separate from owning the exact issue.</p>
+ <p>Importing or refreshing never adds publications, changes monitoring, searches or downloads. Remote updates require review. Source-managed sequences must be detached before local editing.</p>
+ <p id="ro-message" role="status" aria-live="polite"></p>
+ <nav aria-label="Reading Order actions"><button id="ro-list" type="button">All Reading Orders</button><button id="ro-create" type="button">Create Reading Order</button><button id="ro-import" type="button">Import CBL</button><button id="ro-provider" type="button">Find Provider Reading List</button></nav>
+ <section id="ro-content" aria-live="polite"></section>
+ <dialog id="ro-dialog" aria-labelledby="ro-dialog-title"><h2 id="ro-dialog-title"></h2><div id="ro-dialog-body"></div><button id="ro-close" type="button">Cancel / Close</button></dialog>
+</main>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "base.html" import icon_button %}
+{% block title %}Metadata Settings{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/settings_metadata.js') }}" defer></script>
+{% endblock %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>Metadata Settings</h1></div>
+	<section class="tool-bar-container" aria-label="Tool bar">
+		<div class="tool-bar">
+			{{ icon_button("save-button", "Save the changes made", "save.svg", "Save", True) }}
+		</div>
+	</section>
+	<div class="settings-container">
+		<form id="settings-form">
+			<h2>Fetching</h2>
+			<table class="fold-table">
+				<tr>
+					<th><label for="date-type-input">Date Type</label></th>
+					<td>
+						<select id="date-type-input" required>
+							<option value="cover_date">Cover Date</option>
+							<option value="store_date">In Store Date</option>
+						</select>
+						<p>Dates will be updated on next metadata fetch.</p>
+					</td>
+				</tr>
+			</table>
+		</form>
+	</div>
+</main>
+{% endblock main %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "base.html" import icon_button %}
+{% block title %}Queue{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/queue.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/queue.js') }}" defer></script>
+	<script src="{{ url_for('static', filename='js/managed_downloads.js') }}" defer></script>
+{% endblock %}
+
+{% block pre_build_rows %}
+<tr class="queue-entry">
+	<td class="status-column"></td>
+	<td>
+		<a href="" target="_blank" rel="noopener noreferrer"></a>
+	</td>
+	<td class="status-column">
+        <a href="" target="_blank" rel="noopener noreferrer"></a>
+    </td>
+	<td class="number-column"></td>
+	<td class="number-column"></td>
+	<td class="number-column"></td>
+	<td class="option-column">
+        <button title="Move download up" class="move-up-dl">
+			<img src="{{ url_for('static', filename='img/arrow_up.svg') }}">
+        </button>
+        <button title="Move download down" class="move-down-dl">
+			<img src="{{ url_for('static', filename='img/arrow_down.svg') }}">
+        </button>
+		<button title="Remove download" class="remove-dl">
+			<img src="{{ url_for('static', filename='img/delete.svg') }}">
+		</button>
+        <button title="Remove and blocklist download" class="blocklist-dl">
+            <img src="{{ url_for('static', filename='img/blocklist.svg') }}">
+        </button>
+	</td>
+</tr>
+{% endblock %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>Queue</h1></div>
+    <section class="tool-bar-container" aria-label="Tool bar">
+        <div class="tool-bar">
+            {{ icon_button(
+                "removeall-button",
+                "Remove all downloads from the queue",
+                "delete.svg",
+                "Remove All"
+            ) }}
+        </div>
+    </section>
+    <div class="icon-text-color">
+        <table>
+            <thead>
+                <tr>
+                    <th class="status-column">Status</th>
+                    <th>Title</th>
+                    <th class="status-column">Source</th>
+                    <th class="number-column">Size</th>
+                    <th class="number-column">Speed</th>
+                    <th class="number-column">Progress</th>
+                    <th class="option-column">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="queue"></tbody>
+        </table>
+    </div>
+    <section id="empty-window" class="loading-screen">
+        <p>Queue empty</p>
+    </section>
+    <section aria-labelledby="managed-download-title">
+        <h2 id="managed-download-title">Managed acquisitions and seeding</h2>
+        <p>Library import and torrent seeding are separate. Removing a torrent never removes its library copy.</p>
+        <button type="button" id="managed-download-refresh">Refresh local status</button>
+        <button type="button" id="managed-download-previous">Previous</button>
+        <button type="button" id="managed-download-next">Next</button>
+        <p id="managed-download-status" role="status" aria-live="polite"></p>
+        <div id="managed-download-rows" tabindex="0" role="region" aria-label="Managed acquisition table, horizontally scrollable"></div>
+    </section>
+</main>
+{% endblock main %}

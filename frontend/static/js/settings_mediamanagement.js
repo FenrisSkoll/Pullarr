@@ -1,0 +1,459 @@
+const inputs = {
+	'renaming_input': document.querySelector('#renaming-input'),
+	'replace_illegal_characters': document.querySelector('#replace-chars-input'),
+	'volume_folder_naming_input': document.querySelector('#volume-folder-naming-input'),
+	'file_naming_input': document.querySelector('#file-naming-input'),
+	'file_naming_empty_input': document.querySelector('#file-naming-empty-input'),
+	'file_naming_sv_input': document.querySelector('#file-naming-sv-input'),
+	'file_naming_vai_input': document.querySelector("#file-naming-vai-input"),
+	'long_sv_input': document.querySelector('#long-sv-input'),
+	'issue_padding_input': document.querySelector('#issue-padding-input'),
+	'volume_padding_input': document.querySelector('#volume-padding-input'),
+	'create_empty_volume_folders_input': document.querySelector('#create-vf-input'),
+	'delete_empty_folders_input': document.querySelector('#delete-empty-folders-input'),
+	'unmonitor_deleted_input': document.querySelector('#unmonitor-deleted-input'),
+	'change_file_date': document.querySelector('#change-file-date-input'),
+	'chmod_folder': document.querySelector('#chmod-folder-input'),
+	'chown_group': document.querySelector('#chown-group-input'),
+	'convert_input': document.querySelector('#convert-input'),
+	'extract_input': document.querySelector('#extract-input')
+};
+
+//
+// Settings
+//
+function fillSettings(api_key) {
+	fetchAPI('/settings', api_key)
+	.then(json => {
+		document.querySelector('#folder-monitor-input').checked = json.result.folder_monitoring;
+		inputs.renaming_input.checked = json.result.rename_downloaded_files;
+		inputs.replace_illegal_characters.checked = json.result.replace_illegal_characters;
+		inputs.volume_folder_naming_input.value = json.result.volume_folder_naming;
+		inputs.file_naming_input.value = json.result.file_naming;
+		inputs.file_naming_empty_input.value = json.result.file_naming_empty;
+		inputs.file_naming_sv_input.value = json.result.file_naming_special_version;
+		inputs.file_naming_vai_input.value = json.result.file_naming_vai;
+		inputs.long_sv_input.checked = json.result.long_special_version;
+		inputs.issue_padding_input.value = json.result.issue_padding;
+		inputs.volume_padding_input.value = json.result.volume_padding;
+		inputs.create_empty_volume_folders_input.checked = json.result.create_empty_volume_folders;
+		inputs.delete_empty_folders_input.checked = json.result.delete_empty_folders;
+		inputs.unmonitor_deleted_input.checked = json.result.unmonitor_deleted_issues;
+		inputs.change_file_date.value = json.result.change_file_date || '';
+		inputs.chmod_folder.value = json.result.chmod_folder;
+		inputs.chown_group.value = json.result.chown_group;
+		inputs.convert_input.checked = json.result.convert;
+		inputs.extract_input.checked = json.result.extract_issue_ranges;
+
+		fillConvert(api_key, json.result.format_preference);
+	});
+};
+
+function saveSettings(api_key) {
+	document.querySelector("#save-button p").innerText = 'Saving';
+	inputs.volume_folder_naming_input.classList.remove('error-input');
+	inputs.file_naming_input.classList.remove('error-input');
+	inputs.file_naming_empty_input.classList.remove('error-input');
+	inputs.file_naming_sv_input.classList.remove('error-input');
+	inputs.file_naming_vai_input.classList.remove('error-input');
+	inputs.chmod_folder.classList.remove('error-input');
+	inputs.chown_group.classList.remove('error-input');
+	const data = {
+		'folder_monitoring': document.querySelector('#folder-monitor-input').checked,
+		'rename_downloaded_files': inputs.renaming_input.checked,
+		'replace_illegal_characters': inputs.replace_illegal_characters.checked,
+		'volume_folder_naming': inputs.volume_folder_naming_input.value,
+		'file_naming': inputs.file_naming_input.value,
+		'file_naming_empty': inputs.file_naming_empty_input.value,
+		'file_naming_special_version': inputs.file_naming_sv_input.value,
+		'file_naming_vai': inputs.file_naming_vai_input.value,
+		'long_special_version': inputs.long_sv_input.checked,
+		'issue_padding': parseInt(inputs.issue_padding_input.value),
+		'volume_padding': parseInt(inputs.volume_padding_input.value),
+		'create_empty_volume_folders': inputs.create_empty_volume_folders_input.checked,
+		'delete_empty_folders': inputs.delete_empty_folders_input.checked,
+		'unmonitor_deleted_issues': inputs.unmonitor_deleted_input.checked,
+		'change_file_date': inputs.change_file_date.value || null,
+		'chmod_folder': inputs.chmod_folder.value,
+		'chown_group': inputs.chown_group.value,
+		'convert': inputs.convert_input.checked,
+		'extract_issue_ranges': inputs.extract_input.checked,
+		'format_preference': convert_preference,
+	};
+	sendAPI('PUT', '/settings', api_key, {}, data)
+	.then(response =>
+		document.querySelector("#save-button p").innerText = 'Saved'
+	)
+	.catch(e => {
+		document.querySelector("#save-button p").innerText = 'Failed';
+		e.json().then(e => {
+			if (e.error === 'InvalidKeyValue') {
+				if (e.result.key === 'volume_folder_naming')
+					inputs.volume_folder_naming_input.classList.add('error-input');
+				else if (e.result.key === 'file_naming')
+					inputs.file_naming_input.classList.add('error-input');
+				else if (e.result.key === 'file_naming_empty')
+					inputs.file_naming_empty_input.classList.add('error-input');
+				else if (e.result.key === 'file_naming_special_version')
+					inputs.file_naming_sv_input.classList.add('error-input');
+				else if (e.result.key === 'file_naming_vai')
+					inputs.file_naming_vai_input.classList.add('error-input');
+				else if (e.result.key === 'chmod_folder')
+					inputs.chmod_folder.classList.add('error-input');
+				else if (e.result.key === 'chown_group')
+					inputs.chown_group.classList.add('error-input');
+			} else
+				console.log(e.error);
+		});
+	});
+};
+
+//
+// File Processing
+//
+function runFileProcessingMassEditor(e, api_key) {
+	const button = e.target;
+	const identifier = button.dataset.identifier;
+	const settingValue = button.parentElement.firstElementChild.value;
+
+	if (settingValue === '') {
+		button.dataset.originalText = button.innerText
+		button.innerText = 'Not set'
+		setTimeout(() => {
+			button.innerText = button.dataset.originalText
+			button.removeAttribute('data-originalText')
+		}, 2000)
+
+		return
+	}
+
+	button.dataset.originalText = button.innerText
+	button.innerText = 'Applying...'
+
+	fetchAPI('/volumes', api_key)
+	.then(json => {
+		const volumeIds = json.result.map(v => v.id)
+		const data = {
+			action: identifier,
+			volume_ids: volumeIds
+		}
+		sendAPI('POST', '/masseditor', api_key, {}, data)
+		.then(response => {
+			button.innerText = 'Success'
+			setTimeout(() => {
+				button.innerText = button.dataset.originalText
+				button.removeAttribute('data-originalText')
+			}, 2000)
+		})
+		.catch(error => {
+			button.innerText = 'Failed'
+			setTimeout(() => {
+				button.innerText = button.dataset.originalText
+				button.removeAttribute('data-originalText')
+			}, 2000)
+		})
+	})
+	.catch(error => {
+		button.innerText = 'Failed'
+		setTimeout(() => {
+			button.innerText = button.dataset.originalText
+			button.removeAttribute('data-originalText')
+		}, 2000)
+	})
+}
+
+//
+// Convert
+//
+let convert_options = [];
+let convert_preference = [];
+function fillConvert(api_key, convert_pref) {
+	fetchAPI('/settings/availableformats', api_key)
+	.then(json => {
+		convert_options = json.result;
+
+		convert_preference = convert_pref;
+		updateConvertList();
+	});
+};
+
+function getConvertList() {
+	return [
+		...document.querySelectorAll(
+			'#convert-table tr[data-place] select'
+		)
+	].map(el => el.value);
+};
+
+function updateConvertList() {
+	const table = document.querySelector('#convert-table tbody');
+	table.querySelectorAll('tr[data-place]').forEach(
+		e => e.remove()
+		);
+	const no_conversion = table.querySelector('tr:has(#add-convert-input)');
+
+	let last_index = -1;
+	convert_preference.forEach((format, index) => {
+		last_index = index;
+		const entry = document.createElement('tr');
+		entry.dataset.place = index + 1;
+
+		const place = document.createElement('th');
+		place.innerText = index + 1;
+		entry.appendChild(place);
+
+		const select_container = document.createElement('td');
+		const select = document.createElement('select');
+		convert_preference.forEach(o => {
+			const option = document.createElement('option');
+			option.value = option.innerText = o;
+			option.selected = format === o;
+			select.appendChild(option);
+		});
+		select.onchange = (e) => {
+			const other_el = [
+				...table.querySelectorAll(
+					`tr[data-place]:not([data-place="${index + 1}"]) select`
+				)
+			].filter(
+				el => el.value === select.value
+			)[0];
+			const used_values = new Set([
+				...table.querySelectorAll('tr[data-place] select')
+			].map(el => el.value));
+			const missing_value = convert_preference
+				.filter(f => !used_values.has(f))[0];
+			other_el.value = missing_value;
+
+			convert_preference = getConvertList();
+		};
+		select_container.appendChild(select);
+		entry.appendChild(select_container);
+
+		const delete_container = document.createElement('td');
+		const delete_button = document.createElement('button');
+		delete_button.title = 'Delete format from list';
+		delete_button.type = 'button';
+		delete_button.onclick = (e) => {
+			entry.remove();
+			convert_preference = getConvertList();
+			updateConvertList();
+		};
+		const delete_button_icon = document.createElement('img');
+		delete_button_icon.src = `${url_base}/static/img/delete.svg`;
+		delete_button_icon.alt = '';
+
+		delete_button.appendChild(delete_button_icon);
+		delete_container.appendChild(delete_button);
+		entry.appendChild(delete_container);
+
+		no_conversion.insertAdjacentElement("beforebegin", entry);
+	});
+
+	no_conversion.querySelector('th').innerText = last_index + 2;
+
+	const add_select = no_conversion.querySelector('select');
+	add_select.innerHTML = '';
+	const not_added_formats = [
+		'No Conversion',
+		...convert_options
+			.filter(el => !convert_preference.includes(el))
+			.sort()
+	];
+	not_added_formats.forEach(format => {
+		const option = document.createElement('option');
+		option.value = option.innerText = format;
+		add_select.appendChild(option);
+	});
+};
+
+//
+// Root folders
+//
+const root_folders = {};
+function fillRootFolder(api_key) {
+	fetchAPI('/rootfolder', api_key)
+	.then(json => {
+		const table = document.querySelector('#root-folder-list');
+		table.innerHTML = '';
+		json.result.forEach(root_folder => {
+            root_folders[root_folder.id] = root_folder.folder;
+
+			const entry = document.createElement('tr');
+			entry.dataset.id = root_folder.id
+
+			const path = document.createElement('td');
+
+            const path_input = document.createElement('input');
+            path_input.setAttribute('aria-label', 'Library root folder');
+            path_input.readOnly = true;
+            path_input.type = 'text';
+            path_input.value = root_folder.folder;
+            path_input.onkeydown = e => {
+                if (e.key !== 'Enter') return;
+                sendAPI('PUT', `/rootfolder/${root_folder.id}`, api_key, {}, {
+                    'folder': path_input.value
+                })
+                .then(response => fillRootFolder(api_key))
+                .catch(response => {
+                    if (response.status === 400)
+                        hide(
+                            [],
+                            [document.querySelector(`#root-folder-list tr[data-id="${root_folder.id}"] p`)]
+                        );
+                    else
+                        console.log(response.status);
+                });
+            };
+            path.appendChild(path_input);
+
+            const path_error = document.createElement('p');
+            path_error.classList.add('error', 'hidden');
+            path_error.innerText = '*Folder is in other root folder';
+            path.appendChild(path_error);
+
+            entry.appendChild(path);
+
+			const free_space = document.createElement('td');
+			free_space.classList.add('number-column');
+			free_space.innerText = convertSize(root_folder.size?.free, 1);
+			entry.appendChild(free_space);
+
+			const total_space = document.createElement('td');
+			total_space.classList.add('number-column');
+			total_space.innerText = convertSize(root_folder.size?.total, 1);
+			entry.appendChild(total_space);
+
+			const root_folder_action_container = document.createElement('td');
+			root_folder_action_container.classList.add('action-column');
+
+            const edit_root_folder = document.createElement('button');
+            edit_root_folder.setAttribute('aria-label', 'Edit library root folder');
+            edit_root_folder.onclick = e => toggleEditRootFolder(root_folder.id);
+            edit_root_folder.type = 'button';
+            const edit_root_folder_icon = document.createElement('img');
+            edit_root_folder_icon.src = `${url_base}/static/img/edit.svg`;
+            edit_root_folder.appendChild(edit_root_folder_icon);
+            root_folder_action_container.appendChild(edit_root_folder);
+
+            const delete_root_folder = document.createElement('button');
+            delete_root_folder.setAttribute('aria-label', 'Remove library root folder');
+			delete_root_folder.onclick = e => {
+                if (confirm(`Remove library root "${root_folder.folder}" from configuration? Comic files are not deleted. Roots still in use cannot be removed.`)) deleteRootFolder(root_folder.id, api_key);
+            };
+			delete_root_folder.type = 'button';
+			const delete_root_folder_icon = document.createElement('img');
+			delete_root_folder_icon.src = `${url_base}/static/img/delete.svg`;
+			delete_root_folder.appendChild(delete_root_folder_icon);
+            root_folder_action_container.appendChild(delete_root_folder);
+
+            entry.appendChild(root_folder_action_container);
+
+			table.appendChild(entry);
+		});
+	});
+};
+
+function toggleAddRootFolder(e) {
+	hide([
+		document.querySelector('#folder-error'),
+		document.querySelector('#folder-in-folder-error')
+	]);
+	document.querySelector('#folder-input').value = '';
+	document.querySelector('#add-row').classList.toggle('hidden');
+};
+
+function addRootFolder(api_key) {
+	const folder_input = document.querySelector('#folder-input');
+	const folder = folder_input.value;
+	folder_input.value = '';
+
+	sendAPI('POST', '/rootfolder', api_key, {}, {folder: folder})
+	.then(response => {
+		fillRootFolder(api_key);
+		toggleAddRootFolder(1);
+	})
+	.catch(e => {
+		if (e.status === 404)
+			hide(
+				[document.querySelector('#folder-in-folder-error')],
+				[document.querySelector('#folder-error')]
+			);
+		else if (e.status === 400)
+			hide(
+				[document.querySelector('#folder-error')],
+				[document.querySelector('#folder-in-folder-error')]
+			);
+	});
+};
+
+function toggleEditRootFolder(id) {
+    hide(
+        [document.querySelector(`#root-folder-list tr[data-id="${id}"] p`)],
+        []
+    );
+
+    const input = document.querySelector(`#root-folder-list tr[data-id="${id}"] input`);
+    if (input.readOnly) {
+        input.readOnly = false;
+    } else {
+        input.value = root_folders[id];
+        input.readOnly = true;
+    };
+};
+
+function deleteRootFolder(id, api_key) {
+	sendAPI('DELETE', `/rootfolder/${id}`, api_key)
+	.then(response => {
+		document.querySelector(`tr[data-id="${id}"]`).remove();
+	})
+	.catch(e => {
+		if (e.status === 400) {
+			const message = document.createElement('p');
+			message.classList.add('error');
+			message.innerText = 'Root folder is still in use by a volume';
+			document.querySelector(`tr[data-id="${id}"] > :nth-child(1)`).appendChild(message);
+		};
+	});
+};
+
+// code run on load
+
+function fillMonitorStatus(api_key) {
+	const output = document.querySelector('#folder-monitor-status');
+	return fetchAPI('/foldermonitor', api_key).then(json => {
+		const monitor = json.result;
+		output.textContent = (monitor.enabled ? 'Enabled' : 'Disabled') + ' — ' + monitor.backend + '. ' +
+			(monitor.runtime && monitor.runtime.error ? 'Worker: ' + monitor.runtime.error + '. ' : '') +
+			monitor.roots.map(root => root.path + ': ' + root.health +
+				(root.error ? ' (' + root.error + ')' : '') +
+				(root.completed_at ? '; last reconciled ' + new Date(root.completed_at * 1000).toLocaleString() : '')).join('; ') +
+			' ' + monitor.counts.map(item => item.status + ': ' + item.count).join(', ');
+	}).catch(() => { output.textContent = 'Monitoring health unavailable. Manual scans remain available.'; });
+}
+
+usingApiKey()
+.then(api_key => {
+	fillSettings(api_key);
+	fillRootFolder(api_key);
+	fillMonitorStatus(api_key);
+	document.querySelector('#folder-monitor-refresh').onclick = () => fillMonitorStatus(api_key);
+	document.querySelector('#folder-monitor-reconcile').onclick = () =>
+		sendAPI('POST', '/foldermonitor', api_key, {}, {}).then(() => fillMonitorStatus(api_key))
+		.catch(() => { document.querySelector('#folder-monitor-status').textContent = 'Could not request reconciliation. Save monitoring as enabled first.'; });
+	document.querySelector('#save-button').onclick = e => saveSettings(api_key);
+	document.querySelector('#mass-edit-file-date').onclick = e => runFileProcessingMassEditor(e, api_key);
+	document.querySelector('#mass-edit-file-permissions').onclick = e => runFileProcessingMassEditor(e, api_key);
+	document.querySelector('#mass-edit-file-ownership').onclick = e => runFileProcessingMassEditor(e, api_key);
+	document.querySelector('#add-folder').onclick = e => addRootFolder(api_key);
+	document.querySelector('#folder-input').onkeydown = e => e.code === 'Enter' ? addRootFolder(api_key) : null;
+});
+
+document.querySelector('#toggle-root-folder').onclick = toggleAddRootFolder;
+document.querySelector('#add-convert-input').onchange = e => {
+	const value = e.target.value;
+	if (value !== 'No Conversion') {
+		convert_preference.push(value);
+		updateConvertList();
+	};
+};

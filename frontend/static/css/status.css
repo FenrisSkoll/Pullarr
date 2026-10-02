@@ -1,0 +1,131 @@
+main > div {
+	padding: 1rem;
+	color: var(--text-color);
+}
+
+h2 {
+	margin-bottom: 1rem;
+
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+
+	border-bottom: 1px solid var(--border-color);
+
+	font-size: 2rem;
+	font-weight: 500;
+}
+
+section:not(:first-of-type) h2 {
+	margin-top: 1rem;
+}
+
+.container {
+	overflow-x: auto;
+	color: var(--text-color);
+}
+
+#status-table {
+	width: calc(100% - 2rem);
+	min-width: 30rem;
+
+	margin-inline: 1rem;
+}
+
+#status-body tr {
+	transition: background-color 150ms linear;
+
+	&:hover {
+		background-color: var(--hover-color);
+	}
+}
+
+#status-table :where(th, td) {
+	padding-block: .5rem;
+
+	&:first-of-type {
+		width: 100%;
+		padding-left: 1rem;
+	}
+
+	&:last-of-type {
+		width: 7rem;
+
+		display: flex;
+		align-items: center;
+
+		padding-left: 1rem;
+		padding-right: 1rem;
+
+		& button {
+			width: 1rem;
+			fill: var(--light-color);
+		}
+	}
+}
+
+#status-body td {
+	border-top: 1px solid var(--border-color);
+}
+
+#status-body:has(tr:not(#status-clear-row)) #status-clear-row {
+	display: none;
+}
+
+#copy-about {
+	width: 4rem;
+
+	padding: .5rem;
+	border-radius: 4px;
+	color: var(--nav-background-color);
+	background-color: var(--accent-color);
+
+	font-weight: 700;
+}
+
+#about-table {
+	width: 100%;
+	min-width: 31rem;
+}
+
+#about-table :where(th, td) {
+	padding: .3rem .5rem;
+}
+
+#about-table th {
+	width: 10rem;
+	text-align: right;
+	font-weight: 400;
+}
+
+#about-table td {
+	margin-left: 1rem;
+}
+
+.link-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+}
+
+.link-list > :where(a, button) {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 1rem;
+
+	border-radius: 4px;
+	padding: 0.7rem 1rem;
+	background-color: var(--accent-color);
+	color: var(--nav-background-color);
+}
+
+.link-list > a > img {
+	width: 2.5rem;
+}
+
+@media (max-width: 720px) {
+	.link-list > :where(a, button) {
+		flex-grow: 1;
+	}
+}

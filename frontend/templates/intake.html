@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Acquisition Intake{% endblock %}
+{% block js %}
+<script src="{{ url_for('static', filename='js/intake.js') }}" defer></script>
+{% endblock %}
+{% block main %}
+<main>
+    <h1>Acquisition Intake</h1>
+    <p>Download completion and library organization are separate. Review artifacts remain in staging. Retrying does not replace an existing organization job.</p>
+    <button id="intake-refresh" type="button">Refresh</button>
+    <button id="intake-previous" type="button">Previous 100</button>
+    <button id="intake-next" type="button">Next 100</button>
+    <p id="intake-error" role="status"></p>
+    <section id="intake-results" aria-label="Completed acquisitions"></section>
+    <h2>Download client path mappings</h2>
+    <p>Mappings authorize access beneath an explicit local acquisition root. There is no same-path fallback. Editing a mapping invalidates waiting work that used its old fingerprint.</p>
+    <section id="intake-mappings" aria-label="Configured mappings"></section>
+    <form id="intake-mapping-form">
+        <label>Configured client ID <input name="client_id" required></label>
+        <label>Remote path style <select name="remote_style"><option value="posix">POSIX</option><option value="windows">Windows</option></select></label>
+        <label>Remote prefix <input name="remote_prefix" required></label>
+        <label>Local acquisition root <input name="local_root" required></label>
+        <label>Local prefix (optional, beneath root) <input name="local_prefix"></label>
+        <button type="submit">Add mapping</button>
+    </form>
+</main>
+{% endblock %}

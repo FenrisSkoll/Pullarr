@@ -1,0 +1,11 @@
+#calendar { padding: 1rem; max-width: 95rem; }
+#calendar form, #calendar .calendar-actions { display: flex; gap: .75rem; flex-wrap: wrap; align-items: end; }
+#calendar label { display: flex; flex-direction: column; gap: .25rem; }
+#calendar article { border: 1px solid var(--border-color, #777); padding: .8rem; margin: .8rem 0; overflow-wrap: anywhere; }
+#calendar button, #calendar select, #calendar input { padding: .4rem; }
+#calendar button:focus-visible, #calendar a:focus-visible { outline: 3px solid #438add; outline-offset: 2px; }
+#calendar dialog { max-width: min(54rem, 90vw); max-height: 85vh; overflow: auto; padding: 1rem; }
+#calendar .calendar-table { overflow-x: auto; max-width: 100%; }
+#calendar table { border-collapse: collapse; min-width: 35rem; }
+#calendar th, #calendar td { text-align: left; padding: .5rem; border-bottom: 1px solid #888; }
+@media (max-width: 700px) { #calendar { padding: .6rem; } #calendar form { align-items: stretch; } #calendar label { max-width: 100%; } }

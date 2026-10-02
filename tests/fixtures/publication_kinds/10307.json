@@ -1,0 +1,54 @@
+{
+  "origin": {
+    "provider": "metron",
+    "series_id": "10307",
+    "removed": "images, creators, account data and unrelated fields; no headers retained"
+  },
+  "series": {
+    "id": 10307,
+    "name": "8-Bit Zombie",
+    "volume": 1,
+    "issue_count": 1,
+    "year_began": 2013,
+    "desc": "Synthetic one-shot fixture description.",
+    "alt_names": [],
+    "language": "en",
+    "resource_url": "https://metron.cloud/series/8-bit-zombie-2013/",
+    "cv_id": 69612,
+    "gcd_id": 1826214,
+    "series_type": {
+      "id": 5,
+      "name": "One-Shot"
+    },
+    "publisher": {
+      "id": 47,
+      "name": "Antarctic Press"
+    }
+  },
+  "issue_list": [
+    {
+      "id": 136787,
+      "number": "1",
+      "modified": "2025-02-25T22:34:04.333183-05:00"
+    }
+  ],
+  "issues": [
+    {
+      "id": 136787,
+      "number": "1",
+      "title": "",
+      "name": [],
+      "desc": "Synthetic fixture description.",
+      "cover_date": "2013-10-01",
+      "store_date": "2013-11-27",
+      "cv_id": 1826214,
+      "gcd_id": 435246,
+      "modified": "2025-02-25T22:34:04.333183-05:00",
+      "series": {
+        "id": 10307,
+        "name": "8-Bit Zombie"
+      }
+    }
+  ],
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

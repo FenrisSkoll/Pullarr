@@ -1,0 +1,43 @@
+.main-window {
+	padding: 1rem;
+}
+
+.table-container {
+	overflow-x: auto;
+}
+
+table {
+	width: 100%;
+	min-width: 33.3rem;
+	table-layout: fixed;
+
+	color: var(--text-color);
+}
+
+th, td {
+	padding: .5rem .9rem;
+}
+
+.link-column {
+	overflow: auto;
+}
+
+.reason-column {
+	width: 9rem;
+}
+
+.date-column {
+	width: 11rem;
+}
+
+.option-column {
+	width: 4.5rem;
+}
+
+.list-entry > * {
+	border-top: 1px solid var(--border-color);
+}
+
+.delete-entry > img {
+	width: 20px;
+}

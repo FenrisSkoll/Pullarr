@@ -1,0 +1,9 @@
+autopep8 ~= 2.2
+isort ~= 5.13
+mypy ~= 1.10
+pre-commit ~= 3.5
+playwright >= 1.56, < 2
+pip-audit >= 2.9, < 3
+cyclonedx-bom >= 7, < 8
+pip-licenses >= 5, < 6
+PyYAML >= 6, < 7

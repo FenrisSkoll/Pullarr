@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en" class="{{theme}}">
+<head>
+	<!-- Standard headers -->
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta id="url_base" data-value="{{url_base}}">
+
+	<link rel="manifest" href="{{url_base}}/manifest.json">
+	<link rel="apple-touch-icon" href="{{ url_for('static', filename='img/favicon.svg') }}">
+	<meta name="apple-mobile-web-app-status-bar" content="#087f78">
+	<meta name="theme-color" content="#087f78">
+
+	<link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/x-icon">
+
+
+
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/general.css') }}">
+	{% block css %}
+	{% endblock css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/pullarr.css') }}">
+	<script src="{{ url_for('static', filename='vendor/socket.io-4.7.5.min.js') }}"></script>
+	<script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+	<script src="{{ url_for('static', filename='js/general.js') }}" defer></script>
+	{% block js %}
+	{% endblock js %}
+	<script src="{{ url_for('static', filename='js/pullarr.js') }}" defer></script>
+
+	<title>{% block title %}{% endblock %} · Pullarr</title>
+
+</head>
+<body>
+	<a class="skip-link" href="#main-content">Skip to main content</a>
+	<div class="pre-build-els hidden">
+		{% block pre_build_els %}
+		{% endblock %}
+	</div>
+
+	<table class="pre-build-els hidden">
+		<tbody>
+			{% block pre_build_rows %}
+			{% endblock %}
+		</tbody>
+	</table>
+
+	<div class="window">
+		{% block windows %}
+		{% endblock %}
+	</div>
+
+	<header>
+		<div class="menu-title-container">
+			<button id="toggle-nav" aria-label="Open navigation" aria-controls="nav-bar" aria-expanded="false">
+				<img src="{{url_base}}/static/img/menu.svg" alt="">
+			</button>
+			<a href="{{url_base}}/" class="pullarr-brand" aria-label="Pullarr Library">
+				<img src="{{ url_for('static', filename='img/favicon.svg') }}" alt="">
+			<span>Pullarr</span></a>
+		</div>
+		{% block right_side_header %}
+		{% endblock %}
+	</header>
+
+	<div class="nav-main">
+		<aside id="nav-bar">
+			<nav aria-label="Primary navigation">
+<section class="nav-group" aria-label="Library"><h2>Library</h2>
+<a href="{{url_base}}/" {% if request.path == '/' or request.path.startswith('/volumes/') %}class="current-nav" aria-current="page"{% endif %}>Library</a>
+<a href="{{url_base}}/wanted" {% if request.path == '/wanted' %}class="current-nav" aria-current="page"{% endif %}>Wanted / Upgrades</a>
+<a href="{{url_base}}/reading-orders" {% if request.path == '/reading-orders' %}class="current-nav" aria-current="page"{% endif %}>Reading Orders</a>
+<a href="{{url_base}}/collections" {% if request.path == '/collections' %}class="current-nav" aria-current="page"{% endif %}>Collections</a>
+</section>
+<section class="nav-group" aria-label="Explore"><h2>Explore</h2>
+<a href="{{url_base}}/discover" {% if request.path == '/discover' %}class="current-nav" aria-current="page"{% endif %}>Discover</a>
+<a href="{{url_base}}/calendar" {% if request.path == '/calendar' %}class="current-nav" aria-current="page"{% endif %}>Calendar</a>
+<a href="{{url_base}}/add" {% if request.path == '/add' %}class="current-nav" aria-current="page"{% endif %}>Add Comics</a>
+</section>
+<section class="nav-group" aria-label="Operations"><h2>Operations</h2>
+<a href="{{url_base}}/activity/queue" {% if request.path == '/activity/queue' %}class="current-nav" aria-current="page"{% endif %}>Download Queue</a>
+<a href="{{url_base}}/activity/history" {% if request.path == '/activity/history' %}class="current-nav" aria-current="page"{% endif %}>Download History</a>
+<a href="{{url_base}}/activity/intake" {% if request.path == '/activity/intake' %}class="current-nav" aria-current="page"{% endif %}>Acquisition Intake</a>
+<a href="{{url_base}}/library-import" {% if request.path == '/library-import' %}class="current-nav" aria-current="page"{% endif %}>Library Import</a>
+<a href="{{url_base}}/maintenance" {% if request.path == '/maintenance' %}class="current-nav" aria-current="page"{% endif %}>Maintenance</a>
+<a href="{{url_base}}/system/tasks" {% if request.path == '/system/tasks' %}class="current-nav" aria-current="page"{% endif %}>Tasks</a>
+<a href="{{url_base}}/activity/blocklist" {% if request.path == '/activity/blocklist' %}class="current-nav" aria-current="page"{% endif %}>Blocklist</a>
+</section>
+<section class="nav-group" aria-label="Configuration"><h2>Configuration</h2>
+<a href="{{url_base}}/settings/general" {% if request.path == '/settings/general' %}class="current-nav" aria-current="page"{% endif %}>General</a>
+<a href="{{url_base}}/settings/mediamanagement" {% if request.path == '/settings/mediamanagement' %}class="current-nav" aria-current="page"{% endif %}>Library & Organization</a>
+<a href="{{url_base}}/settings/metadata" {% if request.path == '/settings/metadata' %}class="current-nav" aria-current="page"{% endif %}>Metadata</a>
+<a href="{{url_base}}/settings/indexers" {% if request.path == '/settings/indexers' %}class="current-nav" aria-current="page"{% endif %}>Search Sources</a>
+<a href="{{url_base}}/settings/download" {% if request.path == '/settings/download' %}class="current-nav" aria-current="page"{% endif %}>Downloads</a>
+<a href="{{url_base}}/settings/downloadclients" {% if request.path == '/settings/downloadclients' %}class="current-nav" aria-current="page"{% endif %}>Download Clients</a>
+<a href="{{url_base}}/settings/quality" {% if request.path == '/settings/quality' %}class="current-nav" aria-current="page"{% endif %}>Quality Profiles</a>
+<a href="{{url_base}}/system/backups" {% if request.path == '/system/backups' %}class="current-nav" aria-current="page"{% endif %}>Backups</a>
+<a href="{{url_base}}/system/status" {% if request.path == '/system/status' %}class="current-nav" aria-current="page"{% endif %}>About & System<span id="system-issues-badge" class="hidden">0</span></a>
+</section>
+</nav>
+			<div id="task-queue" role="status"></div>
+		</aside>
+		<button id="nav-backdrop" aria-label="Close navigation" hidden></button>
+		{% block main %}
+		{% endblock %}
+	</div>
+</body>
+</html>
+
+{% macro icon_button(id, title, icon, desc='', submit=False) %}
+	<button
+		id="{{ id }}"
+		title="{{ title }}"
+		aria-label="{{ title }}"
+		type="{{ 'button' if not submit else 'submit' }}"
+	>
+		<img src="{{ url_for('static', filename='img/' + icon) }}" alt="">
+		{% if desc %}
+		<div aria-hidden="true">
+			<p>{{ desc }}</p>
+		</div>
+		{% endif %}
+	</button>
+{% endmacro %}
+
+{% macro window(wide_window, id, title, content, save_button='', loading_id='', cancel=True) %}
+	<!-- {{ title }} -->
+	<section
+		id="{{ id }}"
+		aria-label="{{ title }}"
+		role="dialog" aria-modal="true" tabindex="-1"
+		{% if wide_window == True %}class="wide-window"{% endif %}
+		{% if loading_id %}data-loading_window="{{loading_id}}"{% endif %}
+	>
+		<div class="window-header">
+			<h2>{{ title }}</h2>
+			{{ icon_button('', "Cancel", "cancel.svg") }}
+		</div>
+		<div class="window-content">
+			{{ content }}
+		</div>
+		<div class="window-footer">
+			{% if cancel == True %}
+				<button class="cancel-window">Cancel</button>
+			{% endif %}
+			{{ save_button }}
+		</div>
+	</section>
+{% endmacro %}
+
+{% macro loading_window(id, msg) %}
+	<section id="{{ id }}" class="loading-window">
+		<p>{{ msg }}</p>
+	</section>
+{% endmacro %}
+
+{% macro page_turner() %}
+	<section class="page-turner" aria-label="Page Turner">
+		<button id="previous-page" aria-label="Previous Page"><<</button>
+		<p id="page-number" aria-label="Current Page">Page 1</p>
+		<button id="next-page" aria-label="Next Page">>></button>
+	</section>
+{% endmacro %}

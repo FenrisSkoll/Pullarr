@@ -1,0 +1,53 @@
+name: Public source gates
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python scripts/public_release_gate.py
+      - run: python scripts/public_history_gate.py
+      - run: python scripts/check_title_fixture_secrets.py
+      - run: python scripts/check_pullarr_assets.py
+      - run: python -m mypy --explicit-package-bases backend frontend tests scripts Kapowarr.py Pullarr.py
+      - run: python -m isort --check-only .
+      - run: python scripts/public_js_gate.py
+      - run: git diff --check
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -p '*.py'
+  linux-and-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: docker build --target test -t pullarr:public-tests .
+      - run: docker run --rm --network none --tmpfs /tmp:rw,size=2g pullarr:public-tests
+      - run: docker build --target runtime -t pullarr:public-candidate .
+      - run: pip install requests playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: python scripts/public_docker_gate.py --browser

@@ -1,0 +1,54 @@
+{
+  "origin": {
+    "provider": "metron",
+    "series_id": "1530",
+    "removed": "images, creators, account data and unrelated fields; no headers retained"
+  },
+  "series": {
+    "id": 1530,
+    "name": "100ᵗʰ Anniversary Special: Avengers",
+    "volume": 1,
+    "issue_count": 1,
+    "year_began": 2014,
+    "desc": "",
+    "alt_names": [],
+    "language": "en",
+    "resource_url": "https://metron.cloud/series/100-anniversary-special-avengers-2014/",
+    "cv_id": 75888,
+    "gcd_id": 81964,
+    "series_type": {
+      "id": 5,
+      "name": "One-Shot"
+    },
+    "publisher": {
+      "id": 1,
+      "name": "Marvel"
+    }
+  },
+  "issue_list": [
+    {
+      "id": 16909,
+      "number": "1",
+      "modified": "2024-12-27T17:08:17.762512-05:00"
+    }
+  ],
+  "issues": [
+    {
+      "id": 16909,
+      "number": "1",
+      "title": "",
+      "name": [],
+      "desc": "Synthetic fixture description.",
+      "cover_date": "2014-09-01",
+      "store_date": "2014-07-23",
+      "cv_id": 460373,
+      "gcd_id": 1244835,
+      "modified": "2024-12-27T17:08:17.762512-05:00",
+      "series": {
+        "id": 1530,
+        "name": "100ᵗʰ Anniversary Special: Avengers"
+      }
+    }
+  ],
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

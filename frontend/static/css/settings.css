@@ -1,0 +1,481 @@
+.settings-container {
+	overflow-x: auto;
+	color: var(--text-color);
+	padding: 1rem;
+}
+
+.settings-container a {
+	color: var(--accent-color);
+}
+
+/*  */
+/* Sections titles */
+/*  */
+.settings-container h2 {
+	margin-bottom: 1rem;
+
+	border-bottom: 1px solid var(--border-color);
+
+	font-weight: 500;
+	font-size: 1.5rem;
+}
+
+.settings-container h2:not(:first-of-type) {
+	margin-top: 3rem;
+}
+
+.settings-container > label {
+	font-weight: bold;
+}
+
+/*  */
+/* Setting tables */
+/*  */
+.settings-container table {
+	width: 100%;
+}
+
+.settings-container table :where(th, td) {
+	padding: .5rem;
+}
+
+.settings-container table th {
+	width: clamp(9rem, 24vw, 14rem);
+	vertical-align: top;
+	padding-top: 1.1rem;
+}
+
+.settings-container table tr:has(input[type="checkbox"]) th {
+	padding-top: 0.5rem;
+}
+
+.settings-container table select,
+.settings-container table input,
+#convert-table tr:nth-last-child(2) td p {
+	width: min(50rem, 100%);
+
+	padding: .5rem .75rem;
+	border-radius: 6px;
+	border: 2px solid var(--border-color);
+	background-color: var(--background-color);
+	color: var(--text-color);
+
+	font-size: 1rem;
+	font-family: "Ubuntu Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+.settings-container table input[type="checkbox"] {
+	width: 1.15rem;
+	aspect-ratio: 1/1;
+}
+
+.settings-container td p {
+	margin-top: .3rem;
+	color: var(--dimmed-text-color);
+}
+
+/*  */
+/* Short table (preference lists) */
+/*  */
+.settings-container .short-table {
+	width: unset;
+}
+
+.settings-container .short-table tr > th {
+	width: 3rem;
+	vertical-align: middle;
+	padding-top: .5rem;
+}
+
+/*  */
+/* Converting list */
+/*  */
+#convert-table button {
+	width: 2rem;
+	padding: .3rem;
+}
+
+/*  */
+/* Root folder list */
+/*  */
+#root-folder-container {
+	overflow-x: auto;
+}
+
+#root-folder-table {
+	min-width: 39rem;
+}
+
+#root-folder-table th {
+	padding-top: 0rem;
+	width: unset;
+}
+
+#root-folder-list tr > * {
+	border-top: 1px solid var(--border-color);
+}
+
+.number-column {
+	width: 6.5rem;
+}
+
+.action-column {
+	width: 4.6rem;
+}
+
+.action-column button:first-of-type {
+    margin-right: .75rem;
+}
+
+.action-column img {
+	width: 1.4rem;
+}
+
+#root-folder-list input:read-only {
+    padding: 0;
+    border: none;
+}
+
+#toggle-root-folder,
+#empty-download-folder,
+#download-logs-button,
+#mass-edit-file-date,
+#mass-edit-file-permissions,
+#mass-edit-file-ownership {
+	margin-top: .5rem;
+	min-width: 5rem;
+
+	padding: .8rem;
+	border-radius: 4px;
+	color: var(--nav-background-color);
+	background-color: var(--accent-color);
+
+	font-weight: 700;
+}
+
+#add-row td {
+	padding-block: 0;
+}
+
+#root-folder-table :where(input, select) {
+	width: 20rem;
+
+	padding-inline: .3rem;
+}
+
+#add-row button {
+	padding: .4rem .6rem;
+	border-radius: 4px;
+	color: var(--nav-background-color);
+	background-color: var(--accent-color);
+}
+
+/*  */
+/* Authentication Selection */
+/*  */
+#settings-form:has(#auth-toggle > option:checked[value="password"]) #username-input-row {
+	display: none;
+}
+
+#settings-form:has(#auth-toggle > option:checked[value=""]) :where(#username-input-row, #password-input-row) {
+	display: none;
+}
+
+/*  */
+/* Proxy Selection */
+/*  */
+#settings-form > table:has(#proxy-type-input > option:checked[value=""]) tr:nth-child(n + 2) {
+	display: none;
+}
+
+/*  */
+/* Api key bar */
+/*  */
+#api-container {
+	display: flex;
+	width: min(50rem, 100%);
+}
+
+#api-input {
+	overflow-x: auto;
+	border-right: none;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+#generate-api {
+	width: 3rem;
+
+	flex: 0 0 auto;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+
+	border-top-right-radius: 6px;
+	border-bottom-right-radius: 6px;
+	background-color: var(--error-color);
+}
+
+#generate-api img {
+	height: 1.2rem;
+}
+
+/*  */
+/* Download Client List */
+/*  */
+.client-list {
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+.client-list > button {
+	position: relative;
+	width: 15rem;
+	height: 6rem;
+
+	border-radius: 6px;
+	padding-inline: 1rem;
+	background-color: var(--foreground-color);
+	color: var(--text-color);
+
+	overflow: hidden;
+	font-size: 1.2rem;
+
+	box-shadow: 0 0 9px 0px #00000075;
+}
+
+.client-list > button::after {
+	content: '';
+	position: absolute;
+	inset: 0 0 0 auto;
+
+	box-shadow: 0px 0px 20px 36px var(--foreground-color);
+}
+
+#builtin-window .window-content {
+	justify-content: flex-start;
+}
+
+#builtin-window .window-content > :where(h2, p),
+#builtin-window .window-content form {
+	display: none;
+	width: 100%;
+	max-width: unset;
+}
+
+#builtin-window[data-tag="mega"] .window-content :where(#mega-title, #mega-desc, #mega-form) {
+	display: block;
+}
+
+#builtin-window[data-tag="mediafire"] .window-content :where(#mf-title, #mf-desc) {
+	display: block;
+}
+
+#builtin-window[data-tag="wetransfer"] .window-content :where(#wt-title, #wt-desc) {
+	display: block;
+}
+
+#builtin-window[data-tag="pixeldrain"] .window-content :where(#pd-title, #pd-desc, #pixeldrain-form) {
+	display: block;
+}
+
+#builtin-window[data-tag="getcomics"] .window-content :where(#gc-title, #gc-desc) {
+	display: block;
+}
+
+#builtin-window #cred-container tbody td:last-child {
+	width: 4rem;
+}
+
+#builtin-window #cred-container button {
+	width: 2rem;
+	padding: .4rem;
+}
+
+#builtin-window #cred-container button[type="submit"] {
+	width: 1.8rem;
+	transform: rotate(45deg);
+}
+
+.add-button {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.add-button > img {
+	width: 1.6rem;
+	transform: rotate(45deg);
+}
+
+.window-footer > button {
+	background-color: var(--error-color);
+}
+
+.window-footer > button[type="submit"] {
+	background-color: var(--success-color);
+}
+
+.window-content p.error {
+	text-align: center;
+}
+
+.window-content form {
+	width: 100%;
+	max-width: 30rem;
+}
+
+.window-content form > table > tbody {
+	vertical-align: text-top;
+}
+
+.test-button {
+	position: relative;
+	flex: 0 0 auto;
+	width: 5rem;
+	height: 2rem;
+	display: flex;
+	overflow: hidden;
+	background-color: var(--tool-bar-color);
+	transition: background-color 300ms linear;
+}
+
+.test-button > div {
+	position: absolute;
+	width: 3rem;
+	transition: left 100ms linear;
+}
+
+.test-button > div:first-child {
+	left: -100%;
+}
+
+.test-button > div:nth-child(2) {
+	left: 20%;
+}
+
+.test-button > div:last-child {
+	left: 100%;
+}
+
+.test-button.show-success {
+	background-color: var(--success-color);
+}
+.test-button.show-success > div:nth-child(2) {
+	left: -100%;
+}
+.test-button.show-success > div:last-child {
+	left: 20%;
+}
+
+.test-button.show-fail {
+	background-color: var(--error-color);
+}
+.test-button.show-fail > div:nth-child(2) {
+	left: 100%;
+}
+.test-button.show-fail > div:first-child {
+	left: 20%;
+}
+
+#choose-indexer-window > div:nth-child(2),
+#choose-torrent-window > div:nth-child(2) {
+	justify-content: flex-start;
+}
+
+#choose-indexer-list,
+#choose-torrent-list {
+	display: flex;
+	justify-content: center;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+#choose-indexer-list > button,
+#choose-torrent-list > button {
+	width: 10rem;
+	height: 4rem;
+
+	border-radius: 4px;
+	padding: 1rem 2rem;
+	background-color: var(--foreground-color);
+	color: var(--text-color);
+
+	font-size: 1rem;
+
+	box-shadow: 0 0 9px 0px #00000075;
+}
+
+#add-torrent-window .window-content,
+#edit-torrent-window .window-content {
+	justify-content: space-around;
+}
+
+/*  */
+/* Remote Mapping */
+/*  */
+#add-remote-mapping {
+	min-width: 5rem;
+
+	padding: .6rem;
+	border-radius: 4px;
+	background-color: var(--accent-color);
+
+	& img {
+		transform: rotate(45deg);
+		width: 1.1rem;
+	}
+}
+
+.remote-mapping-container {
+	margin-top: 1.1rem;
+	overflow-x: auto;
+}
+
+#remote-mapping-table {
+	min-width: 38rem;
+}
+
+#remote-mapping-table th {
+	width: unset;
+	padding-top: 0;
+}
+
+#remote-mapping-table .action-column {
+	width: 4.8rem;
+}
+
+#remote-mapping-table:has(#remote-mapping-list > tr) #no-mappings-row {
+	display: none;
+}
+
+#no-mappings-row > td {
+	border-top: 1px solid var(--border-color);
+
+	text-align: center;
+}
+
+#remote-mapping-list > tr > td {
+	border-top: 1px solid var(--border-color);
+}
+
+/*  */
+/* Indexers */
+/*  */
+#add-indexer-window .window-content,
+#edit-indexer-window .window-content {
+	justify-content: space-around;
+
+	& form {
+		max-width: 40rem;
+	}
+}
+
+#pref-table {
+	max-width: 17rem;
+}
+
+#pref-table th {
+	width: 2rem;
+}

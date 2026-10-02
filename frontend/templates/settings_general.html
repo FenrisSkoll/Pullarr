@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% from "base.html" import icon_button %}
+{% block title %}General Settings{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/settings_general.js') }}" defer></script>
+{% endblock %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>General Settings</h1></div>
+	<section class="tool-bar-container" aria-label="Tool bar">
+		<div class="tool-bar">
+			{{ icon_button("save-button", "Save the changes made", "save.svg", "Save", True) }}
+		</div>
+	</section>
+	<div class="settings-container">
+		<form id="settings-form">
+			<h2>Host</h2>
+			<p>Changing hosting settings will immediately restart Pullarr. Access the web-ui within 60 seconds for the changes to stay, or they will be reverted.</p>
+			<table class="fold-table">
+				<tr>
+					<th><label for="bind-address-input">Bind Address</label></th>
+					<td>
+						<input type="text" id="bind-address-input" required spellcheck="false">
+						<p>Valid IPv4 address (default is '0.0.0.0' for all available interfaces).</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="port-input">Port Number</label></th>
+					<td>
+						<input type="text" id="port-input" required spellcheck="false">
+						<p>The port used to access the web UI (default is '5656').</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="url-base-input">Base URL</label></th>
+					<td>
+						<input type="text" id="url-base-input" spellcheck="false">
+						<p>For reverse proxy support (default is empty).</p>
+					</td>
+				</tr>
+			</table>
+			<h2>Security</h2>
+			<table class="fold-table">
+				<tr>
+					<th><label for="auth-toggle">Authentication</label></th>
+					<td>
+						<select id="auth-toggle">
+							<option value="">None</option>
+							<option value="password">Password</option>
+							<option value="username-password">Username And Password</option>
+						</select>
+					</td>
+				</tr>
+				<tr id="username-input-row">
+					<th><label for="username-input">Username</label></th>
+					<td>
+						<input id="username-input" required spellcheck="false" autocomplete="username">
+						<p>The username that is required to be entered to get access to web-UI and API.</p>
+					</td>
+				</tr>
+				<tr id="password-input-row">
+					<th><label for="password-input">Password</label></th>
+					<td>
+						<input type="password" id="password-input" required spellcheck="false" autocomplete="new-password">
+						<p>The password that is required to be entered to get access to web-UI and API.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="api-input">API Key</label></th>
+					<td>
+						<div id="api-container" class="icon-light-color">
+							<input type="password" id="api-input" aria-label="Application API key" readonly autocomplete="off">
+							<button type="button" id="copy-api">Copy API Key</button>
+							<button type="button" id="reveal-api" aria-controls="api-input" aria-pressed="false">Show API Key</button>
+							<button type="button" id="generate-api">Regenerate</button>
+						</div>
+						<p id="api-key-status" role="status" aria-live="polite"></p>
+						<p>Regenerate invalidates the previous key. Copy and Show do not change it.</p>
+					</td>
+				</tr>
+			</table>
+			<h2>Proxy</h2>
+			<p>Changing proxy settings will immediately restart Pullarr.</p>
+			<table class="fold-table">
+				<tr>
+					<th><label for="proxy-type-input">Proxy Type</label></th>
+					<td>
+						<select id="proxy-type-input">
+							<option value="">Disabled</option>
+							<option value="http">HTTP</option>
+							<option value="https">HTTPS</option>
+							<option value="socks5">Socks5 (local DNS)</option>
+							<option value="socks5h">Socks5h (remote DNS)</option>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="proxy-host-input">Hostname</label></th>
+					<td>
+						<input id="proxy-host-input" spellcheck="false">
+						<p>The hostname of the proxy.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="proxy-port-input">Port</label></th>
+					<td>
+						<input id="proxy-port-input" type="number" spellcheck="false" min="1" max="65535">
+						<p>The port of the proxy.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="proxy-username-input">Username</label></th>
+					<td>
+						<input id="proxy-username-input" spellcheck="false">
+						<p>You only need to enter a username and password if one is required. Leave them blank otherwise.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="proxy-password-input">Password</label></th>
+					<td>
+						<input id="proxy-password-input" type="password" spellcheck="false">
+						<p>You only need to enter a username and password if one is required. Leave them blank otherwise.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="proxy-ignored-addresses-input">Ignored Addresses</label></th>
+					<td>
+						<input id="proxy-ignored-addresses-input" spellcheck="false">
+						<p>Use ',' as a separator, and '*' as a wildcard for subdomains.</p>
+					</td>
+				</tr>
+			</table>
+			<h2>External Websites</h2>
+			<table class="fold-table">
+				<tr>
+					<th><label for="cv-input">Comic Vine API Key</label></th>
+					<td>
+						<input type="password" id="cv-input" required spellcheck="false" autocomplete="off">
+						<p>The API key of the <a href="https://comicvine.gamespot.com/api" target="_blank" rel="noopener noreferrer">Comic Vine API</a>, required for ComicVine metadata.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="metron-token-input">Metron API Token</label></th>
+					<td>
+						<input type="password" id="metron-token-input" autocomplete="new-password" spellcheck="false">
+						<button type="button" id="metron-test">Test token</button>
+						<span id="metron-test-result" role="status"></span>
+						<p>Generate a token in your <a href="https://metron.cloud/" target="_blank" rel="noreferrer">Metron account</a>. Leave empty to disable Metron. Saved tokens are masked.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="metron-budget-input">Metron Background Request Budget</label></th>
+					<td>
+						<input type="number" id="metron-budget-input" min="1" max="10000" required>
+						<p>Maximum background API requests per UTC day (default 250). This is an application safety budget, not your account quota. Server limits still apply. Manual searches and single-volume refreshes also consume account quota.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="gcd-enabled-input">GCD metadata</label></th>
+					<td>
+						<label><input type="checkbox" id="gcd-enabled-input">Enable GCD</label>
+						<label>Username <input type="text" id="gcd-username-input" autocomplete="off"></label>
+						<label>Password <input type="password" id="gcd-password-input" autocomplete="new-password"></label>
+						<button type="button" id="gcd-test">Test connection</button>
+						<button type="button" id="gcd-clear">Remove credentials</button>
+						<span id="gcd-test-result" role="status"></span>
+						<p>Anonymous read-only access is supported but heavily rate-limited. Both credentials are needed for authenticated access. Blank password edits preserve the saved secret. Local metadata remains readable when disabled.</p>
+					</td>
+				</tr>
+				<tr>
+					<th>GCD catalog graph</th>
+					<td>
+						<label><input type="checkbox" id="catalog-enabled-input">Enable local catalog graph</label>
+						<label>SQLite file (server path) <input type="text" id="catalog-path-input"></label>
+						<p>Supply a complete catalog you are authorized to use. Pullarr does not obtain or redistribute it. Save settings before testing or syncing. The catalog is read-only; reprint evidence does not establish complete issue coverage.</p>
+						<button type="button" id="catalog-test">Test saved catalog</button>
+						<button type="button" id="catalog-sync">Sync Catalog Graph</button>
+						<button type="button" id="catalog-status">Status</button>
+						<p id="catalog-result" role="status"></p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="flaresolverr-input">FlareSolverr Base URL</label></th>
+					<td>
+						<input type="url" name="" id="flaresolverr-input">
+						<p>Base URL of a FlareSolverr instance (set empty to disable). Needed in case of a large amount of requests to CloudFlare protected websites.</p>
+					</td>
+				</tr>
+			</table>
+			<h2>UI</h2>
+			<table class="fold-table">
+				<tr>
+					<th><label for="theme-input">Theme</label></th>
+					<td>
+						<select id="theme-input">
+							<option value="light">Light</option>
+							<option value="dark">Dark</option>
+						</select>
+					</td>
+				</tr>
+			</table>
+			<h2>Logging</h2>
+			<table class="fold-table">
+				<tr>
+					<th><label for="log-level-input">Log Level</label></th>
+					<td>
+						<select id="log-level-input" required>
+							<option value="20">Info</option>
+							<option value="10">Debug</option>
+						</select>
+						<p>Change this to 'Debug' if detailed logging is needed for troubleshooting. Change it back to 'Info' when done.</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="download-logs-button">Download Logs</label></th>
+					<td>
+						<a id="download-logs-button" href="">Download Logs</a>
+					</td>
+				</tr>
+			</table>
+			<h2>Database Backups</h2>
+			<table class="fold-table">
+				<tr>
+					<th><label for="db-backup-folder-input">Backup Folder</label></th>
+					<td>
+						<input type="text" id="db-backup-folder-input" required spellcheck="false">
+					</td>
+				</tr>
+				<tr>
+					<th><label for="db-backup-count-input">Backup Count</label></th>
+					<td>
+						<input type="number" id="db-backup-count-input" required min="0">
+						<p>The amount of backups to keep. If a new backup will exceed this amount, the oldest backup is deleted.</p>
+					</td>
+				</tr>
+			</table>
+		</form>
+	</div>
+</main>
+{% endblock main %}

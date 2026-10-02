@@ -1,0 +1,1572 @@
+{
+  "scope": "Exact public metadata records, not complete series fetch snapshots.",
+  "sanitization": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images.",
+  "records": {
+    "cyberpunk-cv-collected-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-150046/",
+      "data": {
+        "id": 150046,
+        "name": "Cyberpunk 2077: You Have My Word",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: trade paperback.",
+        "start_year": "2023",
+        "publisher": {
+          "id": 364,
+          "name": "Dark Horse Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 1,
+        "site_detail_url": "https://comicvine.gamespot.com/cyberpunk-2077-you-have-my-word/4050-150046/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 987246,
+            "name": "TPB",
+            "issue_number": "1"
+          }
+        ]
+      }
+    },
+    "cyberpunk-cv-collected-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-987246/",
+      "data": {
+        "id": 987246,
+        "name": "TPB",
+        "deck": null,
+        "description": "Synthetic fixture description.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/cyberpunk-2077-you-have-my-word-1-tpb/4000-987246/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 150046,
+          "name": "Cyberpunk 2077: You Have My Word"
+        },
+        "issue_number": "1",
+        "cover_date": "2023-02-01",
+        "store_date": "2023-02-22"
+      }
+    },
+    "cyberpunk-cv-floppy-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-135728/",
+      "data": {
+        "id": 135728,
+        "name": "Cyberpunk 2077: You Have My Word",
+        "deck": null,
+        "description": "Synthetic fixture description.",
+        "start_year": "2021",
+        "publisher": {
+          "id": 364,
+          "name": "Dark Horse Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 4,
+        "site_detail_url": "https://comicvine.gamespot.com/cyberpunk-2077-you-have-my-word/4050-135728/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 845914,
+            "name": null,
+            "issue_number": "1"
+          },
+          {
+            "id": 877929,
+            "name": null,
+            "issue_number": "2"
+          },
+          {
+            "id": 904612,
+            "name": null,
+            "issue_number": "3"
+          },
+          {
+            "id": 943490,
+            "name": null,
+            "issue_number": "4"
+          }
+        ]
+      }
+    },
+    "cyberpunk-cv-floppy-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-845914/",
+      "data": {
+        "id": 845914,
+        "name": null,
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/cyberpunk-2077-you-have-my-word-1/4000-845914/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 135728,
+          "name": "Cyberpunk 2077: You Have My Word"
+        },
+        "issue_number": "1",
+        "cover_date": "2021-04-30",
+        "store_date": "2021-04-28"
+      }
+    },
+    "halloween-floppy-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-6822/",
+      "data": {
+        "id": 6822,
+        "name": "Batman: The Long Halloween",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: omnibus, deluxe.",
+        "start_year": "1996",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 13,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-the-long-halloween/4050-6822/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 48827,
+            "name": "Crime",
+            "issue_number": "1"
+          },
+          {
+            "id": 48828,
+            "name": "Thanksgiving",
+            "issue_number": "2"
+          },
+          {
+            "id": 48829,
+            "name": "Christmas",
+            "issue_number": "3"
+          },
+          {
+            "id": 48830,
+            "name": "New Year's Eve",
+            "issue_number": "4"
+          },
+          {
+            "id": 48831,
+            "name": "Valentine's Day",
+            "issue_number": "5"
+          },
+          {
+            "id": 48832,
+            "name": "St. Patrick's Day",
+            "issue_number": "6"
+          },
+          {
+            "id": 48833,
+            "name": "April Fool's Day",
+            "issue_number": "7"
+          },
+          {
+            "id": 48834,
+            "name": "Mother's Day",
+            "issue_number": "8"
+          },
+          {
+            "id": 48835,
+            "name": "Father's Day",
+            "issue_number": "9"
+          },
+          {
+            "id": 48836,
+            "name": "Independence Day",
+            "issue_number": "10"
+          },
+          {
+            "id": 48837,
+            "name": "Roman Holiday",
+            "issue_number": "11"
+          },
+          {
+            "id": 48838,
+            "name": "Labor Day",
+            "issue_number": "12"
+          },
+          {
+            "id": 48839,
+            "name": "Punishment",
+            "issue_number": "13"
+          }
+        ]
+      }
+    },
+    "halloween-floppy-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-48827/",
+      "data": {
+        "id": 48827,
+        "name": "Crime",
+        "deck": null,
+        "description": "Synthetic fixture description.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-the-long-halloween-1-crime/4000-48827/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 6822,
+          "name": "Batman: The Long Halloween"
+        },
+        "issue_number": "1",
+        "cover_date": "1996-12-01",
+        "store_date": null
+      }
+    },
+    "halloween-hc-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-139540/",
+      "data": {
+        "id": 139540,
+        "name": "Batman: The Long Halloween: Deluxe Edition",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2021",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 1,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-the-long-halloween-deluxe-edition/4050-139540/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 889237,
+            "name": "HC",
+            "issue_number": "1"
+          }
+        ]
+      }
+    },
+    "halloween-hc-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-889237/",
+      "data": {
+        "id": 889237,
+        "name": "HC",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-the-long-halloween-deluxe-edition-1-hc/4000-889237/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 139540,
+          "name": "Batman: The Long Halloween: Deluxe Edition"
+        },
+        "issue_number": "1",
+        "cover_date": "2021-10-13",
+        "store_date": "2021-10-12"
+      }
+    },
+    "saga-trades-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-52845/",
+      "data": {
+        "id": 52845,
+        "name": "Saga",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: trade paperback.",
+        "start_year": "2012",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 12,
+        "site_detail_url": "https://comicvine.gamespot.com/saga/4050-52845/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 360829,
+            "name": "Volume One",
+            "issue_number": "1"
+          },
+          {
+            "id": 411844,
+            "name": "Volume Two",
+            "issue_number": "2"
+          },
+          {
+            "id": 448043,
+            "name": "Volume Three",
+            "issue_number": "3"
+          },
+          {
+            "id": 473696,
+            "name": "Volume Four",
+            "issue_number": "4"
+          },
+          {
+            "id": 499800,
+            "name": "Volume Five",
+            "issue_number": "5"
+          },
+          {
+            "id": 537968,
+            "name": "Volume Six",
+            "issue_number": "6"
+          },
+          {
+            "id": 589859,
+            "name": "Volume Seven",
+            "issue_number": "7"
+          },
+          {
+            "id": 649769,
+            "name": "Volume Eight",
+            "issue_number": "8"
+          },
+          {
+            "id": 686203,
+            "name": "Volume Nine",
+            "issue_number": "9"
+          },
+          {
+            "id": 949796,
+            "name": "Volume Ten",
+            "issue_number": "10"
+          },
+          {
+            "id": 1036608,
+            "name": "Volume Eleven",
+            "issue_number": "11"
+          },
+          {
+            "id": 1110082,
+            "name": "Volume Twelve",
+            "issue_number": "12"
+          }
+        ]
+      }
+    },
+    "saga-trade1-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-360829/",
+      "data": {
+        "id": 360829,
+        "name": "Volume One",
+        "deck": null,
+        "description": "Synthetic fixture description.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/saga-1-volume-one/4000-360829/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 52845,
+          "name": "Saga"
+        },
+        "issue_number": "1",
+        "cover_date": "2012-10-31",
+        "store_date": "2012-10-10"
+      }
+    },
+    "saga-trade2-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-411844/",
+      "data": {
+        "id": 411844,
+        "name": "Volume Two",
+        "deck": null,
+        "description": "Synthetic fixture description.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/saga-2-volume-two/4000-411844/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 52845,
+          "name": "Saga"
+        },
+        "issue_number": "2",
+        "cover_date": "2013-06-30",
+        "store_date": "2013-06-19"
+      }
+    },
+    "kickdown-metron-series": {
+      "provider": "metron",
+      "endpoint": "series/11068/",
+      "data": {
+        "id": 11068,
+        "name": "Cyberpunk 2077: Kickdown",
+        "desc": "Synthetic fixture description. Edition evidence: trade paperback.",
+        "year_began": 2025,
+        "year_end": 2025,
+        "volume": 1,
+        "publisher": {
+          "id": 3,
+          "name": "Dark Horse Comics"
+        },
+        "alt_names": [],
+        "series_type": {
+          "id": 10,
+          "name": "Trade Paperback"
+        },
+        "issue_count": 1,
+        "language": "en",
+        "cv_id": null,
+        "gcd_id": 222274,
+        "resource_url": "https://metron.cloud/series/cyberpunk-2077-kickdown-2025/",
+        "modified": "2025-03-30T01:28:48.839307-04:00"
+      }
+    },
+    "kickdown-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/141367/",
+      "data": {
+        "id": 141367,
+        "name": [],
+        "series": {
+          "id": 11068,
+          "name": "Cyberpunk 2077: Kickdown",
+          "volume": 1,
+          "year_began": 2025
+        },
+        "number": "1",
+        "title": "",
+        "desc": "Synthetic fixture description.",
+        "publisher": {
+          "id": 3,
+          "name": "Dark Horse Comics"
+        },
+        "cover_date": "2025-03-01",
+        "store_date": "2025-03-25",
+        "cv_id": null,
+        "gcd_id": 2721357,
+        "resource_url": "https://metron.cloud/issue/cyberpunk-2077-kickdown-2025-1/",
+        "modified": "2025-03-30T01:35:13.637344-04:00",
+        "isbn": "9781506727127"
+      }
+    },
+    "halloween-floppy-metron-series": {
+      "provider": "metron",
+      "endpoint": "series/1029/",
+      "data": {
+        "id": 1029,
+        "name": "Batman: The Long Halloween",
+        "desc": "Synthetic fixture description.",
+        "year_began": 1996,
+        "year_end": 1997,
+        "volume": 1,
+        "publisher": {
+          "id": 2,
+          "name": "DC Comics"
+        },
+        "alt_names": [],
+        "series_type": {
+          "id": 11,
+          "name": "Limited Series"
+        },
+        "issue_count": 13,
+        "language": "en",
+        "cv_id": 6822,
+        "gcd_id": 7339,
+        "resource_url": "https://metron.cloud/series/batman-long-halloween-1996/",
+        "modified": "2026-04-22T16:43:00.539794-04:00"
+      }
+    },
+    "halloween-floppy-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/9075/",
+      "data": {
+        "id": 9075,
+        "name": [
+          "Crime"
+        ],
+        "series": {
+          "id": 1029,
+          "name": "Batman: The Long Halloween",
+          "volume": 1,
+          "year_began": 1996
+        },
+        "number": "1",
+        "title": "",
+        "desc": "Synthetic fixture description.",
+        "publisher": {
+          "id": 2,
+          "name": "DC Comics"
+        },
+        "cover_date": "1996-12-01",
+        "store_date": "1996-10-16",
+        "cv_id": 48827,
+        "gcd_id": 66003,
+        "resource_url": "https://metron.cloud/issue/batman-long-halloween-1996-1/",
+        "modified": "2026-09-15T12:58:25.735113-04:00",
+        "isbn": ""
+      }
+    },
+    "halloween-hc-metron-series": {
+      "provider": "metron",
+      "endpoint": "series/17376/",
+      "data": {
+        "id": 17376,
+        "name": "Batman: The Long Halloween Deluxe Edition",
+        "desc": "",
+        "year_began": 2021,
+        "year_end": 2021,
+        "volume": 1,
+        "publisher": {
+          "id": 2,
+          "name": "DC Comics"
+        },
+        "alt_names": [],
+        "series_type": {
+          "id": 8,
+          "name": "Hardcover"
+        },
+        "issue_count": 1,
+        "language": "en",
+        "cv_id": 139540,
+        "gcd_id": 176787,
+        "resource_url": "https://metron.cloud/series/batman-the-long-halloween-deluxe-edition-2021/",
+        "modified": "2026-09-15T13:00:38.346186-04:00"
+      }
+    },
+    "halloween-hc-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/184266/",
+      "data": {
+        "id": 184266,
+        "name": [
+          "Crime",
+          "Thanksgiving",
+          "Christmas",
+          "New Year's Eve",
+          "Valentine's Day",
+          "St. Patrick's Day",
+          "April Fool's Day",
+          "Mother's Day",
+          "Father's Day",
+          "Independence Day",
+          "Roman Holiday",
+          "Labor Day",
+          "Punishment"
+        ],
+        "series": {
+          "id": 17376,
+          "name": "Batman: The Long Halloween Deluxe Edition",
+          "volume": 1,
+          "year_began": 2021
+        },
+        "number": "1",
+        "title": "",
+        "desc": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "publisher": {
+          "id": 2,
+          "name": "DC Comics"
+        },
+        "cover_date": "2021-01-01",
+        "store_date": "2021-10-12",
+        "cv_id": 889237,
+        "gcd_id": 2267832,
+        "resource_url": "https://metron.cloud/issue/batman-the-long-halloween-deluxe-edition-2021-1/",
+        "modified": "2026-09-15T13:00:38.296072-04:00",
+        "isbn": "9781779512697"
+      }
+    },
+    "saga-trades-metron-series": {
+      "provider": "metron",
+      "endpoint": "series/3892/",
+      "data": {
+        "id": 3892,
+        "name": "Saga",
+        "desc": "",
+        "year_began": 2012,
+        "year_end": null,
+        "volume": 1,
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "alt_names": [],
+        "series_type": {
+          "id": 10,
+          "name": "Trade Paperback"
+        },
+        "issue_count": 12,
+        "language": "en",
+        "cv_id": null,
+        "gcd_id": 69146,
+        "resource_url": "https://metron.cloud/series/saga-2012/",
+        "modified": "2025-01-11T15:28:59.592943-05:00"
+      }
+    },
+    "saga-trade1-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/52773/",
+      "data": {
+        "id": 52773,
+        "name": [
+          "Chapter One",
+          "Chapter Two",
+          "Chapter Three",
+          "Chapter Four",
+          "Chapter Five",
+          "Chapter Six"
+        ],
+        "series": {
+          "id": 3892,
+          "name": "Saga",
+          "volume": 1,
+          "year_began": 2012
+        },
+        "number": "1",
+        "title": "Volume One",
+        "desc": "Synthetic fixture description.",
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "cover_date": "2012-10-01",
+        "store_date": "2012-10-10",
+        "cv_id": 360829,
+        "gcd_id": 1015888,
+        "resource_url": "https://metron.cloud/issue/saga-2012-1/",
+        "modified": "2025-10-31T09:05:32.154450-04:00",
+        "isbn": "9781607066019"
+      }
+    },
+    "saga-trade2-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/52774/",
+      "data": {
+        "id": 52774,
+        "name": [
+          "Chapter Seven",
+          "Chapter Eight",
+          "Chapter Nine",
+          "Chapter Ten",
+          "Chapter Eleven",
+          "Chapter Twelve"
+        ],
+        "series": {
+          "id": 3892,
+          "name": "Saga",
+          "volume": 1,
+          "year_began": 2012
+        },
+        "number": "2",
+        "title": "Volume Two",
+        "desc": "Synthetic fixture description.",
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "cover_date": "2013-07-01",
+        "store_date": "2013-07-02",
+        "cv_id": 411844,
+        "gcd_id": 1096366,
+        "resource_url": "https://metron.cloud/issue/saga-2012-2/",
+        "modified": "2025-10-31T09:05:17.542068-04:00",
+        "isbn": "9781607066927"
+      }
+    },
+    "batman-deluxe-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-103802/",
+      "data": {
+        "id": 103802,
+        "name": "Batman: Rebirth Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2017",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 3,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-rebirth-deluxe-edition/4050-103802/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 617800,
+            "name": "Book 1",
+            "issue_number": "1"
+          },
+          {
+            "id": 672247,
+            "name": "Book 2",
+            "issue_number": "2"
+          },
+          {
+            "id": 694099,
+            "name": "Book 3",
+            "issue_number": "3"
+          }
+        ]
+      }
+    },
+    "batman-deluxe1-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-617800/",
+      "data": {
+        "id": 617800,
+        "name": "Book 1",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-rebirth-deluxe-edition-1-book-1/4000-617800/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 103802,
+          "name": "Batman: Rebirth Deluxe Edition"
+        },
+        "issue_number": "1",
+        "cover_date": "2017-08-31",
+        "store_date": "2017-08-30"
+      }
+    },
+    "batman-continuation-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-128991/",
+      "data": {
+        "id": 128991,
+        "name": "Batman: Deluxe Edition",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2019",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 3,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-deluxe-edition/4050-128991/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 712943,
+            "name": "Book 4",
+            "issue_number": "4"
+          },
+          {
+            "id": 782557,
+            "name": "Book 5",
+            "issue_number": "5"
+          },
+          {
+            "id": 954198,
+            "name": "Book 6",
+            "issue_number": "6"
+          }
+        ]
+      }
+    },
+    "sandman-deluxe-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-131620/",
+      "data": {
+        "id": 131620,
+        "name": "The Sandman: The Deluxe Edition",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2020",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 5,
+        "site_detail_url": "https://comicvine.gamespot.com/the-sandman-the-deluxe-edition/4050-131620/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 815622,
+            "name": "Book One",
+            "issue_number": "1"
+          },
+          {
+            "id": 837671,
+            "name": "Book Two",
+            "issue_number": "2"
+          },
+          {
+            "id": 876244,
+            "name": "Book Three",
+            "issue_number": "3"
+          },
+          {
+            "id": 906647,
+            "name": "Book Four",
+            "issue_number": "4"
+          },
+          {
+            "id": 924383,
+            "name": "Book Five",
+            "issue_number": "5"
+          }
+        ]
+      }
+    },
+    "dmz-deluxe-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-71452/",
+      "data": {
+        "id": 71452,
+        "name": "DMZ: The Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, trade paperback, deluxe.",
+        "start_year": "2014",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 5,
+        "site_detail_url": "https://comicvine.gamespot.com/dmz-the-deluxe-edition/4050-71452/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 444516,
+            "name": "Book One",
+            "issue_number": "1"
+          },
+          {
+            "id": 456003,
+            "name": "Book Two",
+            "issue_number": "2"
+          },
+          {
+            "id": 473620,
+            "name": "Book Three",
+            "issue_number": "3"
+          },
+          {
+            "id": 493777,
+            "name": "Book Four",
+            "issue_number": "4"
+          },
+          {
+            "id": 507150,
+            "name": "Book Five",
+            "issue_number": "5"
+          }
+        ]
+      }
+    },
+    "overture-deluxe-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-85783/",
+      "data": {
+        "id": 85783,
+        "name": "The Sandman: Overture The Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2015",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 1,
+        "site_detail_url": "https://comicvine.gamespot.com/the-sandman-overture-the-deluxe-edition/4050-85783/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 504922,
+            "name": "HC",
+            "issue_number": "1"
+          }
+        ]
+      }
+    },
+    "overture-deluxe-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-504922/",
+      "data": {
+        "id": 504922,
+        "name": "HC",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/the-sandman-overture-the-deluxe-edition-1-hc/4000-504922/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 85783,
+          "name": "The Sandman: Overture The Deluxe Edition"
+        },
+        "issue_number": "1",
+        "cover_date": "2015-11-30",
+        "store_date": "2015-11-04"
+      }
+    },
+    "hack-deluxe-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-135755/",
+      "data": {
+        "id": 135755,
+        "name": "Hack/Slash Deluxe Edition",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2021",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 6,
+        "site_detail_url": "https://comicvine.gamespot.com/hackslash-deluxe-edition/4050-135755/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 846070,
+            "name": "Volume 1",
+            "issue_number": "1"
+          },
+          {
+            "id": 890709,
+            "name": "Volume 2",
+            "issue_number": "2"
+          },
+          {
+            "id": 996221,
+            "name": "Volume 3",
+            "issue_number": "3"
+          },
+          {
+            "id": 1120905,
+            "name": "Volume 4",
+            "issue_number": "4"
+          },
+          {
+            "id": 1120906,
+            "name": "Volume 5",
+            "issue_number": "5"
+          },
+          {
+            "id": 1162481,
+            "name": null,
+            "issue_number": "6"
+          }
+        ]
+      }
+    },
+    "invincible-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-54479/",
+      "data": {
+        "id": 54479,
+        "name": "Invincible Compendium",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: trade paperback.",
+        "start_year": "2011",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 3,
+        "site_detail_url": "https://comicvine.gamespot.com/invincible-compendium/4050-54479/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 371271,
+            "name": "Volume 1",
+            "issue_number": "1"
+          },
+          {
+            "id": 421831,
+            "name": "Volume 2",
+            "issue_number": "2"
+          },
+          {
+            "id": 677341,
+            "name": "Volume 3",
+            "issue_number": "3"
+          }
+        ]
+      }
+    },
+    "detective-deluxe-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-105737/",
+      "data": {
+        "id": 105737,
+        "name": "Batman: Detective Comics: Rebirth Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2017",
+        "publisher": {
+          "id": 10,
+          "name": "DC Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 4,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-detective-comics-rebirth-deluxe-edition/4050-105737/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 634504,
+            "name": "Book 1",
+            "issue_number": "1"
+          },
+          {
+            "id": 669423,
+            "name": "Book 2",
+            "issue_number": "2"
+          },
+          {
+            "id": 689839,
+            "name": "Book 3",
+            "issue_number": "3"
+          },
+          {
+            "id": 706382,
+            "name": "Book 4",
+            "issue_number": "4"
+          }
+        ]
+      }
+    },
+    "halloween-floppy2-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-48828/",
+      "data": {
+        "id": 48828,
+        "name": "Thanksgiving",
+        "deck": null,
+        "description": "Synthetic fixture description.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/batman-the-long-halloween-2-thanksgiving/4000-48828/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 6822,
+          "name": "Batman: The Long Halloween"
+        },
+        "issue_number": "2",
+        "cover_date": "1997-01-01",
+        "store_date": null
+      }
+    },
+    "descender-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-106862/",
+      "data": {
+        "id": 106862,
+        "name": "Descender Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2017",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 2,
+        "site_detail_url": "https://comicvine.gamespot.com/descender-deluxe-edition/4050-106862/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 646215,
+            "name": "Volume One",
+            "issue_number": "1"
+          },
+          {
+            "id": 728919,
+            "name": "Volume Two",
+            "issue_number": "2"
+          }
+        ]
+      }
+    },
+    "revival-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-68730/",
+      "data": {
+        "id": 68730,
+        "name": "Revival Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2013",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 4,
+        "site_detail_url": "https://comicvine.gamespot.com/revival-deluxe-edition/4050-68730/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 431478,
+            "name": "Volume One",
+            "issue_number": "1"
+          },
+          {
+            "id": 471991,
+            "name": "Volume Two",
+            "issue_number": "2"
+          },
+          {
+            "id": 511555,
+            "name": "Volume Three",
+            "issue_number": "3"
+          },
+          {
+            "id": 598408,
+            "name": "Volume Four",
+            "issue_number": "4"
+          }
+        ]
+      }
+    },
+    "gideon-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-139130/",
+      "data": {
+        "id": 139130,
+        "name": "Gideon Falls Deluxe Edition",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2021",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 2,
+        "site_detail_url": "https://comicvine.gamespot.com/gideon-falls-deluxe-edition/4050-139130/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 885720,
+            "name": "Book 1. The Legend of the Black Barn",
+            "issue_number": "1"
+          },
+          {
+            "id": 954287,
+            "name": "Book 2. The Eater of All Things",
+            "issue_number": "2"
+          }
+        ]
+      }
+    },
+    "gideon1-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-885720/",
+      "data": {
+        "id": 885720,
+        "name": "Book 1. The Legend of the Black Barn",
+        "deck": "Synthetic fixture description.",
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/gideon-falls-deluxe-edition-1-book-1-the-legend-of/4000-885720/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 139130,
+          "name": "Gideon Falls Deluxe Edition"
+        },
+        "issue_number": "1",
+        "cover_date": "2021-09-24",
+        "store_date": "2021-09-22"
+      }
+    },
+    "gideon2-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-954287/",
+      "data": {
+        "id": 954287,
+        "name": "Book 2. The Eater of All Things",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/gideon-falls-deluxe-edition-2-book-2-the-eater-of-/4000-954287/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 139130,
+          "name": "Gideon Falls Deluxe Edition"
+        },
+        "issue_number": "2",
+        "cover_date": "2022-11-10",
+        "store_date": "2022-11-09"
+      }
+    },
+    "rai-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-90119/",
+      "data": {
+        "id": 90119,
+        "name": "Rai Deluxe Edition",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: hardcover, deluxe.",
+        "start_year": "2016",
+        "publisher": {
+          "id": 1924,
+          "name": "DMG/Valiant Entertainment"
+        },
+        "aliases": null,
+        "count_of_issues": 1,
+        "site_detail_url": "https://comicvine.gamespot.com/rai-deluxe-edition/4050-90119/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 528495,
+            "name": "HC",
+            "issue_number": "1"
+          }
+        ]
+      }
+    },
+    "transformers-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-164654/",
+      "data": {
+        "id": 164654,
+        "name": "The Transformers Compendium",
+        "deck": "Synthetic fixture description.",
+        "description": null,
+        "start_year": "2025",
+        "publisher": {
+          "id": 513,
+          "name": "Image"
+        },
+        "aliases": null,
+        "count_of_issues": 2,
+        "site_detail_url": "https://comicvine.gamespot.com/the-transformers-compendium/4050-164654/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 1113027,
+            "name": "Compendium One",
+            "issue_number": "1"
+          },
+          {
+            "id": 1137187,
+            "name": "Compendium Two",
+            "issue_number": "2"
+          }
+        ]
+      }
+    },
+    "bprd-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-145580/",
+      "data": {
+        "id": 145580,
+        "name": "B.P.R.D. Omnibus",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: trade paperback, omnibus.",
+        "start_year": "2022",
+        "publisher": {
+          "id": 364,
+          "name": "Dark Horse Comics"
+        },
+        "aliases": null,
+        "count_of_issues": 10,
+        "site_detail_url": "https://comicvine.gamespot.com/bprd-omnibus/4050-145580/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 951322,
+            "name": "Volume 1",
+            "issue_number": "1"
+          },
+          {
+            "id": 959259,
+            "name": "Volume 2",
+            "issue_number": "2"
+          },
+          {
+            "id": 965766,
+            "name": "Volume 3",
+            "issue_number": "3"
+          },
+          {
+            "id": 984086,
+            "name": "Volume 5",
+            "issue_number": "5"
+          },
+          {
+            "id": 992561,
+            "name": "Volume 4",
+            "issue_number": "4"
+          },
+          {
+            "id": 1011956,
+            "name": "Volume 6",
+            "issue_number": "6"
+          },
+          {
+            "id": 1022202,
+            "name": "Volume 7",
+            "issue_number": "7"
+          },
+          {
+            "id": 1040859,
+            "name": "Volume 8",
+            "issue_number": "8"
+          },
+          {
+            "id": 1048631,
+            "name": "Volume 9",
+            "issue_number": "9"
+          },
+          {
+            "id": 1056808,
+            "name": "Volume 10",
+            "issue_number": "10"
+          }
+        ]
+      }
+    },
+    "bprd1-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-951322/",
+      "data": {
+        "id": 951322,
+        "name": "Volume 1",
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: omnibus.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/bprd-omnibus-1-volume-1/4000-951322/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 145580,
+          "name": "B.P.R.D. Omnibus"
+        },
+        "issue_number": "1",
+        "cover_date": "2022-10-18",
+        "store_date": "2022-10-11"
+      }
+    },
+    "adventure-cv-volume": {
+      "provider": "comicvine",
+      "endpoint": "volume/4050-169674/",
+      "data": {
+        "id": 169674,
+        "name": "Adventure Time Compendium",
+        "deck": null,
+        "description": null,
+        "start_year": "2024",
+        "publisher": {
+          "id": 682,
+          "name": "Oni Press"
+        },
+        "aliases": null,
+        "count_of_issues": 4,
+        "site_detail_url": "https://comicvine.gamespot.com/adventure-time-compendium/4050-169674/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "issues": [
+          {
+            "id": 1150759,
+            "name": null,
+            "issue_number": "1"
+          },
+          {
+            "id": 1150760,
+            "name": null,
+            "issue_number": "2"
+          },
+          {
+            "id": 1150761,
+            "name": null,
+            "issue_number": "3"
+          },
+          {
+            "id": 1194153,
+            "name": null,
+            "issue_number": "4"
+          }
+        ]
+      }
+    },
+    "adventure1-cv-issue": {
+      "provider": "comicvine",
+      "endpoint": "issue/4000-1150759/",
+      "data": {
+        "id": 1150759,
+        "name": null,
+        "deck": null,
+        "description": "Synthetic fixture description. Edition evidence: compendium, collection.",
+        "aliases": null,
+        "site_detail_url": "https://comicvine.gamespot.com/adventure-time-compendium-1/4000-1150759/",
+        "image": {
+          "small_url": "https://example.invalid/synthetic-cover.jpg"
+        },
+        "volume": {
+          "id": 169674,
+          "name": "Adventure Time Compendium"
+        },
+        "issue_number": "1",
+        "cover_date": "2024-10-01",
+        "store_date": null
+      }
+    },
+    "invincible-metron-series": {
+      "provider": "metron",
+      "endpoint": "series/5527/",
+      "data": {
+        "id": 5527,
+        "name": "Invincible Compendium",
+        "desc": "Synthetic fixture description. Edition evidence: trade paperback.",
+        "year_began": 2011,
+        "year_end": 2018,
+        "volume": 1,
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "alt_names": [],
+        "series_type": {
+          "id": 10,
+          "name": "Trade Paperback"
+        },
+        "issue_count": 3,
+        "language": "en",
+        "cv_id": null,
+        "gcd_id": 75143,
+        "resource_url": "https://metron.cloud/series/invincible-compendium-2011/",
+        "modified": "2025-01-11T13:28:41.800143-05:00"
+      }
+    },
+    "invincible1-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/73873/",
+      "data": {
+        "id": 73873,
+        "name": [],
+        "series": {
+          "id": 5527,
+          "name": "Invincible Compendium",
+          "volume": 1,
+          "year_began": 2011
+        },
+        "number": "1",
+        "title": "Compendium One",
+        "desc": "Synthetic fixture description.",
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "cover_date": "2011-08-01",
+        "store_date": "2011-08-30",
+        "cv_id": 371271,
+        "gcd_id": 1124186,
+        "resource_url": "https://metron.cloud/issue/invincible-compendium-2011-1/",
+        "modified": "2025-01-11T20:50:34.239531-05:00",
+        "isbn": "9781607064114"
+      }
+    },
+    "invincible2-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/73876/",
+      "data": {
+        "id": 73876,
+        "name": [],
+        "series": {
+          "id": 5527,
+          "name": "Invincible Compendium",
+          "volume": 1,
+          "year_began": 2011
+        },
+        "number": "2",
+        "title": "Compendium Two",
+        "desc": "Synthetic fixture description. Edition evidence: collection.",
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "cover_date": "2013-08-01",
+        "store_date": "2013-08-14",
+        "cv_id": null,
+        "gcd_id": 1170853,
+        "resource_url": "https://metron.cloud/issue/invincible-compendium-2011-2/",
+        "modified": "2025-01-11T20:50:36.412423-05:00",
+        "isbn": "9781607067726"
+      }
+    },
+    "invincible3-metron-issue": {
+      "provider": "metron",
+      "endpoint": "issue/73877/",
+      "data": {
+        "id": 73877,
+        "name": [],
+        "series": {
+          "id": 5527,
+          "name": "Invincible Compendium",
+          "volume": 1,
+          "year_began": 2011
+        },
+        "number": "3",
+        "title": "Compendium Three",
+        "desc": "Synthetic fixture description. Edition evidence: collection.",
+        "publisher": {
+          "id": 4,
+          "name": "Image Comics"
+        },
+        "cover_date": "2018-07-01",
+        "store_date": "2018-07-24",
+        "cv_id": null,
+        "gcd_id": 1825348,
+        "resource_url": "https://metron.cloud/issue/invincible-compendium-2011-3/",
+        "modified": "2025-01-11T20:50:39.373457-05:00",
+        "isbn": "9781534306868"
+      }
+    }
+  },
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "base.html" import icon_button, page_turner %}
+{% block title %}History{% endblock %}
+{% block css %}
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/history.css') }}">
+{% endblock %}
+{% block js %}
+	<script src="{{ url_for('static', filename='js/history.js') }}" defer></script>
+{% endblock %}
+
+{% block pre_build_rows %}
+<tr class="history-entry">
+	<td>
+		<a href="" target="_blank" rel="noopener noreferrer"></a>
+	</td>
+    <td>
+        <a></a>
+    </td>
+    <td></td>
+	<td></td>
+	<td></td>
+</tr>
+{% endblock %}
+
+{% block main %}
+<main>
+	<div class="page-header"><h1>History</h1></div>
+	<section class="tool-bar-container" aria-label="Tool bar">
+		<div class="tool-bar">
+			{{ icon_button("refresh-button", "Refresh the list", "refresh.svg", "Refresh") }}
+			{{ icon_button("clear-button", "Clear History", "delete.svg", "Clear History") }}
+		</div>
+	</section>
+	<div class="main-window">
+		{{ page_turner() }}
+		<div class="table-container">
+			<table>
+				<thead>
+					<tr>
+						<th>Link</th>
+                        <th>File</th>
+                        <th>Source</th>
+						<th>Downloaded At</th>
+						<th>State</th>
+					</tr>
+				</thead>
+				<tbody id="history"></tbody>
+			</table>
+			<p class="table-empty">No download history on this page. Completed downloads will appear here.</p>
+		</div>
+	</div>
+</main>
+{% endblock main %}

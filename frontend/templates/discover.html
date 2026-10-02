@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Discover{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/discover.css') }}">{% endblock %}
+{% block js %}<script src="{{ url_for('static', filename='js/discover.js') }}" defer></script>{% endblock %}
+{% block main %}
+<main id="discover">
+ <h1>Discover / GetComics</h1>
+ <p>Recent source observations, not a complete catalog. Refresh never adds, searches or downloads. Quality labels are claims; imports remain subject to verification.</p>
+ <p id="d-message" role="status" aria-live="polite"></p>
+ <section aria-label="Source status"><p id="d-source"></p><button id="d-refresh" type="button">Refresh Discover</button> <button id="d-settings" type="button">Source Settings</button></section>
+ <form id="d-filters">
+  <label>Text <input id="d-query" maxlength="200"></label>
+  <label>Interest <select id="d-state"><option value="all">All</option><option value="missing">Missing</option><option value="upgrade">Upgrade</option><option value="satisfied">Owned / Satisfied</option><option value="in_library">In Library</option><option value="unmatched">Unmatched / External</option><option value="ambiguous">Ambiguous</option><option value="bundle">Bundles / Collections</option><option value="non_release">Non-release</option><option value="blocked">Blocked</option></select></label>
+  <label>Category <input id="d-category" maxlength="100"></label><label>Source year <input id="d-year" maxlength="40"></label>
+  <label>Claimed quality <select id="d-quality"><option value="">All claims</option><option value="unknown">Unknown</option><option value="digital">Digital</option><option value="hd_digital">HD-Digital</option><option value="sd_digital">SD-Digital</option><option value="scan">Scan</option><option value="upscaled">Upscaled</option><option value="hd_upscaled">HD-Upscaled</option></select></label>
+  <button type="submit">Apply Filters</button>
+ </form>
+ <section id="d-content" aria-live="polite" aria-label="Discovered posts"></section>
+ <nav aria-label="Discovery pages"><button id="d-prev" type="button">Previous</button><button id="d-next" type="button">Next</button></nav>
+ <dialog id="d-dialog" aria-labelledby="d-title"><h2 id="d-title"></h2><div id="d-body"></div><button id="d-close" type="button">Close / Cancel</button></dialog>
+</main>
+{% endblock %}

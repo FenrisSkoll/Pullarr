@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Switch metadata provider{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/provider_switch.css') }}">{% endblock %}
+{% block js %}
+<script src="{{ url_for('static', filename='js/metadata_search.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/provider_switch.js') }}" defer></script>
+{% endblock %}
+{% block main %}
+<main id="provider-switch" data-volume-id="{{ volume_id }}">
+    <a href="{{ url_base }}/volumes/{{ volume_id }}">Return to volume</a>
+    <h1>Switch metadata provider</h1>
+    <p id="switch-current"></p>
+    <p>Choose an exact provider record for review. Search results and cross-references do not prove equivalence. Nothing changes until you explicitly confirm an applicable review.</p>
+    <p>Reviews expire after 15 minutes and may be evicted or lost on restart. Successful switches remain in durable history.</p>
+    <p id="switch-message" role="status" aria-live="polite"></p>
+    <button id="switch-retry" type="button" hidden>Retry exact submitted switch</button>
+    <form id="switch-search">
+        <label>Search source <select name="provider"><option value="all">All (multiple provider requests)</option><option value="comicvine">ComicVine</option><option value="metron">Metron</option><option value="gcd">GCD</option></select></label>
+        <label>Query <input name="query" required maxlength="500"></label>
+        <button type="submit">Search targets</button>
+    </form>
+    <section id="switch-results" aria-label="Provider search results"></section>
+    <section id="switch-review" aria-label="Reviewed switch"></section>
+    <section id="switch-success" aria-label="Successful switch"></section>
+    <h2>Successful switch history</h2>
+    <button id="switch-history-refresh" type="button">Latest history</button>
+    <section id="switch-history"></section>
+    <button id="switch-history-more" type="button" hidden>Older switches</button>
+    <section id="switch-receipt" aria-label="Receipt details"></section>
+    <dialog id="switch-confirm" aria-labelledby="switch-confirm-title">
+        <h2 id="switch-confirm-title">Confirm metadata authority change</h2>
+        <p id="switch-confirm-identity"></p>
+        <p>This updates selected-provider metadata, may add target issues, rebind reviewed operator-confirmed content claims and coverage, and change derived Wanted state.</p>
+        <p>Existing local IDs, files, folders, monitoring and old provider identities are retained. Files moved: 0. Files renamed: 0. ComicInfo writes: 0.</p>
+        <p>There is no snapshot undo. Switching back requires a fresh acquisition and review.</p>
+        <button id="switch-confirm-cancel" type="button">Cancel</button>
+        <button id="switch-confirm-apply" type="button">Apply this reviewed switch</button>
+    </dialog>
+    <dialog id="switch-mapping" aria-labelledby="switch-mapping-title">
+        <h2 id="switch-mapping-title">Choose exact target issue</h2>
+        <p>Labels aid your review; they never automatically establish correspondence.</p>
+        <label>Filter admitted target issues <input id="switch-mapping-filter" maxlength="200"></label>
+        <div id="switch-mapping-choices"></div>
+        <button id="switch-mapping-close" type="button">Close</button>
+    </dialog>
+</main>
+{% endblock %}

@@ -1,0 +1,23 @@
+#maintenance { display: block; padding: 1.5rem; width: 100%; overflow: auto; overflow-wrap: anywhere; color: var(--text-color); }
+#maintenance > * { flex: none; overflow: visible; }
+#maintenance section { margin: 1.5rem 0; scroll-margin-top: 1rem; }
+#maintenance h2, #maintenance h3 { margin: 1rem 0 .5rem; }
+#maintenance p { margin: .6rem 0; }
+#maintenance nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+#maintenance form { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end; }
+#maintenance label { display: inline-flex; flex-direction: column; gap: .3rem; }
+#maintenance [hidden] { display: none !important; }
+#maintenance button, #maintenance input, #maintenance select { margin: .3rem; padding: .5rem; color: var(--text-color); background: var(--foreground-color); border: 1px solid var(--border-color); border-radius: .3rem; font: inherit; max-width: 100%; }
+#maintenance button:hover, #maintenance :focus-visible { outline: 2px solid var(--accent-color); }
+#maintenance a, #maintenance summary { color: var(--accent-color); cursor: pointer; }
+#maintenance table { width: 100%; border-collapse: collapse; }
+#maintenance td, #maintenance th { padding: .5rem; border-bottom: 1px solid #888; text-align: left; vertical-align: top; }
+#maintenance .maintenance-table { overflow-x: auto; }
+#maintenance .maintenance-notice { border: 1px solid #c85; padding: .7rem; }
+#maintenance pre { white-space: pre-wrap; max-height: 20rem; overflow: auto; }
+#maintenance button:disabled { opacity: .5; cursor: not-allowed; }
+#maintenance dialog { margin: auto; padding: 1.5rem; max-width: min(55rem, 95vw); max-height: 85vh; overflow: auto; background: var(--background-color); color: var(--text-color); border: 1px solid var(--border-color); }
+#maintenance dialog::backdrop { background: #000a; }
+#archive-review th:first-child, #archive-review td:first-child { white-space: nowrap; width: 3.5rem; }
+#archive-review th:nth-child(2) { width: 32%; }
+#archive-dialog { width: min(55rem, 95vw); }

@@ -1,0 +1,1015 @@
+# -*- coding: utf-8 -*-
+
+"""
+Handling folders, files and filenames.
+"""
+
+import ctypes
+from collections import deque
+from ctypes import wintypes
+from datetime import datetime
+from os import chmod, listdir, makedirs, remove, scandir, utime
+from os.path import (abspath, basename, commonpath, dirname, isdir,
+                     isfile, join, relpath, samefile, sep, splitext)
+from re import compile
+from shutil import chown, copy2, copytree, move, rmtree
+from typing import Dict, Iterable, List, Sequence, Union
+from zipfile import ZIP_DEFLATED, ZipFile
+
+from backend.base.definitions import (CharConstants, Constants,
+                                      FileConstants, OSType)
+from backend.base.helpers import (check_filter, force_prefix,
+                                  force_suffix, get_os_type, run_rar)
+from backend.base.logging import LOGGER
+
+filepath_cleaner = compile(
+    r'(<|>|(?<!^\w):|\"|\||\?|\*|\x00|(?:\s|\.)+(?=$|\\|/))'
+)
+smart_filepath_cleaner_compact = compile(
+    r'(\b[<>:]\b)'
+)
+smart_filepath_cleaner_spaced = compile(
+    r'(\b\s[<>]\s\b|\b:\s\b)'
+)
+smart_filestring_cleaner_compact = compile(
+    r'((?:\b|^)/(?:\b|$))'
+)
+
+
+# region Getting
+def folder_path(*folders: str) -> str:
+    """Turn filepaths relative to the project folder into absolute paths.
+
+    Returns:
+        str: The absolute filepath.
+    """
+    return join(dirname(dirname(dirname(abspath(__file__)))), *folders)
+
+
+def list_folders(base_folder: str) -> List[str]:
+    """List all folders in a base folder recursively with absolute paths. Hidden
+    folders (folders starting with `.`) are ignored.
+
+    Args:
+        base_folder (str): The base folder to list sub-folders for.
+
+    Returns:
+        List[str]: The list of folders that are recursively in the base folder.
+            Intermediary folders are included (e.g. if `/foo/bar/quux` is in the
+            list, then so is `/foo/bar`). The base folder itself is not included.
+    """
+    folders: List[str] = []
+    to_dos = deque((base_folder,))
+
+    while to_dos:
+        to_do = to_dos.popleft()
+        for f in scandir(to_do):
+            if f.is_dir() and not f.name.startswith('.'):
+                folders.append(f.path)
+                to_dos.append(f.path)
+
+    return folders
+
+
+def list_files(folder: str, ext: Iterable[str] = []) -> List[str]:
+    """List all files in a folder recursively with absolute paths. Hidden files
+    (files starting with `.`) are ignored.
+
+    Args:
+        folder (str): The base folder to search through.
+
+        ext (Iterable[str], optional): File extensions to only include.
+            Dot-prefix optional. Keep empty to allow all extensions.
+            Defaults to [].
+
+    Returns:
+        List[str]: The absolute paths of the files in the folder.
+    """
+    files: List[str] = []
+    to_dos = deque((folder,))
+    ext = {force_prefix(e.lower(), '.') for e in ext}
+
+    while to_dos:
+        to_do = to_dos.popleft()
+        for f in scandir(to_do):
+            if f.is_dir():
+                to_dos.append(f.path)
+
+            elif (
+                f.is_file()
+                and not f.name.startswith('.')
+                and check_filter(
+                    splitext(f.name)[1].lower(),
+                    ext
+                )
+            ):
+                files.append(f.path)
+
+    return files
+
+
+def get_archive_mimetype(filepath: str) -> Union[str, None]:
+    """Find the archive type of a file based on its actual mimetype (via magic
+    bytes) and return accompanying extension if found.
+
+    Note: This function is not very fast because it has to read the first few
+    bytes of the file from disc. So only use when really necessary.
+
+    Args:
+        filepath (str): The (archive) file to check for.
+
+    Returns:
+        Union[str, None]: The proper lowercase file extension without dot-prefix.
+            If the file isn't an archive or isn't recognised as one, return None.
+    """
+    max_len = max(len(sig) for sig in FileConstants.ARCHIVE_MAGIC_BYTES)
+
+    with open(filepath, 'rb') as f:
+        file_start = f.read(max_len)
+        for sig, ext in FileConstants.ARCHIVE_MAGIC_BYTES.items():
+            if file_start.startswith(sig):
+                return ext
+        return None
+
+
+# region Checking
+def folder_is_inside_folder(
+    base_folder: str,
+    folder: str
+) -> bool:
+    """Check whether `folder` is inside `base_folder`. If folders are equal,
+    they are also considered inside.
+
+    ```
+    >>> folder_is_inside_folder('/foo', '/foo/bar')
+    True
+    >>> folder_is_inside_folder('/foo', '/quux/bar')
+    False
+    >>> folder_is_inside_folder('/foo/', '/foo')
+    True
+    ```
+
+    Args:
+        base_folder (str): The base folder to check against.
+        folder (str): The folder that should be inside `base_folder` or equal
+            to it.
+
+    Returns:
+        bool: Whether `folder` is in `base_folder` or equal to it.
+    """
+    return (
+        force_suffix(abspath(folder))
+    ).startswith(
+        force_suffix(abspath(base_folder))
+    )
+
+
+def are_folders_colliding(
+    check_folder: str,
+    existing_folders: Iterable[str],
+    folder_to_skip: Union[str, None] = None
+) -> bool:
+    """Check whether the folder is the parent or child of any folder
+    in the iterable.
+
+    ```
+    >>> are_folders_colliding('/foo/bar', ['/foo/quux', '/foo/baz'])
+    False
+    >>> are_folders_colliding('/foo/bar', [])
+    False
+    >>> are_folders_colliding('/foo/bar', ['/foo/bar', '/foo/quux'])
+    True
+    >>> are_folders_colliding('/foo/bar', ['/foo/bar/baz'])
+    True
+    >>> are_folders_colliding('/foo/bar', ['/foo'])
+    True
+    ```
+
+    Args:
+        check_folder (str): The folder to check for.
+        existing_folders (Iterable[str]): The folders to check against.
+        folder_to_skip (Union[str, None], optional): If given, a folder in the
+            `existing_folders` iterable that should be skipped.
+            Defaults to None.
+
+    Returns:
+        bool: Whether `check_folder` is the parent or child of any of the folders
+            inside `existing_folders` excluding `folder_to_skip` (if not `None`).
+    """
+    for existing_folder in existing_folders:
+        if existing_folder == folder_to_skip:
+            continue
+
+        if (
+            folder_is_inside_folder(check_folder, existing_folder)
+            or folder_is_inside_folder(existing_folder, check_folder)
+        ):
+            return True
+
+    return False
+
+
+def archive_contains_issues(archive_file: str) -> bool:
+    """Check whether an archive file contains complete issues or is one single
+    issue.
+
+    Args:
+        archive_file (str): The archive file to check. Must have the zip or rar
+            extension.
+
+    Returns:
+        bool: Whether the archive file contains complete issue files.
+    """
+    ext = splitext(archive_file)[1].lower()
+
+    if ext == '.zip':
+        with ZipFile(archive_file, "r") as zip:
+            namelist = zip.namelist()
+
+    elif ext == '.rar':
+        namelist = run_rar([
+            "lb", # List archive contents bare
+            archive_file # Archive to list contents of
+        ]).stdout.split("\n")[:-1]
+
+    else:
+        return False
+
+    return any(
+        splitext(f)[1].lower() in FileConstants.CONTAINER_EXTENSIONS
+        for f in namelist
+    )
+
+
+# region Conversion
+def uppercase_drive_letter(path: str) -> str:
+    """Return the input, but if it's a Windows path that starts with a drive
+    letter, then return the path with the drive letter uppercase.
+
+    Args:
+        path (str): The input path, possibly a Windows path with a drive letter.
+
+    Returns:
+        str: The input path, but with an upper case Windows drive letter if
+        a Windows drive letter is present.
+    """
+    if (
+        len(path) >= 4
+        and (
+            path[1:3] == ":\\"
+            or path[1:3] == ":/"
+        )
+        and path[0].lower() in CharConstants.ALPHABET
+    ):
+        path = path[0].upper() + path[1:]
+
+    return path
+
+
+def set_detected_extension(filepath: str) -> str:
+    """Find the archive type of a file based on its actual mimetype (via magic
+    bytes) and return the filepath with the correct extension. If the file
+    is not an archive or the archive is not recognised, the original
+    filepath is returned.
+
+    Note: This function is not very fast because it has to read the first few
+    bytes of the file from disc. So only use when really necessary.
+
+    Args:
+        filepath (str): The filepath to check and possibly change the extension of.
+
+    Returns:
+        str: The filepath with the correct extension based on the archive type.
+    """
+    ext = get_archive_mimetype(filepath)
+    if ext is None:
+        return filepath
+
+    # Found archive type
+    file_parts = splitext(filepath)
+    current_extension = file_parts[1].lower().lstrip('.')
+    if current_extension == ext:
+        # Already has the correct extension
+        return filepath
+
+    if current_extension in FileConstants.CB_TO_ARCHIVE_EXTENSIONS:
+        # Current file uses cb* extension instead of normal extension
+        # (e.g. cbz instead of zip), so find cb* version of proper extension
+        for cb_ext, normal_ext in FileConstants.CB_TO_ARCHIVE_EXTENSIONS.items():
+            if ext == normal_ext:
+                ext = cb_ext
+                break
+        else:
+            # Not an archive
+            return filepath
+
+    return file_parts[0] + '.' + ext
+
+
+def change_basefolder(
+    files: Iterable[str],
+    current_base_folder: str,
+    desired_base_folder: str
+) -> Dict[str, str]:
+    """
+    Propose new filenames with a different base folder for a list of files.
+    It's only a proposition, so nothing is actually renamed.
+
+    ```
+    >>> change_basefolder(
+        ['/foo/bar/baz.cbr', '/foo/bar/quux/tac.cbr'],
+        '/foo/bar',
+        '/new'
+    )
+    {
+        '/foo/bar/baz.cbr': '/new/baz.cbr',
+        '/foo/bar/quux/tac.cbr': '/new/quux/tac.cbr'
+    }
+    ```
+
+    Args:
+        files (Iterable[str]): Files to change the base folder for.
+        current_base_folder (str): Current base folder, to replace.
+        desired_base_folder (str): Desired base folder, to replace with.
+
+    Returns:
+        Dict[str, str]: Key is old filename, value is new filename.
+    """
+    file_changes = {
+        f: abspath(join(
+            desired_base_folder,
+            relpath(
+                f,
+                current_base_folder
+            )
+        ))
+        for f in files
+    }
+
+    return file_changes
+
+
+def clean_filepath_simple(filepath: str) -> str:
+    """Clean a filepath by removing illegal characters. This makes it safe to
+    use in a filesystem.
+
+    ```
+    >>> clean_filepath_simple('/comics/Batman: The Start... ')
+    '/comics/Batman The Start'
+    ```
+
+    Args:
+        filepath (str): The filepath to be cleaned.
+
+    Returns:
+        str: The cleaned filepath.
+    """
+    safe_filepath = filepath_cleaner.sub('', filepath)
+    return safe_filepath
+
+
+def clean_filepath_smartly(filepath: str) -> str:
+    """Clean a filepath by replacing illegal characters smartly. Remove the
+    character, replace it with a dash or replace it with a dash with spaces
+    around it, all based on the context. This makes it safe to use in a
+    filesystem.
+
+    ```
+    >>> clean_filepath_smartly('/comics/Batman: Joker>Riddler... ')
+    '/comics/Batman - Joker-Riddler'
+    ```
+
+    Args:
+        filepath (str): The filepath to be cleaned.
+
+    Returns:
+        str: The cleaned filepath.
+    """
+    save_filepath = smart_filepath_cleaner_compact.sub('-', filepath)
+    save_filepath = smart_filepath_cleaner_spaced.sub(' - ', save_filepath)
+    save_filepath = clean_filepath_simple(save_filepath)
+    return save_filepath
+
+
+def clean_filestring_simple(filestring: str) -> str:
+    """Clean (a part of) a filename by removing illegal characters. This makes
+    it safe to use in a filesystem. This does the same as
+    `clean_filepath_simple()`, but also replaces `/` and `\\`.
+
+    ```
+    >>> clean_filestring_simple('Batman/Bruce: Which one is it?')
+    'BatmanBruce Which one is it'
+    ```
+
+    Args:
+        filestring (str): The string to clean.
+
+    Returns:
+        str: The cleaned string.
+    """
+    return clean_filepath_simple(
+        filestring.replace('/', '').replace('\\', '')
+    )
+
+
+def clean_filestring_smartly(filestring: str) -> str:
+    """Clean (a part of) a filename by replacing illegal characters smartly.
+    Remove the character, replace it with a dash or replace it with a dash with
+    spaces around it, all based on the context. This does the same as
+    `clean_filepath_smartly()`, but also replaces `/` and `\\`. This makes it
+    safe to use in a filesystem.
+
+    ```
+    >>> clean_filestring_smartly('Batman/Bruce: Which one is it?')
+    'Batman-Bruce - Which one is it'
+    ```
+
+    Args:
+        filestring (str): The string to clean.
+
+    Returns:
+        str: The cleaned string.
+    """
+    save_filepath = smart_filestring_cleaner_compact.sub('-', filestring)
+    save_filepath = save_filepath.replace(' / ', ' - ')
+    save_filepath = clean_filepath_smartly(save_filepath)
+    return save_filepath
+
+
+# region Processing
+def common_folder(files: Sequence[str]) -> str:
+    """Find the deepest folder that is shared between the folders and files.
+
+    ```
+    >>> common_folder(['/foo/bar/baz', '/foo/bar/quux/tac.cbr'])
+    '/foo/bar'
+    >>> common_folder(['/foo/bar/baz'])
+    '/foo/bar/baz'
+    ```
+
+    Args:
+        files (Sequence[str]): The list of files to find the deepest common
+            folder for.
+
+    Returns:
+        str: The path of the deepest common folder.
+    """
+    if len(files) == 1:
+        return dirname(files[0])
+
+    return commonpath(files)
+
+
+def generate_archive_folder(
+    volume_folder: str,
+    archive_file: str
+) -> str:
+    """Generate a folder in which the given archive file can be extracted. The
+    folder is not created.
+
+    ```
+    >>> generate_archive_folder(
+        '/comics/Batman',
+        '/comics/Batman/Batman #1-100/Batman (2010) #1-100.cbr'
+    )
+    '/comics/Batman/.archive_extract_Batman #1-100_Batman (2010) #1-100'
+    ```
+
+    Args:
+        volume_folder (str): The volume folder that the archive file is in.
+        archive_file (str): The filepath of the archive file itself.
+
+    Returns:
+        str: The folder in which the archive file can be extracted.
+    """
+    folder_name_parts = (
+        Constants.ARCHIVE_EXTRACT_FOLDER,
+        *relpath(splitext(archive_file)[0], volume_folder).split(sep)
+    )
+
+    return join(
+        volume_folder,
+        '_'.join(folder_name_parts)
+    )
+
+
+# region Creation
+def create_folder(folder: str) -> None:
+    """Create a folder recursively, if any of the folders don't exist already.
+
+    Args:
+        folder (str): The path to the folder to create.
+    """
+    makedirs(folder, exist_ok=True)
+    return
+
+
+def create_zip_archive(
+    base_folder: str,
+    zip_filename: str
+) -> None:
+    """Put all files in a folder (recursively) into a zip archive.
+
+    Args:
+        base_folder (str): The folder to zip. The folder itself is not included.
+        zip_filename (str): The path of the zip file to create.
+    """
+    with ZipFile(zip_filename, "w", ZIP_DEFLATED) as zip:
+        for file in list_files(base_folder):
+            zip.write(file, relpath(file, base_folder))
+    return
+
+
+# region Altering
+def __set_windows_times(filepath: str, timestamp: float) -> None:
+    try:
+        FILE_WRITE_ATTRIBUTES = 0x0100
+        OPEN_EXISTING = 3
+        FILE_SHARE_READ = 0x00000001
+        FILE_SHARE_WRITE = 0x00000002
+        FILE_SHARE_DELETE = 0x00000004
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True) # type: ignore
+
+        CreateFileW = kernel32.CreateFileW
+        CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        CreateFileW.restype = wintypes.HANDLE
+
+        SetFileTime = kernel32.SetFileTime
+        SetFileTime.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        SetFileTime.restype = wintypes.BOOL
+
+        CloseHandle = kernel32.CloseHandle
+
+        handle = CreateFileW(
+            filepath,
+            FILE_WRITE_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            0,
+            None,
+        )
+
+        if handle == wintypes.HANDLE(-1).value:
+            return
+
+        # Windows FILETIME: 100 ns intervals since 1601-01-01
+        WINDOWS_EPOCH = 11644473600
+        intervals = int((timestamp + WINDOWS_EPOCH) * 10_000_000)
+
+        ft = wintypes.FILETIME(
+            intervals & 0xFFFFFFFF,
+            intervals >> 32,
+        )
+
+        # creation time + modification time
+        SetFileTime(handle, ctypes.byref(ft), None, ctypes.byref(ft))
+        CloseHandle(handle)
+
+    except Exception:
+        pass
+
+    return
+
+
+def __set_macos_times(filepath: str, timestamp: float) -> None:
+    try:
+        libc = ctypes.CDLL("libc.dylib", use_errno=True)
+
+        class Timespec(ctypes.Structure):
+            _fields_ = [("tv_sec", ctypes.c_long), ("tv_nsec", ctypes.c_long)]
+
+        class Attrlist(ctypes.Structure):
+            _fields_ = [
+                ("bitmapcount", ctypes.c_ushort),
+                ("reserved", ctypes.c_ushort),
+                ("commonattr", ctypes.c_uint),
+                ("volattr", ctypes.c_uint),
+                ("dirattr", ctypes.c_uint),
+                ("fileattr", ctypes.c_uint),
+                ("forkattr", ctypes.c_uint),
+            ]
+
+        ATTR_BIT_MAP_COUNT = 5
+        ATTR_CMN_CRTIME = 0x00000200
+
+        attrlist = Attrlist(
+            bitmapcount=ATTR_BIT_MAP_COUNT,
+            reserved=0,
+            commonattr=ATTR_CMN_CRTIME,
+            volattr=0,
+            dirattr=0,
+            fileattr=0,
+            forkattr=0,
+        )
+
+        ts = Timespec(
+            tv_sec=int(timestamp),
+            tv_nsec=int((timestamp % 1) * 1_000_000_000),
+        )
+
+        libc.setattrlist(
+            filepath.encode("utf-8"),
+            ctypes.byref(attrlist),
+            ctypes.byref(ts),
+            ctypes.sizeof(ts),
+            0,
+        )
+
+    except Exception:
+        pass
+    return
+
+
+def set_file_date(filepath: str, file_date: str) -> None:
+    """Set the date of a file or folder to the given date.
+    - Linux: modification time and access time
+    - Windows: modification time and creation time
+    - MacOS: modification time, access time and creation time
+
+    Args:
+        filepath (str): The path to the file to set the date for.
+        file_date (str): The date to set, in `YYYY-MM-DD` format.
+    """
+    from backend.base.issue_facts import BibliographicDate, DateKind
+    day = BibliographicDate.interpret(file_date, DateKind.LEGACY_SELECTED,
+                                     'legacy_mapped', 'date').exact_day
+    if day is None:
+        return  # No fabricated timestamp for partial/unsupported bibliography.
+    timestamp = datetime.combine(day, datetime.min.time()).timestamp()
+
+    os_type = get_os_type()
+    if os_type == OSType.LINUX:
+        utime(filepath, times=(timestamp, timestamp))
+
+    elif os_type == OSType.WINDOWS:
+        __set_windows_times(filepath, timestamp)
+
+    elif os_type == OSType.MACOS:
+        __set_macos_times(filepath, timestamp)
+
+    return
+
+
+def set_volume_folder_permissions(
+    volume_folder: str,
+    root_folder: str,
+    folder_permissions: str
+) -> None:
+    """Set the (chmod) permissions of a volume folder, folders between the root
+    folder and the volume folder, its sub-folders and its files. The folders are
+    set to have the given permissions. The files are set to have the given
+    permissions but without the execution bit (e.g. the folders are set to
+    `'755'` and the files to `'644'`). This function will (safely) not perform
+    anything unless the OS is Linux or MacOS.
+
+    Args:
+        volume_folder (str): The path to the volume folder.
+
+        root_folder (str): The path to the root folder that the volume folder is
+            in.
+
+        folder_permissions (str): The permissions that should be applied to the
+            folders, in string form. E.g.: `'755'`. The same permissions, but
+            without the execution bit, are applied to the files.
+    """
+    # We can't set the permissions if we don't own the file as the user. This
+    # doesn't happen in Kapowarr, as we only change the owner group, but the
+    # user could manually change it.
+
+    if get_os_type() not in (OSType.LINUX, OSType.MACOS):
+        # Only Linux and MacOS support chmod-type permissions
+        return
+
+    # Set folders leading up to, and including, the volume folder
+    octal_folder_permissions = int(folder_permissions, 8)
+    towards_volume_folder = relpath(volume_folder, root_folder).split(sep)
+    for i in range(len(towards_volume_folder)):
+        chmod(
+            join(root_folder, *towards_volume_folder[:i + 1]),
+            octal_folder_permissions
+        )
+
+    # Set all sub-folders
+    for folder in list_folders(volume_folder):
+        chmod(folder, octal_folder_permissions)
+
+    # Set all files in the folder
+    file_permissions = ''.join((
+        str(int(p) - 1) if int(p) % 2 == 1 else p
+        for p in folder_permissions
+    ))
+    octal_file_permissions = int(file_permissions, 8)
+    for file in list_files(volume_folder):
+        chmod(file, octal_file_permissions)
+
+    return
+
+
+def set_volume_folder_owner_group(
+    volume_folder: str,
+    root_folder: str,
+    owner_group: str
+) -> None:
+    """Set the (chown) group owner of a volume folder, folders between the root
+    folder and the volume folder, its sub-folders and its files. This function
+    will (safely) not perform anything unless the OS is Linux or MacOS.
+
+    Args:
+        volume_folder (str): The path to the volume folder.
+
+        root_folder (str): The path to the root folder that the volume folder is
+            in.
+
+        owner_group (str): The group that should be applied to the folders and
+            files. The string can be in the form of a group name (e.g. `'media'`)
+            or a group number (e.g. `'1000'`).
+    """
+    # We can't change the group ownership if the running user isn't part of the
+    # target ownergroup. This doesn't happen in Kapowarr, but the user could
+    # manually change it.
+
+    if get_os_type() not in (OSType.LINUX, OSType.MACOS):
+        # Only Linux and MacOS support chown-type ownership
+        return
+
+    # Set folders leading up to, and including, the volume folder
+    towards_volume_folder = relpath(volume_folder, root_folder).split(sep)
+    for i in range(len(towards_volume_folder)):
+        chown(
+            join(root_folder, *towards_volume_folder[:i + 1]),
+            group=owner_group
+        )
+
+    # Set all sub-folders
+    for folder in list_folders(volume_folder):
+        chown(folder, group=owner_group)
+
+    # Set all files in the folder
+    for file in list_files(volume_folder):
+        chown(file, group=owner_group)
+
+    return
+
+
+# region Moving
+def copy(
+    src,
+    dst,
+    *,
+    follow_symlinks=True
+) -> str:
+    """Copy a file or folder.
+
+    Args:
+        src (str): The source file or folder.
+        dst (str): The destination of the copy.
+        follow_symlinks (bool, optional): Whether to follow symlinks.
+            Defaults to True.
+
+    Returns:
+        str: The destination.
+    """
+    try:
+        return copy2(src, dst, follow_symlinks=follow_symlinks)
+
+    except PermissionError as pe:
+        if pe.errno == 1:
+            # Issue 117
+            # NFS file system doesn't allow/support chmod.
+            # This is done after the file is already copied. So just accept that
+            # it isn't possible to change the permissions. Continue like normal.
+            return dst
+
+        raise
+
+    except OSError as oe:
+        if oe.errno == 524:
+            # Issue 229
+            # NFS file system doesn't allow/support setting extended attributes.
+            # This is done after the file is already copied. So just accept that
+            # it isn't possible to set them. Continue like normal.
+            return dst
+
+        raise
+
+
+def rename_file(
+    before: str,
+    after: str
+) -> None:
+    """Rename a file/folder, but also taking care of creating the new location,
+    handling the possible complications with files on OSes and filesystems,
+    moving a folder into a sub-folder of itself and logging the rename.
+
+    Args:
+        before (str): The current filepath of the file.
+        after (str): The new desired filepath of the file.
+    """
+    LOGGER.debug(f'Renaming file {before} to {after}')
+
+    if folder_is_inside_folder(before, after):
+        # Cannot move folder into itself
+        old_before = before
+        before = old_before + '_temp'
+        move(old_before, before, copy_function=copy)
+
+    create_folder(dirname(after))
+
+    # Move file into folder
+    move(before, after, copy_function=copy)
+
+    return
+
+
+def copy_directory(source: str, target: str) -> None:
+    """Copy a directory.
+
+    Args:
+        source (str): The current folderpath of the source directory.
+        target (str): The desired folderpath to where the directory should be copied.
+    """
+    copytree(source, target, copy_function=copy)
+    return
+
+
+# region Deletion
+def delete_file_folder(path: str) -> None:
+    """Delete a file or folder. In the case of a folder, it is deleted
+    recursively. Does nothing if it doesn't exist. I.E.: delete whatever it is,
+    if it exists.
+
+    Args:
+        path (str): The path to the file or folder.
+    """
+    if isfile(path):
+        remove(path)
+
+    elif isdir(path):
+        rmtree(path, ignore_errors=True)
+
+    return
+
+
+def delete_empty_parent_folders(top_folder: str, root_folder: str) -> None:
+    """Delete parent folders that are empty until we reach a folder with content
+    or the root folder. Take notice of the difference between this function and
+    `delete_empty_child_folders()`.
+
+    For example, assume the following folder and file structure:
+
+    ```
+    /ant/bear/cat/dog/
+    /ant/bear/cow/deer.txt
+    ```
+
+    Then:
+
+    ```
+    >>> delete_empty_parent_folders(
+        top_folder="/ant/bear/cat/dog",
+        root_folder="/ant"
+    )
+    # Deletes "/ant/bear/cat"
+    ```
+
+    Args:
+        top_folder (str): The folder to start deleting from.
+        root_folder (str): The root folder to stop at in case we reach it.
+    """
+    if top_folder == root_folder:
+        return
+
+    LOGGER.debug(
+        f'Deleting empty parent folders from {top_folder} until {root_folder}'
+    )
+
+    if not folder_is_inside_folder(root_folder, top_folder):
+        LOGGER.error(f'The folder {top_folder} is not in {root_folder}')
+        return
+
+    if isfile(top_folder):
+        top_folder = dirname(top_folder)
+
+    parent_folder = top_folder
+    child_folder = None
+
+    while parent_folder:
+        if isdir(parent_folder):
+            if samefile(parent_folder, root_folder):
+                break
+
+            if listdir(parent_folder) not in ([], [child_folder]):
+                # Folder has content and that content isn't just the empty child
+                break
+
+        child_folder = basename(parent_folder)
+        parent_folder = dirname(parent_folder)
+
+    if child_folder:
+        lowest_empty_folder = join(parent_folder, child_folder)
+        LOGGER.debug(f'Deleting folder and children: {lowest_empty_folder}')
+        delete_file_folder(lowest_empty_folder)
+
+    return
+
+
+def delete_empty_child_folders(
+    base_folder: str,
+    skip_hidden_folders: bool = False
+) -> None:
+    """Delete child folders that don't (recursively) contain any files. Take
+    notice of the difference between this function and
+    `delete_empty_parent_folders()`.
+
+    For example, assume the following folder and file structure:
+
+    ```
+    /ant/bear/cat/dog/
+    /ant/bear/cat/deer/
+    /ant/bee/cow/
+    /ant/bee/camel.txt
+    /ant/bat.txt
+    ```
+
+    Then:
+
+    ```
+    >>> delete_empty_child_folders(base_folder="/ant")
+    # Deletes "/ant/bear" and "/ant/bee/cow"
+    ```
+
+    Args:
+        base_folder (str): The base folder to remove empty children of.
+        skip_hidden_folders (bool, optional): Whether to skip hidden folders
+            (folders starting with `.`). Defaults to False.
+    """
+    LOGGER.debug(f'Deleting empty child folders from {base_folder}')
+
+    if isfile(base_folder):
+        base_folder = dirname(base_folder)
+
+    resulting_folders: List[str] = []
+
+    def _decf(
+        folder: str,
+        resulting_folders: List[str],
+        _first_call: bool = True
+    ) -> bool:
+        folders: List[str] = []
+        contains_files: bool = False
+
+        for f in scandir(folder):
+            if f.is_dir() and (
+                not skip_hidden_folders
+                or not f.name.startswith('.')
+            ):
+                folders.append(f.path)
+
+            elif f.is_file():
+                contains_files = True
+
+        if not (contains_files or folders):
+            # Folder is empty
+            return True
+
+        sub_folder_results = {
+            f: _decf(f, resulting_folders, False)
+            for f in folders
+        }
+
+        if not contains_files and all(sub_folder_results.values()):
+            # Folder only contains (indirectly) empty folders
+            if _first_call:
+                resulting_folders.extend(sub_folder_results.keys())
+            return True
+
+        resulting_folders.extend((
+            k
+            for k, v in sub_folder_results.items()
+            if v
+        ))
+
+        return False
+
+    _decf(base_folder, resulting_folders)
+
+    for f in resulting_folders:
+        LOGGER.debug(f"Deleting folder and children: {f}")
+        delete_file_folder(f)
+
+    return

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Library Maintenance{% endblock %}
+{% block css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/maintenance.css') }}">{% endblock %}
+{% block js %}<script src="{{ url_for('static', filename='js/maintenance.js') }}" defer></script><script src="{{ url_for('static', filename='js/archive_maintenance.js') }}" defer></script>{% endblock %}
+{% block main %}
+<main id="maintenance">
+    <h1>Library Maintenance</h1>
+    <p>Inspect your library, review findings and read durable operation history.</p>
+    <p class="maintenance-notice">Library changes require an action-specific review and explicit confirmation. Reviews are bounded and expire or disappear on application restart; durable receipts and journals remain in History. Recovery continues a recorded operation. Revert and restore are conditional, not universal undo.</p>
+    <nav aria-label="Maintenance sections">
+        <a href="#maintenance-overview">Overview</a>
+        <a href="#maintenance-problems">Problems</a>
+        <a href="#maintenance-review">Review</a>
+        <a href="#maintenance-history">History</a>
+        <a href="#archive-maintenance">Archive Maintenance</a>
+    </nav>
+    <p id="maintenance-message" role="status" aria-live="polite"></p>
+    <section id="archive-maintenance" aria-labelledby="archive-title">
+        <h2 id="archive-title">Archive Maintenance</h2>
+        <p>Verify archives, convert CBR to CBZ, or explicitly repack a readable CBZ. Page bytes and metadata are preserved; container changes are not quality upgrades. No PDF conversion.</p>
+        <form id="archive-volume-form"><label>Find volume <input id="archive-volume-query" type="search" maxlength="200"></label><button type="submit">Find volumes</button></form>
+        <label>Scope <select id="archive-volume"><option value="">Library — paged files</option></select></label>
+        <p id="archive-message" role="status" aria-live="polite">Loading archive file list…</p>
+        <div id="archive-files"></div>
+        <div class="maintenance-actions">
+            <button id="archive-select" type="button">Select page</button>
+            <button id="archive-scan" type="button">Scan selected — no changes</button>
+            <button id="archive-preview" type="button">Preview / Dry Run</button>
+            <button id="archive-cancel" type="button" disabled>Cancel task</button>
+            <button id="archive-previous" type="button" disabled>Previous files</button>
+            <button id="archive-next" type="button" disabled>Next files</button>
+        </div>
+        <p>Selections are page-scoped. Up to 100 files per reviewed batch; each replacement has its own recovery journal. Healthy CBZs are never rewritten by scanning.</p>
+        <label>Findings <select id="archive-filter"><option value="all">All</option><option value="convertible">CBR → CBZ</option><option value="healthy">Healthy CBZ / explicit repack</option><option value="shared">Shared / seed source</option><option value="review_required">Review required / unreadable</option><option value="blocked">Blocked</option><option value="completed">Completed</option></select></label>
+        <div id="archive-results"></div>
+        <button id="archive-results-next" type="button" disabled>Next findings</button>
+        <a href="#maintenance-history">Maintenance history and interrupted-operation recovery</a>
+        <dialog id="archive-dialog" aria-labelledby="archive-dialog-title">
+            <h2 id="archive-dialog-title" tabindex="-1">Review archive replacements</h2>
+            <p>No library changes have occurred. Selected originals remain authoritative until verified replacement. Shared seeding sources are left unchanged. Completed conversions have no indefinite undo.</p>
+            <div id="archive-review"></div>
+            <button id="archive-apply" type="button">Confirm selected replacements</button>
+            <button id="archive-close" type="button">Cancel</button>
+        </dialog>
+    </section>
+    <section id="maintenance-overview" aria-labelledby="maintenance-overview-title">
+        <h2 id="maintenance-overview-title">Read-only health inspection</h2>
+        <form id="maintenance-scan-form">
+            <label>Inspection level
+                <select id="maintenance-level">
+                    <option value="inventory">Inventory — paths, ownership and policy</option>
+                    <option value="archive">Archive — inspect bounded archive metadata</option>
+                    <option value="deep">Deep — stream hashes (extra disk IO)</option>
+                </select>
+            </label>
+            <label>Scope
+                <select id="maintenance-scope">
+                    <option value="library">Whole library</option>
+                    <option value="root">Configured root</option>
+                    <option value="volumes">Selected volumes</option>
+                </select>
+            </label>
+            <label id="maintenance-root-label" hidden>Configured root
+                <select id="maintenance-root"></select>
+            </label>
+            <button id="maintenance-start" type="submit">Start read-only scan</button>
+        </form>
+        <div id="maintenance-volumes-label" hidden>
+            <form id="maintenance-volume-search-form">
+                <label>Find local volumes by title<input id="maintenance-volume-query" maxlength="200" type="search"></label>
+                <button type="submit">Find volumes</button>
+            </form>
+            <div id="maintenance-volume-selected" aria-live="polite"></div>
+            <div id="maintenance-volume-results"></div>
+        </div>
+        <p>Inventory is the cheapest inspection. Archive and Deep read additional data within backend limits. An incomplete scan cannot establish that the library is healthy.</p>
+        <div id="maintenance-scan-status">No scan yet.</div>
+        <button id="maintenance-cancel" type="button" disabled>Request scan cancellation</button>
+        <p>Cancellation is cooperative; it cannot immediately interrupt an OS-blocked read.</p>
+    </section>
+    <section id="maintenance-problems" aria-labelledby="maintenance-problems-title">
+        <h2 id="maintenance-problems-title">Problems</h2>
+        <form id="maintenance-filter-form">
+            <label>Category<select id="maintenance-category"><option value="">All categories</option>
+                {% for category in ['filesystem','association','archive','comicinfo','identity','policy','duplicate','metadata'] %}
+                <option value="{{ category }}">{{ category|capitalize }}</option>{% endfor %}</select></label>
+            <label>Severity<select id="maintenance-severity"><option value="">All severities</option>
+                <option value="error">Error</option><option value="warning">Warning</option>
+                <option value="policy_deviation">Policy deviation</option><option value="informational">Informational</option></select></label>
+            <label>Inspection<select id="maintenance-inspection"><option value="">All inspection states</option>
+                {% for state in ['complete','partial','unavailable','unsupported','skipped_by_policy','failed','bounded','cancelled'] %}
+                <option value="{{ state }}">{{ state|replace('_',' ')|capitalize }}</option>{% endfor %}</select></label>
+            <button type="submit">Filter findings</button>
+        </form>
+        <div id="maintenance-findings">Complete a scan to see findings.</div>
+        <button id="maintenance-create-review" type="button" disabled>Create reviewed worklist</button>
+    </section>
+    <section id="maintenance-review" aria-labelledby="maintenance-review-title">
+        <h2 id="maintenance-review-title">Reviewed worklist</h2>
+        <p>Select intent explicitly. A worklist does not authorize execution; each supported action still requires its own fresh review and confirmation.</p>
+        <button id="maintenance-reload-review" type="button">Reload current worklist</button>
+        <div id="maintenance-worklist">No worklist yet.</div>
+        <div id="maintenance-specialized" aria-live="polite"></div>
+        <button id="maintenance-retry-action" type="button" hidden>Check durable result / exact retry</button>
+    </section>
+    <section id="maintenance-history" aria-labelledby="maintenance-history-title">
+        <h2 id="maintenance-history-title">Maintenance history</h2>
+        <form id="maintenance-history-form">
+            <label>Operation<select id="maintenance-operation"><option value="">All operations</option>
+                {% for operation in ['archive_normalization','rename','folder_organization','comicinfo_repair','duplicate_quarantine','duplicate_restore','metadata_repair','provider_switch','content_claim','content_coverage','local_organization','intake'] %}
+                <option value="{{ operation }}">{{ operation|replace('_',' ')|capitalize }}</option>{% endfor %}</select></label>
+            <label>State<select id="maintenance-state"><option value="">All states</option>
+                {% for state in ['pending','active','complete','failed','recovery_required','unknown'] %}
+                <option value="{{ state }}">{{ state|replace('_',' ')|capitalize }}</option>{% endfor %}</select></label>
+            <button type="submit">Filter history</button>
+        </form>
+        <div id="maintenance-history-rows">No history loaded.</div>
+        <div id="maintenance-detail" aria-live="polite"></div>
+        <div id="maintenance-batch" aria-live="polite"></div>
+    </section>
+    <dialog id="maintenance-confirm" aria-labelledby="maintenance-confirm-title">
+        <h2 id="maintenance-confirm-title">Confirm reviewed operation</h2>
+        <p id="maintenance-confirm-description"></p>
+        <p>No filesystem-wide transaction is promised. Independent successful jobs are not rolled back automatically.</p>
+        <button id="maintenance-confirm-cancel" type="button" autofocus>Cancel</button>
+        <button id="maintenance-confirm-submit" type="button">Confirm reviewed operation</button>
+    </dialog>
+</main>
+{% endblock %}

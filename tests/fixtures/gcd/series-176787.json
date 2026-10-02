@@ -1,0 +1,52 @@
+{
+  "acquisition": {
+    "provider": "gcd",
+    "url": "https://www.comics.org/api/series/176787/",
+    "date": "2026-09-25",
+    "anonymous": true,
+    "status": 200,
+    "observed_fields": [
+      "api_url",
+      "name",
+      "country",
+      "language",
+      "active_issues",
+      "issue_descriptors",
+      "color",
+      "dimensions",
+      "paper_stock",
+      "binding",
+      "publishing_format",
+      "notes",
+      "year_began",
+      "year_ended",
+      "publisher"
+    ],
+    "transformation": "All response fields retained.",
+    "license": "GCD data: CC BY-SA 4.0; subset adapted for characterization; cover URLs only, no images."
+  },
+  "response": {
+    "api_url": "https://www.comics.org/api/series/176787/",
+    "name": "Batman: The Long Halloween Deluxe Edition",
+    "country": "us",
+    "language": "en",
+    "active_issues": [
+      "https://www.comics.org/api/issue/2267832/",
+      "https://www.comics.org/api/issue/2658754/"
+    ],
+    "issue_descriptors": [
+      "",
+      "[Batman Day Special Edition Variant Dust Jacket]"
+    ],
+    "color": "color",
+    "dimensions": "",
+    "paper_stock": "",
+    "binding": "hardcover",
+    "publishing_format": "collected edition",
+    "notes": "",
+    "year_began": 2021,
+    "year_ended": 2021,
+    "publisher": "https://www.comics.org/api/publisher/54/"
+  },
+  "public_fixture": "Synthetic prose; factual provider IDs/titles/type observations retained. No original synopsis or images."
+}

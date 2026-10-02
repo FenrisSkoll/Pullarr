@@ -1,0 +1,10 @@
+body {
+	justify-content: center;
+	background-color: var(--background-color);
+}
+
+h1 {
+	color: var(--accent-color);
+	text-align: center;
+	font-size: min(12vw, 5rem);
+}

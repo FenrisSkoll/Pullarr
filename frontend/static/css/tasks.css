@@ -1,0 +1,75 @@
+.main-window {
+	color: var(--text-color);
+	padding: 1rem;
+}
+
+.main-window h2 {
+	border-bottom: 2px solid var(--border-color);
+	margin-bottom: 1rem;
+}
+
+.main-window h2:not(:first-child) {
+	margin-top: 1rem;
+}
+
+.task-interval-container {
+	overflow-x: auto;
+}
+
+.task-interval-table {
+	min-width: 33.2rem;
+}
+
+.task-interval-table tr > .name-column {
+	min-width: 6rem;
+}
+
+.task-interval-table tr > :where(.schedule-column, .prev-column, .next-column) {
+	width: 8.5rem;
+}
+
+.task-interval-table tr > .actions-column {
+	width: 6rem;
+}
+
+.task-interval-table tr > td {
+	border-top: 1px solid var(--border-color);
+}
+
+.task-entry button {
+	height: 2rem;
+	padding: .4rem;
+}
+
+.task-entry button img {
+	height: 100%;
+}
+
+table {
+	width: 100%;
+}
+
+th, td {
+	padding: .5rem;
+}
+
+.history-entry > * {
+	border-top: 1px solid var(--border-color);
+}
+
+#task-form {
+	width: 100%;
+	max-width: 30rem;
+}
+
+#task-form tbody {
+	vertical-align: text-top;
+}
+
+#task-form:not(:has(#task-schedule-preset option[value=""]:checked)) #custom-schedule-row {
+	display: none;
+}
+
+#schedule-error {
+	margin-inline: auto;
+}
