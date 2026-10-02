@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Container version="2">
   <Name>Pullarr</Name>
-  <Repository>__PULLARR_IMAGE__</Repository>
-  <Registry>https://github.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/pkgs/container/pullarr</Registry>
+  <Repository>ghcr.io/fenrisskoll/pullarr:latest</Repository>
+  <Registry>https://github.com/FenrisSkoll/Pullarr/pkgs/container/pullarr</Registry>
   <Network>bridge</Network>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Icon>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/docs/assets/pullarr-ca.png</Icon>
+  <Icon>https://raw.githubusercontent.com/FenrisSkoll/Pullarr/main/docs/assets/pullarr-ca.png</Icon>
   <WebUI>http://[IP]:[PORT:5656]</WebUI>
   <Overview>Manage comic metadata, monitoring and Wanted acquisition, Reading Orders, quality profiles and verified upgrades. Browse GetComics Discover; use SABnzbd, NZBGet or qBittorrent with Prowlarr or Torznab. Reviewed archive maintenance preserves page bytes. Configure authentication before exposing beyond your trusted network.</Overview>
-  <Project>https://github.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__</Project>
-  <TemplateURL>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/templates/pullarr.xml</TemplateURL>
-  <ReadMe>https://raw.githubusercontent.com/__PULLARR_GITHUB_OWNER__/__PULLARR_APP_REPO__/main/README.md</ReadMe>
+  <Project>https://github.com/FenrisSkoll/Pullarr</Project>
+  <TemplateURL>https://raw.githubusercontent.com/FenrisSkoll/Pullarr/main/templates/pullarr.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/FenrisSkoll/Pullarr/main/README.md</ReadMe>
   <Category>MediaApp:Books</Category>
   <ExtraSearchTerms>comic comics manga arr library downloader organizer reading</ExtraSearchTerms>
   <Requires>Linux x86_64. Persistent appdata and access to client downloads. A common data mount and compatible underlying filesystem are required for hardlinks; safe copy fallback is supported.</Requires>
