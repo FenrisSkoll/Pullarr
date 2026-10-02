@@ -51,6 +51,9 @@ Read [configuration and deployment](docs/deployment.md) for bind mounts,
 download visibility, permissions, backups and upgrades. Do not run two Pullarr
 processes against the same database.
 
+For Unraid storage, UID/GID and hardlink guidance, see [Unraid deployment](docs/unraid.md).
+Community Applications availability remains pending public publication and review.
+
 ## Source installation
 
 Tested with Python 3.11 on Windows and Python 3.13 on Linux. Python 3.11+ is

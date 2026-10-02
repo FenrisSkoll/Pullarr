@@ -1,0 +1,77 @@
+name: Deliberate GHCR image release
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish after validation (requires protected environment approval)'
+        type: boolean
+        default: false
+      version:
+        description: 'Existing vMAJOR.MINOR.PATCH tag at this commit; required to publish'
+        type: string
+        default: ''
+      stable:
+        description: 'Also update latest as a deliberate stable release'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python scripts/public_history_gate.py
+      - run: docker build --platform linux/amd64 --target test -t pullarr:release-tests .
+      - run: docker run --rm --network none --tmpfs /tmp:rw,size=2g pullarr:release-tests
+      - run: docker build --platform linux/amd64 -t pullarr:unraid-check .
+      - run: python -m playwright install --with-deps chromium
+      - run: python scripts/unraid_docker_gate.py --browser
+  publish:
+    if: ${{ inputs.publish }}
+    needs: validate
+    environment: container-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release identity, build and publish
+        env:
+          VERSION: ${{ inputs.version }}
+          STABLE: ${{ inputs.stable }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git rev-parse "$VERSION^{commit}")" = "$GITHUB_SHA"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pullarr"
+          # Never overwrite an immutable version tag.
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          if docker manifest inspect "$image:$VERSION" > /tmp/manifest.json 2> /tmp/manifest-error; then
+            echo 'Version tag already exists; refusing overwrite.' >&2
+            exit 1
+          fi
+          grep -Eq 'manifest unknown|no such manifest|not found' /tmp/manifest-error || { echo 'Cannot prove version tag is absent'; exit 1; }
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.version=$VERSION" -t "$image:sha-$GITHUB_SHA" -t "$image:$VERSION" .
+          python -m pip install requests
+          python scripts/unraid_docker_gate.py --image "$image:$VERSION"
+          docker push "$image:sha-$GITHUB_SHA"
+          docker push "$image:$VERSION"
+          if [ "$STABLE" = true ]; then
+            docker tag "$image:$VERSION" "$image:latest"
+            docker push "$image:latest"
+          fi

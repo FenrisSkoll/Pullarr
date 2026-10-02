@@ -45,9 +45,10 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.13'
-      - run: docker build --target test -t pullarr:public-tests .
+      - run: docker build --platform linux/amd64 --target test -t pullarr:public-tests .
       - run: docker run --rm --network none --tmpfs /tmp:rw,size=2g pullarr:public-tests
-      - run: docker build --target runtime -t pullarr:public-candidate .
+      - run: docker build --platform linux/amd64 --target runtime -t pullarr:public-candidate .
       - run: pip install requests playwright
       - run: python -m playwright install --with-deps chromium
       - run: python scripts/public_docker_gate.py --browser
+      - run: python scripts/unraid_docker_gate.py --image pullarr:public-candidate --browser
