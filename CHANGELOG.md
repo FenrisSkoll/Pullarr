@@ -12,6 +12,11 @@ canonical identity, reviewed import/organization, monitoring, Collections,
 Calendar, Reading Orders/CBL, Quality Profiles/upgrades/provenance, Discover,
 Pullarr UI, expanded clients/indexers and archive-maintenance programmes.
 
+First-publication CI corrected narrow Linux form overflow and a Windows CPython
+path-versus-descriptor timestamp mismatch during health/duplicate hashing.
+Identity checks and descriptor change detection remain enforced. Windows CI uses
+runner scratch storage for disposable fixtures; no durability checks are disabled.
+
 Publication hardening removes proprietary trial RAR executables from the public
 source and image in favor of separately licensed UnRAR readers. Legacy RAR
 creation requires the user's own licensed tool. Synthetic archive fixtures no

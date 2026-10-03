@@ -17,6 +17,18 @@ from typing import Iterator
 from backend.base.organization_job import ExecutionCode, OrganizationError
 
 
+def comparison_ctime(value: os.stat_result) -> int:
+    """Comparable path/fd timestamp; Windows fstat ctime may be ChangeTime.
+
+    CPython #157671: Windows path stat retains creation time while fstat uses
+    change time. Birth time preserves the historical path-stamp contract. Raw
+    descriptor ctime must additionally be compared before/after a long read.
+    """
+    if sys.platform == 'win32':
+        return getattr(value, 'st_birthtime_ns', value.st_ctime_ns)
+    return value.st_ctime_ns
+
+
 def safe_path(path: str) -> None:
     target = Path(path)
     if not target.is_absolute() or '..' in target.parts:

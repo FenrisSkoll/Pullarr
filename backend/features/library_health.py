@@ -24,7 +24,8 @@ from backend.base.library_health import (HealthFinding, HealthLevel,
                                          fingerprint)
 from backend.base.organization_job import OrganizationError
 from backend.implementations.comicinfo_archive import inspect_comicinfo
-from backend.implementations.organization_filesystem import safe_path
+from backend.implementations.organization_filesystem import (comparison_ctime,
+                                                             safe_path)
 from backend.internals.library_health import HealthSnapshotLimit, read_snapshot
 
 
@@ -36,7 +37,7 @@ def _inside(path: str, root: str) -> bool:
 
 
 def _stamp(value: os.stat_result) -> tuple:
-    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, comparison_ctime(value)
 
 
 class _Stopped(Exception):
@@ -385,7 +386,8 @@ class _Scan:
             safe_path(path)
             digest = sha256()
             with open(path, 'rb') as stream:
-                if _stamp(os.fstat(stream.fileno())) != before:
+                opened = os.fstat(stream.fileno())
+                if _stamp(opened) != before:
                     raise ValueError()
                 while True:
                     self.check()
@@ -398,6 +400,9 @@ class _Scan:
                         self.reasons.add('hash_limit')
                         raise _Stopped()
                     digest.update(block)
+                finished = os.fstat(stream.fileno())
+                if _stamp(finished) != _stamp(opened) or finished.st_ctime_ns != opened.st_ctime_ns:
+                    raise ValueError()
             if _stamp(os.lstat(path)) != before:
                 raise ValueError()
             self.counts['hashes'] += 1

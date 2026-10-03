@@ -7,12 +7,13 @@ from time import monotonic
 
 from backend.base.duplicate_review import DuplicateReviewError
 from backend.base.organization_job import OrganizationError
-from backend.implementations.organization_filesystem import safe_path
+from backend.implementations.organization_filesystem import (comparison_ctime,
+                                                             safe_path)
 
 
 def stamp(value):
     return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
+            value.st_mtime_ns, comparison_ctime(value))
 
 
 class HashBudget:
@@ -43,7 +44,8 @@ class HashBudget:
                 raise DuplicateReviewError('duplicate_hash_byte_limit')
             digest = sha256()
             with open(path, 'rb') as stream:
-                if stamp(os.fstat(stream.fileno())) != stamp(before):
+                opened = os.fstat(stream.fileno())
+                if stamp(opened) != stamp(before):
                     raise DuplicateReviewError('duplicate_hash_source_changed')
                 while True:
                     self.check()
@@ -55,7 +57,8 @@ class HashBudget:
                         raise DuplicateReviewError('duplicate_hash_byte_limit')
                     digest.update(block)
                     self.progress(self.used)
-                if stamp(os.fstat(stream.fileno())) != stamp(before):
+                finished = os.fstat(stream.fileno())
+                if stamp(finished) != stamp(opened) or finished.st_ctime_ns != opened.st_ctime_ns:
                     raise DuplicateReviewError('duplicate_hash_source_changed')
             safe_path(path)
             if stamp(os.lstat(path)) != stamp(before):
