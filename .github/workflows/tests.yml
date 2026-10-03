@@ -29,6 +29,11 @@ jobs:
       - run: git diff --check
   windows:
     runs-on: windows-latest
+    env:
+      # Use the runner's disposable workspace disk, not the OS-profile short-path
+      # temp directory, for SQLite/filesystem fixtures and their fsync workload.
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
