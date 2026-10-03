@@ -1,5 +1,18 @@
 # Release notes
 
+## 1.3.3 — qBittorrent 5.2 compatibility
+
+- Support qBittorrent 5.2 / WebAPI 2.15, including 204 no-content login and
+  removal responses, while retaining earlier supported 5.x behaviour.
+- Preserve current port-qualified and legacy session cookies, including upstream
+  base64 session values. HTTP success statuses remain explicitly endpoint-scoped.
+- Validate modern torrent-add receipts and resolve pending submissions with bounded
+  reads, preserving exact hashes, candidate tags and ambiguous-outcome safeguards.
+- Show bounded managed-client failure codes instead of hiding structured API
+  failures behind a generic unavailable message.
+- No database/schema migration; schema72, retention and reviewed cleanup gates
+  are unchanged. The Unraid template continues to follow the stable `latest` image.
+
 ## 1.3.2 — first public release
 
 Unraid Community Applications metadata, icon, validation and materialization

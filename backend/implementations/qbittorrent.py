@@ -1,38 +1,58 @@
-"""qBittorrent 5 / WebAPI v2: configured origin, transient SID, exact hashes."""
+"""qBittorrent 5 / WebAPI v2: configured origin, transient session, exact hashes."""
 import json
 import re
 from http.cookies import CookieError, SimpleCookie
 from pathlib import PurePosixPath, PureWindowsPath
+from time import sleep
 from urllib.parse import urlencode
 from uuid import uuid4
 
 from backend.base.download_job import (DownloadErrorCode as E,
                                        DownloadFailure, DownloadJobState as S,
                                        RemoteDownload, endpoint)
-from backend.implementations.download_transport import DownloadHTTP
+from backend.implementations.download_transport import (DownloadHTTP,
+                                                        HTTPStatusFailure)
 
 
 class QBittorrentClient:
     def __init__(self, config, http=None):
         self.config, self.http = config, http or DownloadHTTP()
-        self._sid = None
+        self._cookie = None
 
     def _login(self):
         result = self.http.request(endpoint(self.config.url) + '/api/v2/auth/login', method='POST',
             headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': endpoint(self.config.url) + '/'},
-            body=urlencode(dict(username=self.config.username, password=self.config.password)).encode(), maximum=4096)
+            body=urlencode(dict(username=self.config.username, password=self.config.password)).encode(), maximum=4096,
+            success_statuses=(200, 204))
+        if result.status in (301, 302, 303, 307, 308):
+            raise DownloadFailure(E.REDIRECT)
         cookies = SimpleCookie()
         try:
+            if any(ord(c) < 32 or ord(c) == 127 for c in result.cookie):
+                raise ValueError
             cookies.load(result.cookie)
-            sid = cookies['SID'].value
-            if result.body.strip() != b'Ok.' or not re.fullmatch(r'[A-Za-z0-9_-]{16,256}', sid):
+            if len(cookies) != 1:
+                raise ValueError
+            name, cookie = next(iter(cookies.items()))
+            if (not result.cookie.startswith(name + '=')
+                    or len(re.findall(r'(?:^|[;,]\s*)' + re.escape(name) + '=', result.cookie)) != 1):
+                raise ValueError
+            # Upstream uses its configured WebUI port, which a reverse proxy
+            # need not expose as the configured client's URL port.
+            modern = re.fullmatch(r'QBT_SID_([1-9][0-9]{0,4})', name)
+            if name != 'SID' and not (modern and int(modern[1]) <= 65535):
+                raise ValueError
+            if (not re.fullmatch(r'[A-Za-z0-9_+/-]{16,256}', cookie.value)
+                    or not ((result.status == 200 and result.body.strip() == b'Ok.')
+                            or (result.status == 204 and result.body == b''))):
                 raise ValueError
         except (KeyError, ValueError, CookieError):
             raise DownloadFailure(E.AUTHENTICATION) from None
-        self._sid = sid
+        self._cookie = name + '=' + cookie.value
 
-    def _call(self, path, params=None, *, post=False, body=None, content_type=None, raw=False):
-        if self._sid is None:
+    def _call(self, path, params=None, *, post=False, body=None, content_type=None, raw=False,
+              success_statuses=(200,), full_response=False):
+        if self._cookie is None:
             self._login()
         for attempt in range(2):
             url = endpoint(self.config.url) + '/api/v2/' + path
@@ -41,11 +61,16 @@ class QBittorrentClient:
                 url += '?' + encoded.decode()
             try:
                 response = self.http.request(url, method='POST' if post else 'GET',
-                    headers={'Cookie': 'SID=' + self._sid, 'Referer': endpoint(self.config.url) + '/',
+                    headers={'Cookie': self._cookie, 'Referer': endpoint(self.config.url) + '/',
                              'Content-Type': content_type or 'application/x-www-form-urlencoded'},
-                    body=body if body is not None else encoded if post else b'', maximum=8 * 1024 * 1024)
-                if response.status != 200:
+                    body=body if body is not None else encoded if post else b'', maximum=8 * 1024 * 1024,
+                    success_statuses=success_statuses)
+                if response.status in (301, 302, 303, 307, 308):
+                    raise DownloadFailure(E.REDIRECT)
+                if response.status not in success_statuses:
                     raise DownloadFailure(E.INVALID_RESPONSE)
+                if full_response:
+                    return response
                 if raw:
                     return response.body
                 try:
@@ -56,7 +81,7 @@ class QBittorrentClient:
                 # Only an explicit authentication refusal can retry a mutation.
                 if error.code != E.AUTHENTICATION or attempt:
                     raise
-                self._sid = None
+                self._cookie = None
                 self._login()
 
     def check(self):
@@ -189,27 +214,65 @@ class QBittorrentClient:
         parts.append(f'--{boundary}--\r\n'.encode())
         try:
             result = self._call('torrents/add', post=True, body=b''.join(parts),
-                content_type='multipart/form-data; boundary=' + boundary, raw=True)
-            if result.strip() != b'Ok.':
+                content_type='multipart/form-data; boundary=' + boundary,
+                success_statuses=(200, 202), full_response=True)
+            pending, acknowledged = False, None
+            if result.status == 200 and result.body.strip() == b'Fails.':
                 raise DownloadFailure(E.REJECTED)
+            if not (result.status == 200 and result.body.strip() == b'Ok.'):
+                try:
+                    receipt = json.loads(result.body)
+                except (ValueError, UnicodeError, RecursionError):
+                    raise DownloadFailure(E.AMBIGUOUS) from None
+                if not isinstance(receipt, dict):
+                    raise DownloadFailure(E.AMBIGUOUS)
+                counts = [receipt.get(k) for k in ('success_count', 'failure_count', 'pending_count')]
+                ids = receipt.get('added_torrent_ids')
+                if (any(type(n) is not int or n not in (0, 1) for n in counts)
+                        or sum(counts) != 1 or not isinstance(ids, list)
+                        or len(ids) != counts[0]
+                        or any(not isinstance(h, str) or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', h) for h in ids)
+                        or (result.status == 202) != bool(counts[2])):
+                    raise DownloadFailure(E.AMBIGUOUS)
+                if counts[1]:
+                    raise DownloadFailure(E.REJECTED)
+                pending = bool(counts[2])
+                acknowledged = ids[0] if ids else None
         except DownloadFailure as error:
+            if isinstance(error, HTTPStatusFailure) and error.status in (400, 409, 415):
+                raise DownloadFailure(E.REJECTED) from None
             if error.code in (E.AUTHENTICATION, E.REJECTED):
                 raise
             raise DownloadFailure(E.AMBIGUOUS) from None
-        return self.find_submission(torrent.identity, torrent.candidate_id)
+        # Retry reads only for an explicitly pending receipt. Never resubmit.
+        return self.find_submission(torrent.identity, torrent.candidate_id,
+                                    attempts=3 if pending else 1, acknowledged=acknowledged)
 
-    def find_submission(self, identity, candidate_id):
+    def find_submission(self, identity, candidate_id, *, attempts=1, acknowledged=None):
+        if type(attempts) is not int or not 1 <= attempts <= 3:
+            raise DownloadFailure(E.CONFIGURATION)
         tag = 'pullarr-' + candidate_id[:32]
         if not re.fullmatch(r'pullarr-[0-9a-f]{32}', tag):
             raise DownloadFailure(E.SELECTION)
-        # Upload response has no ID. Resolve only exact protocol hashes, never name.
-        rows = self._call('torrents/info', {'tag': tag, 'limit': 2})
+        # Confirm candidate correlation and full protocol hashes, never name.
+        for attempt in range(attempts):
+            try:
+                rows = self._call('torrents/info', {'tag': tag, 'limit': 2})
+            except DownloadFailure:
+                raise DownloadFailure(E.AMBIGUOUS) from None
+            if rows != [] or attempt == attempts - 1:
+                break
+            sleep(.25)
         if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
             raise DownloadFailure(E.AMBIGUOUS)
         remote = rows[0].get('hash', '')
-        if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', remote):
+        if (not isinstance(remote, str) or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', remote)
+                or acknowledged is not None and remote != acknowledged):
             raise DownloadFailure(E.AMBIGUOUS)
-        properties = self.properties(remote)
+        try:
+            properties = self.properties(remote)
+        except DownloadFailure:
+            raise DownloadFailure(E.AMBIGUOUS) from None
         if (identity.v1 and properties.get('infohash_v1') != identity.v1
                 or identity.v2 and properties.get('infohash_v2') != identity.v2):
             raise DownloadFailure(E.AMBIGUOUS)
@@ -219,4 +282,5 @@ class QBittorrentClient:
         # Service must admit the durable owned job and current cleanup review first.
         if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', remote_hash) or type(delete_data) is not bool:
             raise DownloadFailure(E.CONFIGURATION)
-        self._call('torrents/delete', {'hashes': remote_hash, 'deleteFiles': str(delete_data).lower()}, post=True, raw=True)
+        self._call('torrents/delete', {'hashes': remote_hash, 'deleteFiles': str(delete_data).lower()},
+                   post=True, raw=True, success_statuses=(200, 204))

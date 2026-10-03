@@ -116,8 +116,8 @@ recompression**. qBittorrent is the only supported torrent client.
 
 The completed implementation programmes are summarized in the changelog. Private
 development diaries, runtime evidence and agent instructions are intentionally
-not part of this public source candidate. The inherited application version
-`1.3.2` is retained for the first deliberate public release (`v1.3.2`).
+not part of this public source candidate. Application version `1.3.3` adds
+qBittorrent 5.2 compatibility; see the release notes for details.
 The official image reference is `ghcr.io/fenrisskoll/pullarr:latest`; verify
 anonymous availability before installing or submitting the CA template.
 

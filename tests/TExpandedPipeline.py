@@ -16,7 +16,7 @@ from backend.internals.release_sources import load_sources
 
 
 class ExpandedPipelineTests(TestCase):
-    def workflow(self, false_hd=False, after=None, kind='qbittorrent', failed=False):
+    def workflow(self, false_hd=False, after=None, kind='qbittorrent', failed=False, profile='legacy'):
         fixture = quality_fixture.UpgradeTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
@@ -25,7 +25,7 @@ class ExpandedPipelineTests(TestCase):
         if false_hd:
             quality_fixture.comic(fixture.h.source, 900)
         before, seed = fixture.old.read_bytes(), fixture.h.source.read_bytes()
-        with services() as remote, patch('backend.internals.release_sources.get_db',side_effect=db.cursor), \
+        with services(profile) as remote, patch('backend.internals.release_sources.get_db',side_effect=db.cursor), \
                 patch('backend.features.direct_downloads.get_db',side_effect=db.cursor), \
                 patch('backend.internals.identification.get_db',side_effect=db.cursor):
             client = configure(db, remote, fixture.h.incoming, kind=kind)
@@ -169,3 +169,9 @@ class ExpandedPipelineTests(TestCase):
             finally:
                 store.close()
         self.workflow(after=after)
+
+
+class ModernExpandedPipelineTests(ExpandedPipelineTests):
+    """Repeat acquisition, recovery and reviewed cleanup with WebAPI 2.15.1."""
+    def workflow(self, *args, **kwargs):
+        return super().workflow(*args, **kwargs, profile='5.2.4')

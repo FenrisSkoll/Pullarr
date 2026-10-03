@@ -17,7 +17,7 @@ import TQualityUpgrade as quality_fixture
 from fixtures.expanded_clients import configure, services
 
 
-def run(kind, false_hd=False):
+def run(kind, false_hd=False, profile='legacy'):
     fixture=quality_fixture.UpgradeTests(); fixture.setUp()
     runtime_db=None
     try:
@@ -26,7 +26,7 @@ def run(kind, false_hd=False):
         db.execute('UPDATE indexer_clients SET enabled=0')
         if false_hd: quality_fixture.comic(fixture.h.source,900)
         original=fixture.old.read_bytes(); seed=fixture.h.source.read_bytes()
-        with services() as remote:
+        with services(profile) as remote:
             configure(db,remote,fixture.h.incoming,kind=kind)
             remote['completed']=True
             with closing(socket.socket()) as listener:
@@ -74,7 +74,7 @@ def run(kind, false_hd=False):
                         process.terminate(); process.wait(timeout=15)
             content=output_path.read_text(encoding='utf-8')
             assert 'Traceback' not in content and '[ERROR]' not in content,'Unexpected normal-entrypoint error'
-            print(f'Normal Pullarr workers: {kind}, false-HD={false_hd}, imported/rejected as expected, one submission, integrity/FKs PASS',flush=True)
+            print(f'Normal Pullarr workers: {kind}, profile={profile}, false-HD={false_hd}, imported/rejected as expected, one submission, integrity/FKs PASS',flush=True)
     finally:
         if runtime_db is not None: runtime_db.close()
         fixture.doCleanups()
@@ -84,3 +84,5 @@ if __name__=='__main__':
     run('nzbget')
     run('qbittorrent')
     run('qbittorrent',True)
+    run('qbittorrent', profile='5.2.4')
+    run('qbittorrent', True, profile='5.2.4')

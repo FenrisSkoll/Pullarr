@@ -3,6 +3,17 @@ function setupManagedClients(apiKey) {
     const field = name => document.querySelector(`#managed-${name}`);
     let selected = null, pending = false, generation = 0;
     const status = text => { field('status').textContent = text; };
+    const failureCodes = new Set(['configuration', 'invalid_selection', 'resolver_expired',
+        'source_resolution_failed', 'redirect_rejected', 'invalid_nzb', 'authentication',
+        'unavailable', 'timeout', 'response_limit', 'invalid_response', 'category_missing',
+        'submission_rejected', 'submission_ambiguous', 'remote_missing', 'remote_failed',
+        'downloader_configuration_changed', 'busy', 'invalid_request', 'internal_error']);
+    function failure(result) {
+        const code = result?.error === 'ClientFailure' && result.result?.code;
+        if (failureCodes.has(code))
+            status(`Action blocked: ${code}. Reload and review current configuration.`);
+        else status('Client action unavailable. Saved configuration and acquisitions are retained.');
+    }
     const typeChanged = () => { field('torrent').hidden = field('kind').value !== 'qbittorrent'; };
     function edit(value = null) {
         selected = value;
@@ -37,9 +48,14 @@ function setupManagedClients(apiKey) {
         try {
             const response = await sendAPI(method, '/managed-clients' + suffix, apiKey, {}, body);
             const result = await response.json();
-            if (!response.ok || result.error) { status(`Action blocked: ${result.result?.code || 'unavailable'}. Reload and review current configuration.`); return; }
+            if (!response.ok || result.error) { failure(result); return; }
             await done(result.result);
-        } catch (_) { status('Client action unavailable. Saved configuration and acquisitions are retained.'); }
+        } catch (response) {
+            // sendAPI rejects HTTP failures with the authenticated API Response.
+            let result;
+            try { result = await response.json(); } catch (_) { /* Transport/unparseable failure. */ }
+            failure(result);
+        }
         finally {
             field('password').value = ''; pending = false;
             field('form').querySelectorAll('button').forEach(button => { button.disabled = false; });

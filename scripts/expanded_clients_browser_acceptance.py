@@ -33,7 +33,7 @@ def main(false_hd=False):
     errors, external = [], []
     atlas = REPO / '.devdata' / 'phase9a-atlas'
     atlas.mkdir(parents=True,exist_ok=True)
-    with TemporaryDirectory(prefix='pullarr-9a-browser-') as directory, services() as remote:
+    with TemporaryDirectory(prefix='pullarr-9a-browser-') as directory, services('5.2.4') as remote:
         root = Path(directory)
         folder, incoming = root / 'library' / 'Batman', root / 'incoming'
         folder.mkdir(parents=True); incoming.mkdir()
@@ -75,7 +75,7 @@ def main(false_hd=False):
                     page.goto(origin + '/settings/downloadclients')
                     page.locator('#managed-list button').first.click()
                     page.locator('#managed-test').focus(); page.keyboard.press('Enter')
-                    page.get_by_text('Connected: qBittorrent v5.0.0 · torrent',exact=True).wait_for()
+                    page.get_by_text('Connected: qBittorrent v5.2.4 · torrent',exact=True).wait_for()
                     page.locator('#managed-name').fill('<script>window.expandedHostile=true</script> fixture')
                     page.locator('#managed-form button[type=submit]').click()
                     page.get_by_text('Saved. No download was started.',exact=True).wait_for()

@@ -16,7 +16,10 @@ SID = 'synthetic-session-12345678'
 
 
 @contextmanager
-def services():
+def services(profile='legacy'):
+    assert profile in ('legacy', '5.2.4')
+    modern = profile == '5.2.4'
+    cookie_name = 'QBT_SID_8080' if modern else 'SID'
     state = dict(calls=[], submitted=0, completed=False, removed=False, ratio=.5, seeding_time=60,
                  title='Batman 001 (2020) (HD-Digital)', files=['Batman 001 (2020).cbz'], label='HD-Digital', hash=HASH)
     class Handler(BaseHTTPRequestHandler):
@@ -79,17 +82,20 @@ def services():
                 values = parse_qs(data.decode())
                 if values != {'username':['fixture-user'],'password':['fixture-password']}:
                     return self.reply(b'Fails.', 403)
-                return self.reply(b'Ok.', cookie='SID=' + SID + '; HttpOnly; Path=/')
-            if self.headers.get('Cookie') != 'SID=' + SID:
+                return self.reply(b'' if modern else b'Ok.', 204 if modern else 200,
+                                  cookie=cookie_name + '=' + SID + '; HttpOnly; Path=/')
+            if self.headers.get('Cookie') != cookie_name + '=' + SID:
                 return self.reply({}, 403)
             endpoint = path.removeprefix('/qbit/api/v2/')
-            if endpoint == 'app/version': return self.reply(b'v5.0.0')
-            if endpoint == 'app/webapiVersion': return self.reply(b'2.11.0')
+            if endpoint == 'app/version': return self.reply(b'v5.2.4' if modern else b'v5.0.0')
+            if endpoint == 'app/webapiVersion': return self.reply(b'2.15.1' if modern else b'2.11.0')
             if endpoint == 'torrents/categories': return self.reply({'pullarr': {'name':'pullarr','savePath':'/complete'}})
             if endpoint == 'torrents/add':
                 if self.command != 'POST' or b'magnet:?xt=urn:btih:' not in data:
                     return self.reply(b'Fails.')
                 state['submitted'] += 1
+                if modern:
+                    return self.reply(dict(success_count=0, failure_count=0, pending_count=1, added_torrent_ids=[]), 202)
                 return self.reply(b'Ok.')
             if endpoint == 'torrents/info':
                 return self.reply([] if not state['submitted'] or state['removed'] else [dict(hash=state['hash'],
@@ -100,9 +106,10 @@ def services():
             if endpoint == 'torrents/files': return self.reply([dict(index=n,name=name,priority=1,progress=1,size=1000)
                                                                   for n,name in enumerate(state['files'])])
             if endpoint == 'torrents/delete':
+                assert parse_qs(data.decode()).get('hashes') == [state['hash']]
                 state['removed'] = True
                 state['delete_data'] = parse_qs(data.decode()).get('deleteFiles') == ['true']
-                return self.reply(b'')
+                return self.reply(b'', 204 if modern else 200)
             return self.reply({}, 404)
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)

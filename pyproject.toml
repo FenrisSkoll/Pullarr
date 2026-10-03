@@ -1,6 +1,6 @@
 [project]
 name = "Pullarr"
-version = "1.3.2"
+version = "1.3.3"
 description = "Manage, monitor and organize your comic library."
 authors = [
     {name = "Cas van Tijn"}

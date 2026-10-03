@@ -22,6 +22,13 @@ class PrivateResponse:
     cookie: str = field(default='', repr=False)
 
 
+class HTTPStatusFailure(DownloadFailure):
+    """Unexpected HTTP status, without retaining a remote body or headers."""
+    def __init__(self, status: int):
+        super().__init__(E.UNAVAILABLE)
+        self.status = status
+
+
 class DownloadHTTP:
     def __init__(self, connect_timeout: float = 5, read_timeout: float = 10):
         if not 0 < connect_timeout <= 10 or not 0 < read_timeout <= 30:
@@ -29,7 +36,11 @@ class DownloadHTTP:
         self.connect_timeout, self.read_timeout = connect_timeout, read_timeout
 
     def request(self, url: str, *, method: str = 'GET', headers=None,
-                body: bytes = b'', maximum: int = 1024 * 1024) -> PrivateResponse:
+                body: bytes = b'', maximum: int = 1024 * 1024,
+                success_statuses: tuple[int, ...] = (200,)) -> PrivateResponse:
+        if (not success_statuses or any(type(s) is not int or not 200 <= s < 300
+                                       for s in success_statuses)):
+            raise DownloadFailure(E.CONFIGURATION)
         try:
             p = urlsplit(url)
             if (p.scheme not in ('http', 'https') or not p.hostname or p.username
@@ -61,8 +72,8 @@ class DownloadHTTP:
                 return PrivateResponse(response.status, b'', location)
             if response.status in (401, 403):
                 raise DownloadFailure(E.AUTHENTICATION)
-            if response.status != 200:
-                raise DownloadFailure(E.UNAVAILABLE)
+            if response.status not in success_statuses:
+                raise HTTPStatusFailure(response.status)
             if response.getheader('Content-Encoding', 'identity').lower() != 'identity':
                 raise DownloadFailure(E.INVALID_RESPONSE)
             length = response.getheader('Content-Length')
