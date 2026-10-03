@@ -29,11 +29,6 @@ jobs:
       - run: git diff --check
   windows:
     runs-on: windows-latest
-    env:
-      # Use the runner's disposable workspace disk, not the OS-profile short-path
-      # temp directory, for SQLite/filesystem fixtures and their fsync workload.
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -43,6 +38,11 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m unittest discover -s tests -p '*.py' -v -f
+        env:
+          # Runner context is available at step scope. Keep fixtures on scratch
+          # storage, not the slower OS-profile short-path temporary directory.
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
   linux-and-image:
     runs-on: ubuntu-latest
     steps:
