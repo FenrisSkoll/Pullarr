@@ -496,6 +496,28 @@ class DDLSourceSecurity(TestCase):
         self.assertIsNone(supported_mirror('torrent', link, False, config(), set()))
         self.assertEqual(supported_mirror('torrent', link, True, config(), set()), GCDownloadService.GETCOMICS_TORRENT)
 
+    def test_automatic_getcomics_never_resolves_or_dispatches_torrent_mirrors(self):
+        from backend.features.direct_downloads import (dispatch_offering,
+                                                       resolve_offerings)
+
+        link = 'magnet:?xt=urn:btih:' + 'a' * 40
+        http = FixtureHTTP()
+        http.page_body = ('<section class="post-contents"><ul><li>Batman #5 (2016)'
+                          f'<a href="{link}">Torrent</a></li></ul></section>')
+        selected = SimpleNamespace(source=GetComicsSource(config(), http),
+            raw={'link': 'https://getcomics.example/release/1'},
+            authorization={'authorization': 'automatic'})
+        with patch('backend.implementations.external_client_manager.ExternalClients.clients',
+                   {DownloadType.TORRENT: {1: Mock()}}):
+            with self.assertRaisesRegex(DDLError, 'no_supported_offering'):
+                resolve_offerings(selected, set())
+        # Cached/manual offerings must also be filtered at the final mutation boundary.
+        with patch('backend.features.download_queue.DownloadHandler') as handler:
+            with self.assertRaisesRegex(DDLError, 'mirrors_unavailable'):
+                dispatch_offering(selected, None,
+                    {'links': {GCDownloadService.GETCOMICS_TORRENT: [link]}}, 5, False, set())
+            handler.assert_not_called()
+
     def test_cloudflare_solver_is_explicit_and_bounded(self):
         from backend.base.download_job import (DownloadErrorCode,
                                                DownloadFailure)

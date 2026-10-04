@@ -305,7 +305,8 @@ def resolve_offerings(selected, blocked):
     body = soup.find('section', {'class': 'post-contents'})
     if body is None:
         raise DDLError('invalid_page')
-    torrent = bool(ExternalClients.clients[DownloadType.TORRENT])
+    torrent = (selected.authorization.get('authorization') != 'automatic'
+               and bool(ExternalClients.clients[DownloadType.TORRENT]))
     checker = lambda text, link, available: supported_mirror(text, link, available, config, blocked)
     groups = _extract_button_links(body, torrent, checker, False) + _extract_list_links(body, torrent, checker, False)
     if len(groups) > 100:
@@ -363,8 +364,10 @@ def dispatch_offering(selected, evaluation, group, issue_id, force, blocked):
     from backend.implementations.download_preppers.ddl.GetComics import \
         GetComicsPrepper
 
+    # Recheck at dispatch as offerings can have been resolved during manual search.
+    torrent = selected.authorization.get('authorization') != 'automatic'
     group = {**group, 'links': {service: [link for link in links
-        if supported_mirror(service.value.lower(), link, True, selected.source.config, blocked) == service]
+        if supported_mirror(service.value.lower(), link, torrent, selected.source.config, blocked) == service]
         for service, links in group['links'].items()}}
     if not any(group['links'].values()):
         raise DDLError('mirrors_unavailable')
@@ -380,7 +383,7 @@ def dispatch_offering(selected, evaluation, group, issue_id, force, blocked):
                     if k in ('automation_decision_id', 'authorization')})
     async def purify(service, link):
         return resolve_mirror(service, link, lambda candidate: supported_mirror(
-            service.value.lower(), candidate, True, selected.source.config, blocked) == service)
+            service.value.lower(), candidate, torrent, selected.source.config, blocked) == service)
 
     downloads = run(prepper.prepare_exact_offering(group, selected.evaluation.candidate.raw_title,
         selected.source.config.services, selected.source.config.avoid_large, receipt, purify))
