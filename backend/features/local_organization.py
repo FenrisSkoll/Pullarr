@@ -120,7 +120,7 @@ def apply_preview(database: str, identifier: str) -> dict:
             outcomes.append(dict(source=plan.source_path, target=plan.target_path,
                                  publication=plan.identification.selected.title,
                                  volume_id=plan.identification.selected.local_volume_id,
-                                 job_id=job, state=result.state.value))
+                                 job_id=job, state=result.state.value, error=result.error))
         from backend.features.import_folder_cleanup import cleanup_sources
         cleanup_sources(executor, session, outcomes)
         return dict(id=identifier, jobs=outcomes, replay=replay,

@@ -10,8 +10,15 @@ const LocalOrganizationUI = (() => {
         title_disagreement: 'Publication title differs from this volume.',
         provider_identity_conflict: 'Embedded publication identity conflicts with the selection.',
         candidate_evidence_conflict: 'Local metadata contains conflicting evidence.',
-        folder_assignment_required: 'Selected files must share one immediate parent folder.',
-        existing_volume_folder_conflict: 'This publication already uses a different or unestablished folder.',
+        folder_assignment_required: 'Select one configured library root for this publication.',
+        existing_volume_folder_conflict: 'This publication has an unavailable or unestablished managed folder. Repair its folder before importing.',
+        filesystem_target_occupied: 'The destination already contains a file. Resolve the collision before importing; the source is preserved.',
+        managed_folder_ownership_conflict: 'Another publication owns the destination folder.',
+        source_unavailable_or_changed: 'The source file changed or is unavailable. Refresh the import preview.',
+        target_occupied: 'The destination became occupied. The source is preserved.',
+        source_missing_or_changed: 'The source file changed or is unavailable.',
+        permission_denied: 'Filesystem access was denied.',
+        disk_full: 'The destination has insufficient free space.',
         publication_registration_conflict: 'Publication identity or folder ownership conflicts with the selection.',
         publication_registration_unavailable: 'Publication registration failed. Check the selected metadata provider.'
     };
@@ -35,8 +42,9 @@ const LocalOrganizationUI = (() => {
             const ready = ['ready', 'no_changes', 'associated'].includes(plan.status);
             text(row, 'p', `${name(plan.source)} → ${ready ? (plan.status === 'associated' ? 'Associated: ' : plan.status === 'no_changes' ? 'Already associated: ' : '') + ((plan.issue_labels || []).join(', ') || 'Ready to associate') : 'Needs review'}`);
             if (plan.publication) text(row, 'p', `Selected publication: ${plan.publication}`);
+            else if (plan.authority) text(row, 'p', `Selected publication: ${plan.authority.provider}:${plan.authority.id}`);
             if (!ready) {
-                const reason = (plan.identification_reasons || []).map(code => reasons[code]).find(Boolean);
+                const reason = [...(plan.identification_reasons || []), ...(plan.diagnostics || []).map(d => d.code)].map(code => reasons[code]).find(Boolean);
                 text(row, 'p', reason || 'Issue matching or file ownership needs review. Files remain unchanged.');
                 if (review && plan.review_available) {
                     const button = text(row, 'button', 'Review issue match'); button.type = 'button';
@@ -58,10 +66,16 @@ const LocalOrganizationUI = (() => {
         if (value.review?.length) text(parent, 'p', `${value.review.length} files need issue matching or folder review.`);
         rows(parent, value.review || []);
         if (failures.length) text(parent, 'p', `${failures.length} operations need recovery. Check Maintenance history before retrying.`);
+        for (const job of failures) {
+            text(parent, 'p', `${name(job.source)} → ${job.publication || 'Selected publication'}. ${reasons[job.error] || 'The operation needs recovery review.'}`);
+            const link = text(parent, 'a', 'Review in Maintenance');
+            link.href = `${typeof url_base === 'string' ? url_base : ''}/maintenance`;
+        }
         return completed;
     }
     const reviewErrors = {
         stale_preview: 'This preview is stale. Refresh Local Scan and try again.',
+        association_lookup_failed: 'Association lookup failed. Refresh Local Scan and try again.',
         override_required: 'Review the existing or embedded issue association before replacing it.',
         invalid_issue_selection: 'Choose valid issues from this managed volume.',
         publication_or_file_conflict: 'Publication identity or file ownership conflicts require separate review. This issue action cannot override them.',
