@@ -1,5 +1,18 @@
 # Release notes
 
+## 1.5.1 — managed-volume Local Scan issue review
+
+- Repair Review issue match: open an inline issue picker with filename, ComicInfo,
+  existing-association evidence and specific conflict reasons. Keep the managed
+  publication fixed and preserve the Local Files Preview through Cancel and Save.
+- Treat harmless title punctuation consistently in ComicInfo comparisons; clean
+  numeric Books 1–3 become ready without review. Genuine issue conflicts remain
+  reviewable; publication identity and file-ownership conflicts remain protected.
+- Revalidate retained previews, file identity and issue choices before atomic,
+  idempotent manual association. Keep other rows usable, with explicit stale/busy
+  feedback and no native browser alerts or confirmation dialogs.
+- No database migration (schema72); no file moves, renames or metadata refreshes.
+
 ## 1.5.0 — library and acquisition workflow reliability
 
 - Stream CBR → CBZ conversion and exact member verification without page, member,

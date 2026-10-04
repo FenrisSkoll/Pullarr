@@ -311,12 +311,31 @@ async function refreshVolume(api_key) {
         if (!response.ok) throw response;
         const preview = (await response.json()).result;
         panel.replaceChildren();
+        const reviewRequest = async (method, row, ids, query = '') => {
+            const endpoint = `/volumes/${volume_id}/local-scan/${encodeURIComponent(preview.id)}/review/${encodeURIComponent(row)}`;
+            try {
+                const body = method === 'GET'
+                    ? await fetchAPI(endpoint, api_key, query ? {q:encodeURIComponent(query)} : {})
+                    : await (await sendAPI('POST', endpoint, api_key, {}, {issue_ids:ids})).json();
+                return body.result;
+            } catch (error) {
+                const body = error?.json ? await error.json().catch(() => ({})) : {};
+                throw {code:body.result?.code};
+            }
+        };
         LocalOrganizationUI.preview(panel, preview, async () => {
             const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
             if (!applied.ok) throw applied;
             const result = (await applied.json()).result;
             await fetchAPI(`/volumes/${volume_id}`, api_key).then(json => fillPage(json.result, api_key));
             return result;
+        }, {
+            load: (row, query) => reviewRequest('GET', row, null, query),
+            save: async (row, ids) => {
+                const updated = await reviewRequest('POST', row, ids);
+                await fetchAPI(`/volumes/${volume_id}`, api_key).then(json => fillPage(json.result, api_key));
+                return updated;
+            }
         });
     } catch (_) {
         panel.textContent = 'Local files could not be inspected. Check the managed folder and try a fresh preview.';

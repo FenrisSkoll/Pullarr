@@ -264,3 +264,8 @@ main:has(#wanted-results) > button {margin:.35rem 0;}
 #managed-form { display: grid; gap: var(--space-3, 12px); max-width: 48rem; }
 #managed-form label { display: grid; gap: var(--space-1, 4px); }
 #managed-form input, #managed-form select { max-width: 100%; min-width: 0; }
+.local-organization-results { min-width: 0; width: 100%; overflow-wrap: anywhere; }
+.local-issue-review { margin-block: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.local-issue-review[hidden] { display: none; }
+.local-issue-review button { margin: .35rem .35rem .35rem 0; }
+.local-issue-choices { max-height: 18rem; overflow-y: auto; padding-block: .5rem; }

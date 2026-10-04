@@ -17,6 +17,13 @@ checks contradictory evidence and displays read-only results. **Apply ready
 associations** is the mutation boundary. It neither refreshes provider metadata nor
 renames files nor removes missing-file records.
 
+**Review issue match** opens an inline panel within that preview. It displays the
+filename, relevant ComicInfo values, existing associations and issues from the
+fixed managed volume. Cancel makes no changes; **Save association** records the
+explicit issue selection atomically and returns to the same preview. Other ready
+rows remain usable. A stale preview requires a fresh Local Scan; publication
+identity, unsafe-path and ownership conflicts cannot be overridden by this picker.
+
 ## Release acquisition
 
 Automatic missing-issue and upgrade selection, including Search and grab now,

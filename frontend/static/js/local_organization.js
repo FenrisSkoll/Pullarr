@@ -26,17 +26,22 @@ const LocalOrganizationUI = (() => {
         }
         node.replaceChildren(); return node;
     }
-    function rows(parent, plans) {
+    function rows(parent, plans, review) {
         for (const plan of plans) {
             const row = text(parent, 'div', '');
-            const ready = ['ready', 'no_changes'].includes(plan.status);
-            text(row, 'p', `${name(plan.source)} → ${ready ? (plan.issue_labels || []).join(', ') || 'Ready to associate' : 'Needs review'}`);
+            const ready = ['ready', 'no_changes', 'associated'].includes(plan.status);
+            text(row, 'p', `${name(plan.source)} → ${ready ? (plan.status === 'associated' ? 'Associated: ' : '') + ((plan.issue_labels || []).join(', ') || 'Ready to associate') : 'Needs review'}`);
             if (plan.publication) text(row, 'p', `Selected publication: ${plan.publication}`);
             if (!ready) {
                 const reason = (plan.identification_reasons || []).map(code => reasons[code]).find(Boolean);
                 text(row, 'p', reason || 'Issue matching or file ownership needs review. Files remain unchanged.');
-                const link = text(row, 'a', 'Review issue match');
-                if (Number.isSafeInteger(plan.volume_id)) link.href = `${typeof url_base === 'string' ? url_base : ''}/volumes/${plan.volume_id}`;
+                if (review && plan.review_available) {
+                    const button = text(row, 'button', 'Review issue match'); button.type = 'button';
+                    button.onclick = event => { event?.preventDefault(); event?.stopPropagation(); return review(plan, button); };
+                } else if (Number.isSafeInteger(plan.volume_id)) {
+                    const link = text(row, 'a', 'Open publication');
+                    link.href = `${typeof url_base === 'string' ? url_base : ''}/volumes/${plan.volume_id}`;
+                }
             }
         }
     }
@@ -50,17 +55,103 @@ const LocalOrganizationUI = (() => {
         if (failures.length) text(parent, 'p', `${failures.length} operations need recovery. Check Maintenance history before retrying.`);
         return completed;
     }
-    function preview(parent, value, apply) {
+    const reviewErrors = {
+        stale_preview: 'This preview is stale. Refresh Local Scan and try again.',
+        invalid_issue_selection: 'Choose valid issues from this managed volume.',
+        publication_or_file_conflict: 'Publication identity or file ownership conflicts require separate review. This issue action cannot override them.',
+        file_busy: 'This file or volume has another operation in progress. Try a fresh Local Scan after it finishes.'
+    };
+    function preview(parent, value, apply, reviewAPI) {
+        const token = {}; parent.reviewToken = token;
+        let reviewing = false, applying = false;
+        const current = () => parent.reviewToken === token;
         text(parent, 'h3', 'Local files preview');
         text(parent, 'p', 'Ready files can be associated. Files are not moved or renamed; provider metadata and missing files are unchanged.');
-        rows(parent, value.plans);
+        if (value.message) text(parent, 'p', value.message);
+        if (value.reviewMessage) text(parent, 'p', value.reviewMessage);
+        const open = async (plan, trigger) => {
+            if (reviewing || applying || !current()) return;
+            reviewing = true; trigger.disabled = true; button.disabled = true;
+            const panel = text(parent, 'section', ''); panel.className = 'local-issue-review';
+            panel.setAttribute('aria-label', 'Review issue match'); panel.tabIndex = -1;
+            text(panel, 'h3', 'Review issue match');
+            const status = text(panel, 'p', 'Loading issue evidence…');
+            const cancel = text(panel, 'button', 'Cancel'); cancel.type = 'button';
+            cancel.onclick = () => {
+                panel.hidden = true; panel.remove(); reviewing = false; trigger.disabled = false;
+                button.disabled = !value.plans.some(p => ['ready', 'no_changes'].includes(p.status)); trigger.focus();
+            };
+            panel.focus(); panel.scrollIntoView?.({block:'nearest'});
+            try {
+                const detail = await reviewAPI.load(plan.row_id);
+                if (!current() || panel.hidden) return;
+                status.textContent = '';
+                text(panel, 'p', `File: ${detail.filename}`);
+                text(panel, 'p', `Publication: ${detail.publication} (managed volume ${detail.volume_id})`);
+                for (const entry of detail.evidence) text(panel, 'p', `${entry.label}: ${entry.value || 'Unavailable'}`);
+                text(panel, 'h4', 'Why review is required');
+                for (const reason of detail.reasons) text(panel, 'p', reason);
+                text(panel, 'p', 'Existing association: ' + (detail.existing.map(e => `#${e.label}${e.forced ? ' (manual)' : ''}`).join(', ') || 'None'));
+                text(panel, 'h4', 'Choose issue');
+                const search = text(panel, 'input', ''); search.type = 'search'; search.maxLength = 100;
+                search.setAttribute('aria-label', 'Find issue by number or title');
+                const find = text(panel, 'button', 'Find issues'); find.type = 'button';
+                const choices = text(panel, 'div', ''); choices.className = 'local-issue-choices';
+                let inputs = [];
+                const show = data => {
+                    choices.replaceChildren(); inputs = [];
+                    for (const issue of data.issues) {
+                        const label = text(choices, 'label', '');
+                        const input = text(label, 'input', ''); input.type = 'checkbox'; input.value = String(issue.id);
+                        input.checked = data.existing.some(e => e.issue_id === issue.id); inputs.push(input);
+                        text(label, 'span', issue.label); text(choices, 'br', '');
+                    }
+                    if (data.more) text(choices, 'p', 'Showing 200 issues. Search by issue number or title for more.');
+                };
+                show(detail);
+                find.onclick = async () => {
+                    if (find.disabled) return; find.disabled = true;
+                    try { const data = await reviewAPI.load(plan.row_id, search.value); if (current() && !panel.hidden) show(data); }
+                    catch (error) { status.textContent = reviewErrors[error.code] || 'Issue evidence could not be loaded. Try again.'; }
+                    finally { find.disabled = false; }
+                };
+                const save = text(panel, 'button', 'Save association'); save.type = 'button';
+                save.disabled = !!detail.blocked;
+                if (detail.blocked) status.textContent = reviewErrors[detail.blocked];
+                save.onclick = async () => {
+                    if (save.disabled || !current()) return;
+                    const ids = inputs.filter(i => i.checked).map(i => Number(i.value));
+                    if (!ids.length) { status.textContent = reviewErrors.invalid_issue_selection; return; }
+                    save.disabled = true; cancel.disabled = true; find.disabled = true;
+                    status.textContent = 'Saving association…';
+                    try {
+                        const updated = await reviewAPI.save(plan.row_id, ids);
+                        if (!current()) return;
+                        parent.replaceChildren(); preview(parent, {...updated,message:'Association saved.'}, apply, reviewAPI);
+                    } catch (error) {
+                        status.textContent = reviewErrors[error.code] || 'Association could not be confirmed. Retry the same selection or refresh Local Scan.';
+                        save.disabled = false; cancel.disabled = false; find.disabled = false;
+                    }
+                };
+            } catch (error) { status.textContent = reviewErrors[error.code] || 'Issue evidence could not be loaded. Cancel and try again.'; }
+        };
+        rows(parent, value.plans, reviewAPI ? open : null);
         const button = text(parent, 'button', 'Apply ready associations'); button.type = 'button';
         button.disabled = !value.plans.some(p => ['ready', 'no_changes'].includes(p.status));
         button.onclick = async () => {
-            if (button.disabled) return;
+            if (button.disabled || reviewing) return;
+            applying = true;
             button.disabled = true;
             const progress = text(parent, 'p', 'Associating selected files…');
-            try { result(parent, await apply()); }
+            try {
+                const applied = await apply();
+                if (!current()) return;
+                const completed = (applied.jobs || []).filter(j => j.state === 'completed');
+                const plans = value.plans.map(p => completed.some(j => j.source === p.source) ? {...p,status:'associated',review_available:false} : p);
+                parent.replaceChildren();
+                preview(parent, {...value,plans,message:`${completed.length} files imported or associated.`,
+                    reviewMessage:`${applied.review?.length || 0} files need issue matching or folder review.`}, apply, reviewAPI);
+            }
             catch (_) { progress.textContent = 'Association could not be confirmed. Inspect Maintenance history before retrying.'; }
         };
         parent.tabIndex = -1; parent.focus(); parent.scrollIntoView?.({block: 'nearest'});

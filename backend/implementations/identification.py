@@ -15,7 +15,8 @@ from backend.base.identification import (IdentificationResult, LocalMatchIssue,
                                          MatchContribution, MatchReason,
                                          MatchState, PublicationAuthority,
                                          PublicationMatch)
-from backend.base.import_candidate import (ClaimRole, DiagnosticKind,
+from backend.base.import_candidate import (ClaimRole, ComicInfoObservation,
+                                           DiagnosticCode, DiagnosticKind,
                                            ImportCandidate, InspectionState,
                                            ProviderReference, ResourceKind)
 from backend.base.issue_facts import (NumberCatalog, NumericRange,
@@ -39,6 +40,15 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
     if authority not in (PublicationAuthority.IMPORT_SELECTION, PublicationAuthority.MANAGED_VOLUME):
         raise ValueError('Explicit publication authority required')
     volume = snapshot.volumes[volume_id]
+    coverage, reason = _coverage(candidate, volume, snapshot, prefer_filename_issue=True)
+    if (candidate.existing and coverage and reason in (MatchReason.ISSUE_RAW, MatchReason.ISSUE_NUMERIC)
+            and all(a.volume_id == volume_id for a in candidate.existing.associations)
+            and set(coverage) == {a.issue_id for a in candidate.existing.associations}):
+        # Raw spelling (e.g. 001 versus 1) is not a conflict once this catalog
+        # proves the unique issue is exactly the existing association.
+        candidate = replace(candidate, diagnostics=tuple(d for d in candidate.diagnostics
+            if not (d.code == DiagnosticCode.BIBLIOGRAPHIC_DISAGREEMENT
+                    and d.provenance.locator.endswith('/Number/local_association'))))
     ordinary = identify(candidate, snapshot)
     option = next((m for m in ordinary.alternatives if m.local_volume_id == volume_id), None)
     reasons = []
@@ -61,7 +71,11 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
             MatchReason.EVIDENCE_CONFLICT, MatchReason.UNKNOWN_IDENTITY,
             MatchReason.IDENTITY_CONFLICT) or authority == PublicationAuthority.MANAGED_VOLUME
             and r == MatchReason.TITLE_CONFLICT)
-    coverage, reason = _coverage(candidate, volume, snapshot, prefer_filename_issue=True)
+    if authority == PublicationAuthority.MANAGED_VOLUME and reason == MatchReason.ISSUE_ID:
+        filename_coverage, _ = _coverage(replace(candidate, claims=(), comicinfo=ComicInfoObservation()),
+                                        volume, snapshot, prefer_filename_issue=True)
+        if filename_coverage and coverage != filename_coverage:
+            reasons.append(MatchReason.EVIDENCE_CONFLICT)
     if candidate.existing and not reasons and ordinary.selected and ordinary.selected.local_volume_id == volume_id:
         coverage = ordinary.selected.local_issue_ids or coverage
     if not coverage:

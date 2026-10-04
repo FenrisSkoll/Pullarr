@@ -15,6 +15,7 @@ from backend.base.import_candidate import (CandidateDiagnostic,
 from backend.implementations.comicinfo import comicinfo_claims
 from backend.implementations.comicinfo_archive import (ComicInfoInspection,
                                                        inspect_comicinfo)
+from backend.implementations.identification import title_key
 
 
 def enrich_comicinfo(candidate: ImportCandidate,
@@ -51,7 +52,7 @@ def enrich_comicinfo(candidate: ImportCandidate,
         disagreements = []
         if candidate.filename:
             filename = candidate.filename
-            if document.series and filename.series and document.series.strip().casefold() != filename.series.strip().casefold():
+            if document.series and filename.series and title_key(document.series) != title_key(filename.series):
                 disagreements.append('Series/filename')
             if document.date.year is not None and filename.year is not None and document.date.year != filename.year:
                 disagreements.append('Year/filename')
@@ -69,7 +70,7 @@ def enrich_comicinfo(candidate: ImportCandidate,
             associations = candidate.existing.associations
             titles = {a.volume_title for a in associations if a.volume_title is not None}
             numbers = {a.issue_number for a in associations if a.issue_number is not None}
-            if document.series and titles and document.series not in titles:
+            if document.series and titles and title_key(document.series) not in {title_key(t) for t in titles}:
                 disagreements.append('Series/local_association')
             if document.number is not None and numbers and document.number not in numbers:
                 # Literal disagreement, not proof two bibliographic issues differ.

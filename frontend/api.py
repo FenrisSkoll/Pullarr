@@ -1081,6 +1081,34 @@ def api_local_organization(volume_id=None, identifier=None):
         return return_api({}, 'OrganizationReviewRequired', 409)
 
 
+@api.route('/volumes/<int:volume_id>/local-scan/<identifier>/review/<int:index>', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_local_issue_review(volume_id, identifier, index):
+    from sqlite3 import IntegrityError, OperationalError
+
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.base.organization_job import OrganizationError
+    from backend.base.switch_review import SwitchReviewError
+    from backend.features.local_issue_review import (LocalReviewError,
+                                                     review_issue)
+    from backend.internals.db import DBConnection
+    data = request.get_json(silent=True) if request.method == 'POST' else None
+    if request.method == 'POST' and (not isinstance(data, dict) or set(data) != {'issue_ids'} or not isinstance(data['issue_ids'], list)):
+        return return_api({'code':'invalid_issue_selection'}, 'LocalIssueReview', 400)
+    try:
+        result = review_issue(DBConnection.default_file, volume_id, identifier, index,
+                              issue_ids=data['issue_ids'] if data is not None else None,
+                              query=request.args.get('q', ''))
+        return return_api(result)
+    except LocalReviewError as error:
+        return return_api({'code':error.code}, 'LocalIssueReview', 409)
+    except (IntakeFailure, OSError):
+        return return_api({'code':'stale_preview'}, 'LocalIssueReview', 409)
+    except (OrganizationError, SwitchReviewError, IntegrityError, OperationalError):
+        return return_api({'code':'file_busy'}, 'LocalIssueReview', 409)
+
+
 @api.route('/libraryimport', methods=['GET', 'POST'])
 @error_handler
 @auth
