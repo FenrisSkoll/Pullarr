@@ -15,6 +15,23 @@ from backend.base.definitions import DateType
 
 
 class MetronMappingContract(TestCase):
+    def test_associated_series_are_undirected_bounded_and_not_identity_aliases(self):
+        data = dict(SERIES, series=SERIES['name'], associated=[{'id': 700, 'series': 'Self'},
+            {'id': 701, 'series': 'Related'}, {'id': 701, 'series': 'Related'},
+            {'id': 702, 'series': 'Another'}, {'id': 703, 'series': 'Beyond cap'}])
+        result = self.provider.search_result(data)
+        self.assertEqual([r.target_id for r in result.relations], ['701', '702'])
+        self.assertTrue(all(r.relation_type == 'related_series' and r.target_provider == 'metron'
+                            and r.provenance == 'metron:series:associated' for r in result.relations))
+        self.assertEqual(result.provider_id, '700')
+        self.assertEqual(result.aliases, SERIES['alt_names'])
+
+    def test_malformed_optional_association_does_not_destroy_primary_result(self):
+        for associated in ('not a list', [None, {'id': '../1'}, {'id': 701, 'series': {}}]):
+            result = self.provider.search_result(dict(SERIES, series=SERIES['name'], associated=associated))
+            self.assertEqual(result.relations, [])
+            self.assertEqual(result.provider_id, '700')
+
     def setUp(self):
         from backend.implementations.metadata.metron import \
             MetronMetadataProvider
@@ -105,6 +122,53 @@ class MetronMappingContract(TestCase):
 
 
 class MetronHTTPContract(TestCase):
+    def test_artwork_streamed_json_bounded_no_proxy_or_redirect(self):
+        response = self.response(None)
+        response.iter_content.return_value = [b'{"results":[]}']
+        self.assertEqual(self.client.get('series/700/issue_list/', bounded=True), {'results': []})
+        options = self.session.get.call_args.kwargs
+        self.assertTrue(options['stream'])
+        self.assertEqual(options['proxies'], {})
+        self.assertFalse(options['allow_redirects'])
+        self.assertEqual(options['headers']['Accept-Encoding'], 'identity')
+        response.close.assert_called_once()
+
+    def test_artwork_oversize_and_invalid_json_rejected(self):
+        for body in (b'x' * (2 * 1024 * 1024 + 1), b'<html/>', b'[]'):
+            response = self.response(None)
+            response.iter_content.return_value = [body]
+            with self.assertRaises(self.error):
+                self.client.get('series/700/issue_list/', bounded=True)
+            response.close.assert_called_once()
+
+    def test_artwork_compressed_body_rejected(self):
+        response = self.response(None, headers={'Content-Encoding': 'gzip'})
+        with self.assertRaises(self.error):
+            self.client.get('series/700/issue_list/', bounded=True)
+        response.iter_content.assert_not_called()
+        response.close.assert_called_once()
+
+    def test_artwork_rate_budget_does_not_sleep_or_request(self):
+        from time import time
+
+        from backend.implementations.metadata.metron_client import RATE_STATE
+        RATE_STATE.update(burst_remaining=0, burst_reset=time() + 20)
+        with patch('backend.implementations.metadata.metron_client.sleep') as sleep:
+            with self.assertRaises(self.error):
+                self.client.get('series/700/issue_list/', bounded=True)
+            sleep.assert_not_called()
+        self.session.get.assert_not_called()
+
+    def test_artwork_http_errors_close_and_do_not_retry(self):
+        for status in (301, 401, 403, 429, 500):
+            with patch.dict('backend.implementations.metadata.metron_client.RATE_STATE', {}, clear=True):
+                response = self.response(None, code=status)
+                before = self.session.get.call_count
+                with self.assertRaises(self.error):
+                    self.client.get('series/700/issue_list/', bounded=True)
+                response.close.assert_called_once()
+                self.assertEqual(self.session.get.call_count, before + 1)
+
     def setUp(self):
         from backend.implementations.metadata.metron_client import (
             MetronClient, MetronError)

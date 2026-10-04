@@ -5,6 +5,7 @@ Search for volumes/issues and fetch metadata for them on ComicVine
 """
 
 from asyncio import gather, run, sleep
+from dataclasses import asdict
 from json import JSONDecodeError
 from re import IGNORECASE, compile
 from typing import Any, AsyncGenerator, Dict, Iterable, List, Sequence, Union
@@ -26,13 +27,14 @@ from backend.base.helpers import (AsyncSession, Session, batched,
                                   to_full_string_cv_id, to_string_cv_id)
 from backend.base.logging import LOGGER
 from backend.implementations.matching import select_best_volume_result_for_file
+from backend.implementations.metadata.search_presentation import (
+    CONTINUING as continuing_volume_regex,
+    PRECEDING as preceding_volume_regex, comicvine_relations)
 from backend.internals.db import get_db
 from backend.internals.settings import Settings
 from backend.internals.status import StatusHandlers
 
 # autopep8: off
-preceding_volume_regex = compile(r'preceded by (?:<a[^>]*>)?(.*?)' + volume_regex.pattern, IGNORECASE)
-continuing_volume_regex = compile(r'continued in (?:<a[^>]*>)?(.*?)' + volume_regex.pattern, IGNORECASE)
 translation_regex = compile(
     r'^<p>\s*\w+(?<!English) publication(\.?</p>$|,\s| \(in the \w+(?<!English) language\)|, translates )|' +
     r'^<p>\s*published by the \w+(?<!English) wing of|' +
@@ -420,6 +422,11 @@ class ComicVine:
             self.__format_volume_output(r)
             for r in search_results
         ]
+
+        for raw, formatted in zip(search_results, formatted_results):
+            evidence = comicvine_relations(str(formatted['comicvine_id']), raw.get('description'))
+            if evidence:
+                formatted['search_relations'] = [asdict(r) for r in evidence]
 
         # Mark entries that are already added
         volume_ids: Dict[int, int] = dict(cursor.execute(f"""

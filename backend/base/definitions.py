@@ -730,6 +730,7 @@ class IssueMetadata(TypedDict):
 
 
 class VolumeMetadata(TypedDict):
+    search_relations: NotRequired[List[dict]]
     comicvine_id: int
     title: str
     year: Union[int, None]

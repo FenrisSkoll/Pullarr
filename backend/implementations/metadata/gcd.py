@@ -21,7 +21,8 @@ from backend.implementations.metadata.gcd_staging import (GcdIssueNumber,
                                                           GcdVariantRelation)
 from backend.implementations.metadata.models import (VolumeMetadata,
                                                      VolumeSearchResult)
-from backend.implementations.metadata.provider import MetadataSearchProvider
+from backend.implementations.metadata.provider import (MetadataArtworkProvider,
+                                                       MetadataSearchProvider)
 from backend.implementations.metadata.snapshot import (
     MetadataSnapshotProvider, ProviderVolumeSnapshot,
     SnapshotIssue, SnapshotReceipt)
@@ -96,7 +97,7 @@ def issue(client: GcdClient, data: Dict[str, Any], parent: str, expected: str) -
         raise GcdError('malformed') from None
 
 
-class GcdMetadataProvider(MetadataSearchProvider, MetadataSnapshotProvider):
+class GcdMetadataProvider(MetadataSearchProvider, MetadataSnapshotProvider, MetadataArtworkProvider):
     search_label = 'GCD'
     search_supports_year = True
 
@@ -121,7 +122,19 @@ class GcdMetadataProvider(MetadataSearchProvider, MetadataSnapshotProvider):
         identity, members = series(client, data)
         return VolumeSearchResult('gcd', identity, data['name'], data['year_began'],
             1, None, None, 'https://www.comics.org/series/' + identity + '/', [],
-            None, len(members), data.get('language') not in (None, '', 'en'), None)
+            None, len(members), data.get('language') not in (None, '', 'en'), None,
+            artwork_hint=members[0] if members else None)
+
+    def search_artwork_url(self, provider_id, hint):
+        client = self.client_factory()
+        try:
+            data = client.get('issue/' + resource_id(hint) + '/')
+            if (client.identity(data.get('api_url'), 'issue') != hint
+                    or client.identity(data.get('series'), 'series') != provider_id):
+                raise GcdError('coherence')
+            return text(data.get('cover')) or None
+        finally:
+            client.close()
 
     async def search_volumes(self, query: Any, year: Optional[int] = None) -> List[VolumeSearchResult]:
         if not isinstance(query, str) or not query.strip() or len(query) > 500:

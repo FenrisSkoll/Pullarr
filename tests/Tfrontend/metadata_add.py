@@ -4,7 +4,8 @@ import unittest
 from os.path import join
 
 from aiohttp import ClientError
-from fixtures.comicvine_fetch import LibraryAddHarness, issue_result
+from fixtures.comicvine_fetch import (LibraryAddHarness,
+                                      issue_response, issue_result)
 from fixtures.comicvine_search import (FAKE_APP_KEY, FAKE_CV_KEY,
                                        volume_response)
 
@@ -12,6 +13,23 @@ from backend.internals.server import Server
 
 
 class AddVolumeMetadata(LibraryAddHarness, unittest.TestCase):
+    def test_batman_continuations_add_independently_with_separate_issue_lists(self):
+        created = []
+        for identity, title, numbers, description in (
+            ('100', 'Batman: Rebirth Deluxe Edition', (1, 2, 3), '<p>Continued in <a href="/4050-128991/">Batman: Deluxe Edition</a></p>'),
+            ('128991', 'Batman: Deluxe Edition', (4, 5, 6), '<p>Preceded by <a href="/4050-100/">Batman: Rebirth Deluxe Edition</a></p>')):
+            self.prepare_fetch(volume_response(id=identity, name=title, count_of_issues='3', description=description),
+                [issue_response(id=str(1000 + n), volume={'id': identity}, issue_number=str(n)) for n in numbers])
+            response = self.post_volume(comicvine_id=None, provider='comicvine', provider_id=identity)
+            self.assertEqual(response.status_code, 201)
+            result = response.json['result']
+            self.assertEqual(result['metadata_source'], {'provider': 'comicvine', 'id': identity})
+            self.assertEqual([i['issue_number'] for i in result['issues']], list(map(str, numbers)))
+            created.append(result['id'])
+        self.assertNotEqual(*created)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 2)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues').fetchone()[0], 6)
+
     def setUp(self):
         super().setUp()
         self.start_patch(

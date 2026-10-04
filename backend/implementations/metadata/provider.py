@@ -32,6 +32,14 @@ class MetadataSearchProvider(ABC):
         ...
 
 
+class MetadataArtworkProvider(ABC):
+    """One optional, charged metadata request; never a full volume/issue fetch."""
+
+    @abstractmethod
+    def search_artwork_url(self, provider_id: str, hint: str) -> Optional[str]:
+        ...
+
+
 class MetadataBulkVolumeProvider(ABC):
     """Optional two-stage batch fetching, independent of single-volume fetch.
 

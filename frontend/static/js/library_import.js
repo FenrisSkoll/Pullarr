@@ -269,7 +269,7 @@ function searchMetadata() {
 	usingApiKey()
 	.then(api_key => {
 		liEls.search.results.innerHTML = '';
-		const params = {query: encodeURIComponent(query)};
+		const params = {query: encodeURIComponent(query), expand_relations: 'false'};
 		if (provider !== 'comicvine') params.provider = provider;
 		fetchAPI('/volumes/search', api_key, params)
 		.then(json => {

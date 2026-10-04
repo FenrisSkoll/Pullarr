@@ -181,6 +181,11 @@ main > div {
 	border-radius: 2px;
 }
 
+.entry-description,
+.entry-spare-description {
+    white-space: pre-line;
+}
+
 .entry-spare-description {
 	display: none;
 }

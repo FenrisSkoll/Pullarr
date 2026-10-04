@@ -25,7 +25,8 @@ class ComicVineProviderSearch(ComicVineSearchHarness, unittest.TestCase):
         expected = public_result(already_added=73)
         del expected['comicvine_id']
         del expected['issues']
-        expected.update(provider='comicvine', provider_id='2127')
+        expected.update(provider='comicvine', provider_id='2127', relations=[], search_origin='direct',
+                        relation_reason=None, rank_components={}, artwork_hint=None)
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], VolumeSearchResult)
         self.assertEqual(asdict(result[0]), expected)

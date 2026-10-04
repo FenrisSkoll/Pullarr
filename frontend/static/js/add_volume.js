@@ -53,7 +53,11 @@ function addAlreadyAdded(entry, id) {
 	title.appendChild(aa_icon);
 };
 
-function buildResults(results, api_key, groups = null) {
+let searchArtwork;
+function buildResults(results, api_key, groups = null, ticket = null) {
+    if (searchArtwork) searchArtwork.stop();
+    const generation = metadataSearchGeneration;
+    searchArtwork = MetadataSearchPresentation.artwork(ticket, api_key, () => generation === metadataSearchGeneration);
 	SearchEls.search_results.querySelectorAll('.metadata-search-group').forEach(e => e.remove());
 	SearchEls.search_results
         .querySelectorAll('button:not(.filter-bar)')
@@ -142,11 +146,12 @@ function buildResults(results, api_key, groups = null) {
 		});
 		if (groups) {
 			const note = document.createElement('p');
-			note.textContent = MetadataSearchPresentation.annotations(result);
+			note.textContent = [MetadataSearchPresentation.relationships(result), MetadataSearchPresentation.annotations(result)].filter(Boolean).join(' · ');
 			tags.appendChild(note);
 		}
 
 		SearchEls.search_results.appendChild(entry);
+        searchArtwork.observe(entry, result);
 	});
 
 	// Fill filters
@@ -250,14 +255,13 @@ function search(reset_url_params=true) {
 
     usingApiKey().then(api_key => {
 		const query = selectedQuery;
-		const params = {query: encodeURIComponent(query)};
-		if (selectedProvider !== 'comicvine') params.provider = selectedProvider;
+		const params = {query: encodeURIComponent(query), provider: selectedProvider, presentation: 'v2', artwork: 'true'};
 		fetchAPI('/volumes/search', api_key, params)
 		.then(json => {
 
 			if (generation !== metadataSearchGeneration) return;
 			const groups = MetadataSearchPresentation.groups(json.result);
-			buildResults(groups ? groups.flatMap(g => g.results) : json.result, api_key, groups);
+			buildResults(groups ? groups.flatMap(g => g.results) : json.result, api_key, groups, json.result.artwork_ticket);
 
 			if (!groups && !SearchEls.search_results.querySelector('button:not(.filter-bar)'))
 				hide([SearchEls.msgs.loading], [SearchEls.msgs.empty]);
@@ -278,6 +282,7 @@ function search(reset_url_params=true) {
 
 function clearSearch(e) {
 	metadataSearchGeneration++;
+    if (searchArtwork) searchArtwork.stop();
 	SearchEls.search_results.querySelectorAll('.metadata-search-group').forEach(e => e.remove());
 	hide([
 		SearchEls.search_results,

@@ -27,6 +27,55 @@ from frontend.metadata import qualified_volume_search_result
 
 
 class AggregateSearchTests(GcdLifecycleHarness, TestCase):
+    def test_batman_continuation_real_adapter_exact_api_no_issue_fetch(self):
+        first = volume_response(id='100', name='Batman: Rebirth Deluxe Edition', count_of_issues='3',
+            description='<p>Books 1–3. Continued in <a href="/batman/4050-128991/">Batman: Deluxe Edition</a></p>')
+        second = volume_response(id='128991', name='Batman: Deluxe Edition', count_of_issues='3',
+            description='<p>Books 4–6. Preceded by <a href="/batman/4050-100/">Batman: Rebirth Deluxe Edition</a></p>')
+        self.response.json.side_effect = [{'status_code': 1, 'results': [first]}, {'status_code': 1, 'results': second}]
+        response = self.search('Batman Rebirth Deluxe Edition', provider='comicvine', presentation='v2')
+        self.assertEqual(response.status_code, 200)
+        results = response.json['result']['providers'][0]['results']
+        self.assertEqual([r['metadata_source']['id'] for r in results], ['100', '128991'])
+        self.assertEqual(results[1]['search_origin'], 'relation')
+        self.assertEqual(results[0]['relations'][0]['target_id'], '128991')
+        self.assertIn('Books 1–3.', results[0]['description'])
+        self.assertIn('Books 4–6.', results[1]['description'])
+        self.assertNotIn('<p>', results[0]['description'])
+        self.assertEqual(self.session.get.await_count, 2)
+        self.assertTrue(self.session.get.await_args_list[1].args[0].endswith('/volume/4050-128991/'))
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 0)
+
+    def test_import_disables_expansion_and_no_artwork_calls(self):
+        self.respond([volume_response(description='<p>continued in <a href="/4050-128991/">Other</a></p>')])
+        result = self.search(expand_relations='false').json['result']
+        self.assertEqual(result['providers'][0]['result_count'], 1)
+        self.assertEqual(self.session.get.await_count, 1)
+        self.assertNotIn('artwork_ticket', result)
+        self.assertFalse(any('/issue/' in path for path, _ in self.fake.requests))
+
+    def test_artwork_api_authenticated_ticket_and_gcd_charged_lookup(self):
+        from backend.features.metadata_artwork import SearchArtwork
+        fetcher = Mock()
+        fetcher.fetch_image.return_value = b'fixture-jpeg'
+        service = SearchArtwork(fetcher=fetcher)
+        self.fake.issues['1']['cover'] = 'https://files1.comics.org//img/gcd/covers_by_id/1/w400/1000.jpg'
+        with patch('backend.features.metadata_artwork.ARTWORK', service):
+            result = self.search(artwork='true').json['result']
+            self.assertEqual(len(self.fake.requests), 1)
+            fetcher.fetch_image.assert_not_called()
+            data = {'ticket': result['artwork_ticket'], 'identities': ['gcd:1']}
+            self.assertEqual(self.client.post('/api/volumes/search/artwork', json=data).status_code, 401)
+            response = self.client.post('/api/volumes/search/artwork', query_string={'api_key': FAKE_APP_KEY}, json=data)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json['result'][0]['artwork_state'], 'available')
+            self.assertEqual(len(self.fake.requests), 2)
+            state = json.loads(self.db.execute("SELECT value FROM config WHERE key='gcd_request_ledger_v1'").fetchone()[0])
+            self.assertEqual(len(state['attempts']), 2)
+            again = self.client.post('/api/volumes/search/artwork', query_string={'api_key': FAKE_APP_KEY}, json=data)
+            self.assertEqual(again.json, response.json)
+            self.assertEqual(len(self.fake.requests), 2)
+
     def setUp(self):
         super().setUp()
         self.settings.metron_api_token = 'synthetic-token'
@@ -75,7 +124,12 @@ class AggregateSearchTests(GcdLifecycleHarness, TestCase):
             actual = group['results'][0].copy()
             for key in ('result_key', 'local_identity_annotations', 'identity_conflict'):
                 actual.pop(key)
-            self.assertEqual(actual, qualified_volume_search_result(single[0]))
+            rank = actual.pop('rank_components')
+            self.assertEqual(rank, dict(exact_title=True, exact_alias=False, query_tokens_matched=1,
+                query_tokens_total=1, year_match=False, origin='direct'))
+            expected = qualified_volume_search_result(single[0])
+            expected.pop('rank_components')
+            self.assertEqual(actual, expected)
         self.assertEqual([g['results'][0]['title'] for g in result['providers']], ['Batman'] * 3)
         self.assertEqual([g['results'][0]['result_key'] for g in result['providers']], ['comicvine:2127', 'metron:700', 'gcd:1'])
         # Metron's old search DTO intentionally does not transport raw cv_id.

@@ -24,9 +24,11 @@ from backend.implementations.metadata.format_evidence import (
 from backend.implementations.metadata.metron_client import (MetronClient,
                                                             MetronError)
 from backend.implementations.metadata.models import (IssueMetadata,
+                                                     PublicationRelation,
                                                      VolumeMetadata,
                                                      VolumeSearchResult)
-from backend.implementations.metadata.provider import (MetadataSearchProvider,
+from backend.implementations.metadata.provider import (MetadataArtworkProvider,
+                                                       MetadataSearchProvider,
                                                        MetadataVolumeProvider)
 from backend.implementations.metadata.publication_evidence import (
     ProviderPublicationEvidence, PublicationKind)
@@ -60,7 +62,7 @@ def references(data: Dict[str, Any], entity: Literal['volume', 'issue']) -> List
             if data.get(key) is not None]
 
 
-class MetronMetadataProvider(MetadataSearchProvider, MetadataVolumeProvider,
+class MetronMetadataProvider(MetadataSearchProvider, MetadataVolumeProvider, MetadataArtworkProvider,
                              MetadataEnrichmentProvider, MetadataScheduledProvider, MetadataReviewProvider):
     """Deliberately no bulk capability: sequential full snapshots only."""
     search_label = 'Metron'
@@ -156,11 +158,47 @@ class MetronMetadataProvider(MetadataSearchProvider, MetadataVolumeProvider,
     @classmethod
     def search_result(cls, data: Dict[str, Any]) -> VolumeSearchResult:
         value = cls.volume_metadata(dict(data, name=data.get('series')), [])
+        relations = []
+        # Detail-only, undirected provider evidence; never a continuation guess.
+        associated = data.get('associated') or []
+        if not isinstance(associated, list):
+            associated = []
+        seen = {value.provider_id}
+        for row in associated[:100]:
+            if not isinstance(row, dict):
+                continue
+            try:
+                identity = resource_id(row.get('id'))
+                title = optional_text(row.get('series')) or ''
+            except MetronError:
+                continue
+            if identity not in seen:
+                relations.append(PublicationRelation('metron', value.provider_id, 'related_series',
+                    'metron', identity, title[:500], 'metron:series:associated'))
+                seen.add(identity)
+            if len(relations) == 2:
+                break
         return VolumeSearchResult(
             value.provider, value.provider_id, value.title, value.year,
             value.volume_number, None, None,
             'https://metron.cloud/api/series/' + value.provider_id + '/',
-            [], value.publisher, value.issue_count, value.translated, None)
+            value.aliases, value.publisher, value.issue_count, value.translated, None,
+            artwork_hint=value.provider_id if value.issue_count else None, relations=relations)
+
+    def search_artwork_url(self, provider_id, hint):
+        identity = resource_id(provider_id)
+        # One first page, never pagination or issue detail enumeration.
+        data = MetronClient().get('series/' + identity + '/issue_list/', bounded=True)
+        rows = data.get('results')
+        if not isinstance(rows, list) or len(rows) > 100:
+            raise MetronError('malformed')
+        if not rows:
+            return None
+        row = rows[0]
+        if not isinstance(row, dict) or not isinstance(row.get('series'), dict) or resource_id(row['series'].get('id')) != identity:
+            raise MetronError('malformed')
+        resource_id(row.get('id'))
+        return optional_text(row.get('image'))
 
     async def search_volumes(self, query: str) -> List[VolumeSearchResult]:
         return self._search(query)

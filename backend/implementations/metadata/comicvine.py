@@ -8,6 +8,7 @@ from backend.implementations.comicvine import ComicVine
 from backend.implementations.metadata.enrichment import (
     MetadataEnrichmentProvider, ProviderIssueFacts, VolumeFetchResult)
 from backend.implementations.metadata.models import (IssueMetadata,
+                                                     PublicationRelation,
                                                      VolumeMetadata,
                                                      VolumeSearchResult)
 from backend.implementations.metadata.provider import (
@@ -65,7 +66,8 @@ class ComicVineMetadataProvider(
             publisher=result['publisher'],
             issue_count=result['issue_count'],
             translated=result['translated'],
-            already_added=result['already_added']
+            already_added=result['already_added'],
+            relations=[PublicationRelation(**r) for r in result.get('search_relations', [])]
         ) for result in results]
 
     async def fetch_volume(self, provider_id: str) -> VolumeMetadata:

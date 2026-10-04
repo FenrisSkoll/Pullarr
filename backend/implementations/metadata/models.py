@@ -1,9 +1,31 @@
 """Provider-neutral search and fetch metadata, not persisted identity."""
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import List, Union
 
 from backend.base.definitions import UnsupportedLegacyIssue
+
+
+@dataclass(frozen=True)
+class PublicationRelation:
+    source_provider: str
+    source_id: str
+    relation_type: str
+    target_provider: str
+    target_id: str
+    target_title: str
+    provenance: str
+
+    def __post_init__(self):
+        if (self.source_provider not in ('comicvine', 'metron', 'gcd')
+                or self.target_provider not in ('comicvine', 'metron', 'gcd')
+                or self.relation_type not in ('continues_from', 'continues_as', 'related_series')
+                or not re.fullmatch(r'[1-9][0-9]{0,18}', self.source_id)
+                or not re.fullmatch(r'[1-9][0-9]{0,18}', self.target_id)
+                or (self.source_provider, self.source_id) == (self.target_provider, self.target_id)
+                or len(self.target_title) > 500 or len(self.provenance) > 100):
+            raise ValueError('Invalid publication relationship')
 
 
 @dataclass
@@ -28,6 +50,11 @@ class VolumeSearchResult:
     issue_count: int
     translated: bool
     already_added: Union[int, None]
+    relations: List[PublicationRelation] = field(default_factory=list)
+    search_origin: str = 'direct'
+    relation_reason: Union[PublicationRelation, None] = None
+    rank_components: dict = field(default_factory=dict)
+    artwork_hint: Union[str, None] = field(default=None, repr=False, compare=False)
 
 
 @dataclass

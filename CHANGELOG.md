@@ -1,5 +1,21 @@
 # Release notes
 
+## 1.4.0 — metadata search artwork and relationships
+
+- Present ComicVine search descriptions as readable, bounded plain text; stored
+  library descriptions are unchanged.
+- Load GCD and Metron search artwork lazily for visible cards, with bounded
+  provider requests, validated image thumbnails and an identity-keyed cache.
+- Show explicit ComicVine predecessor/continuation links and discover related
+  volumes through bounded, one-hop exact-ID lookups. Related publications remain
+  independently addable provider-qualified identities.
+- Preserve Metron's detail-only associated-series evidence as undirected related
+  series, without inferring continuation or identity equivalence.
+- Rank direct title/alias matches ahead of related results, retaining provider
+  groups and local-library annotations. Library Import keeps direct search only.
+- No database/schema migration (schema72). The Unraid CA template continues to
+  follow `ghcr.io/fenrisskoll/pullarr:latest`.
+
 ## 1.3.3 — qBittorrent 5.2 compatibility
 
 - Support qBittorrent 5.2 / WebAPI 2.15, including 204 no-content login and

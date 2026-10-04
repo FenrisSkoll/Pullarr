@@ -6,7 +6,7 @@ provider failures are isolated; programming errors still reach the normal 500.
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from time import monotonic
 from typing import List, Optional
 
@@ -18,6 +18,59 @@ from backend.implementations.metadata.provider import MetadataSearchProvider
 from backend.implementations.metadata.registry import (PROVIDERS,
                                                        get_search_provider)
 from backend.internals.db import get_db
+
+MAX_RELATED = 4
+MAX_RELATIONS_PER_RESULT = 2
+
+
+def normalized_title(value):
+    # Punctuation and whitespace only: meaningful title terms remain intact.
+    return ' '.join(re.findall(r'\w+', value.casefold()))
+
+
+def rank_results(query, results, year=None):
+    title = normalized_title(query)
+    tokens = set(title.split())
+    for result in results:
+        candidate = normalized_title(result.title)
+        overlap = len(tokens & set(candidate.split()))
+        exact = candidate == title
+        alias = any(normalized_title(a) == title for a in result.aliases)
+        result.rank_components = dict(exact_title=exact, exact_alias=alias,
+            query_tokens_matched=overlap, query_tokens_total=len(tokens),
+            year_match=year is not None and result.year == year,
+            origin=result.search_origin)
+    def key(result):
+        c = result.rank_components
+        tier = (2 if result.search_origin == 'relation' else
+                0 if c['exact_title'] or c['exact_alias'] else
+                1 if c['query_tokens_matched'] else 3)
+        return (tier, not c['exact_title'], not c['exact_alias'],
+                -c['query_tokens_matched'], not c['year_match'],
+                normalized_title(result.title))
+    return sorted(results, key=key)
+
+
+async def expand_related(instance, provider, results, remaining):
+    """One hop, same namespace, exact ID, no issue/cover fetch or recursion."""
+    visited = {r.provider_id for r in results}
+    expanded = []
+    for source in tuple(results):
+        for relation in source.relations[:MAX_RELATIONS_PER_RESULT]:
+            if (not remaining or relation.relation_type not in ('continues_as', 'continues_from')
+                    or relation.source_provider != provider or relation.source_id != source.provider_id
+                    or relation.target_provider != provider or relation.target_id in visited):
+                continue
+            visited.add(relation.target_id)
+            remaining -= 1
+            try:
+                found = await instance.search_aggregate(('cv' if provider == 'comicvine' else provider) + ':' + relation.target_id)
+                if len(found) != 1 or found[0].provider != provider or found[0].provider_id != relation.target_id:
+                    continue
+                expanded.append(replace(found[0], search_origin='relation', relation_reason=relation))
+            except (MetadataProviderError, MetadataSourceRateLimitReached):
+                continue
+    return results + expanded, remaining
 
 
 @dataclass
@@ -55,13 +108,14 @@ def search_scope(query):
     return list(PROVIDERS), query
 
 
-async def aggregated_search(query: str, year: Optional[int] = None, *, selected_provider: Optional[str] = None):
+async def aggregated_search(query: str, year: Optional[int] = None, *, selected_provider: Optional[str] = None, expand_relations: bool = True):
     providers, routed_query = search_scope(query)
     if selected_provider is not None:
         if selected_provider not in PROVIDERS or selected_provider not in providers:
             raise InvalidKeyValue('provider', 'Invalid search scope')
         providers = [selected_provider]
     receipts = []
+    remaining = MAX_RELATED
     for key in providers:
         if not issubclass(PROVIDERS[key], MetadataSearchProvider):
             receipts.append(ProviderSearchReceipt(key, key, 'unavailable', 0, [], 'unsupported_capability'))
@@ -91,10 +145,15 @@ async def aggregated_search(query: str, year: Optional[int] = None, *, selected_
                 if len(unique) > receipt.result_limit:
                     raise MetadataProviderError(key, 'search_limit')
                 receipt.results = list(unique.values())
+                if len(json.dumps([asdict(r) for r in receipt.results], ensure_ascii=True).encode()) > 8 * 1024 * 1024:
+                    raise MetadataProviderError(key, 'response_limit')
                 # CV cannot expose a total count through the legacy adapter.
                 if len(receipt.results) == receipt.result_limit:
                     receipt.status = 'limited'
                     receipt.reason = 'at_result_limit'
+                if expand_relations:
+                    receipt.results, remaining = await expand_related(instance, key, receipt.results, remaining)
+                receipt.results = rank_results(query, receipt.results, year)
         except MetadataProviderError as error:
             receipt.status = {'credentials': 'auth_required', 'disabled': 'disabled',
                 'rate_limited': 'rate_limited', 'deferred': 'rate_limited', 'budget': 'rate_limited',

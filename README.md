@@ -81,6 +81,8 @@ compatibility identifiers; do not rename an existing database.
 Add metadata providers in Settings before searching for volumes. Search Sources
 are separate from metadata providers: Prowlarr or direct Torznab supply releases,
 not canonical publication identity. Test configured sources and download clients.
+Add Comics includes bounded lazy artwork and explicit continuation discovery;
+see [metadata search](docs/metadata-search.md) for provider capabilities and limits.
 NZBGet 21+ and qBittorrent 5.x / Web API 2.9.3+ are the supported added clients.
 Create the desired qBittorrent category first. Managed clients permit one enabled
 client per protocol; explicitly selected legacy SABnzbd retains Usenet precedence.
@@ -116,8 +118,8 @@ recompression**. qBittorrent is the only supported torrent client.
 
 The completed implementation programmes are summarized in the changelog. Private
 development diaries, runtime evidence and agent instructions are intentionally
-not part of this public source candidate. Application version `1.3.3` adds
-qBittorrent 5.2 compatibility; see the release notes for details.
+not part of this public source candidate. Application version `1.4.0` adds
+metadata search artwork and continuation discovery; see the release notes for details.
 The official image reference is `ghcr.io/fenrisskoll/pullarr:latest`; verify
 anonymous availability before installing or submitting the CA template.
 

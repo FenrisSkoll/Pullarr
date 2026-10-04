@@ -9,6 +9,8 @@ from backend.base.custom_exceptions import InvalidKeyValue
 from backend.base.definitions import SpecialVersion
 from backend.implementations.issue_presentation import issue_display_title
 from backend.implementations.metadata.models import VolumeSearchResult
+from backend.implementations.metadata.search_presentation import \
+    description_text
 from backend.internals.db import get_db
 from backend.internals.provider_identity import (MetadataIdentityError,
                                                  ProviderIdentityDB)
@@ -32,6 +34,8 @@ def qualified_volume_search_result(result: VolumeSearchResult) -> Dict[str, Any]
     data = asdict(result)
     data.pop('provider')
     data.pop('provider_id')
+    data.pop('artwork_hint')
+    data['description'] = description_text(result.description)
     data['comicvine_id'] = int(result.provider_id) if result.provider == 'comicvine' else None
     data['metadata_source'] = {'provider': result.provider, 'id': result.provider_id}
     data['external_ids'] = {result.provider: result.provider_id}

@@ -1,8 +1,9 @@
 """Focused token-only Metron transport. No implicit retries or CV fallback."""
 
+import json
 from email.utils import parsedate_to_datetime
 from threading import RLock
-from time import sleep, time
+from time import monotonic, sleep, time
 from typing import Any, Callable, Dict, List, Mapping, Optional
 from urllib.parse import urljoin, urlsplit
 
@@ -77,13 +78,15 @@ class MetronClient:
             # One serialized request stream; only a short burst wait is allowed.
             sleep(delay + 0.1)
 
-    def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get(self, path: str, params: Optional[Dict[str, Any]] = None, *, bounded: bool = False) -> Dict[str, Any]:
         url = self.api_url(path)
         if not self._token.strip():
             raise MetronError('credentials')
         if any(c.isspace() for c in self._token):
             raise MetronError('credentials')
         with REQUEST_LOCK:
+            if bounded and any(RATE_STATE.get(w + '_remaining') == 0 and RATE_STATE.get(w + '_reset', time() + 60) > time() for w in ('burst', 'sustained')):
+                raise MetronError('rate_limited')
             self.wait_for_capacity()
             if self.before_request is not None:
                 self.before_request()
@@ -93,16 +96,21 @@ class MetronClient:
                     # Keep configured environment proxies, but prohibit .netrc
                     # replacing Bearer authentication. Never use FlareSolverr.
                     session.trust_env = False
+                    started = monotonic()
                     response = session.get(
                         url, params=params,
                         headers={'Authorization': 'Bearer ' + self._token,
                                  'Accept': 'application/json',
+                                 **({'Accept-Encoding': 'identity'} if bounded else {}),
                                  'User-Agent': 'Pullarr Metron metadata integration'},
-                        proxies=get_environ_proxies(url),
-                        timeout=(10, 30), allow_redirects=False)
+                        proxies={} if bounded else get_environ_proxies(url),
+                        timeout=(5, 5) if bounded else (10, 30), allow_redirects=False,
+                        **({'stream': True} if bounded else {}))
                     self.observe(response.headers)
                     status = response.status_code
                     if status == 429:
+                        if bounded:
+                            response.close()
                         raw = response.headers.get('Retry-After', '60')
                         try:
                             retry_at = time() + max(1, float(raw))
@@ -114,10 +122,25 @@ class MetronClient:
                         RATE_STATE['retry_at'] = max(time() + 1, retry_at)
                         raise MetronError('rate_limited', RATE_STATE['retry_at'])
                     if status != 200:
+                        if bounded:
+                            response.close()
                         raise MetronError({401: 'credentials', 403: 'forbidden',
                                            404: 'not_found'}.get(status, 'unavailable'))
                     try:
-                        data = response.json()
+                        if bounded:
+                            try:
+                                if response.headers.get('Content-Encoding', 'identity').lower() not in ('identity', ''):
+                                    raise MetronError('malformed')
+                                content = bytearray()
+                                for chunk in response.iter_content(65536):
+                                    content.extend(chunk)
+                                    if len(content) > 2 * 1024 * 1024 or monotonic() - started > 15:
+                                        raise MetronError('response_limit')
+                                data = json.loads(content)
+                            finally:
+                                response.close()
+                        else:
+                            data = response.json()
                     except ValueError:
                         raise MetronError('malformed') from None
                     if not isinstance(data, dict):

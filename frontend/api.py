@@ -1323,6 +1323,17 @@ def api_gcd_clear_credentials():
     return return_api({'cleared': True})
 
 
+@api.route('/volumes/search/artwork', methods=['POST'])
+@error_handler
+@auth
+def api_search_artwork():
+    from backend.features.metadata_artwork import ARTWORK
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise InvalidKeyValue('artwork', 'Expected artwork batch')
+    return return_api(ARTWORK.batch(data.get('ticket'), data.get('identities')))
+
+
 @api.route('/volumes/search', methods=['GET', 'POST'])
 @error_handler
 @auth
@@ -1330,7 +1341,7 @@ def api_volumes_search():
     if request.method == 'GET':
         query = extract_key(request, 'query')
         provider = request.args.get('provider')
-        if provider == 'all':
+        if provider == 'all' or request.args.get('presentation') == 'v2':
             from backend.features.metadata_search import (aggregate_response,
                                                           aggregated_search)
             year = request.args.get('year')
@@ -1338,8 +1349,20 @@ def api_volumes_search():
                 if not year.isdecimal() or not 1 <= int(year) <= 9999:
                     raise InvalidKeyValue('year', 'Expected year 1–9999')
                 year = int(year)
-            return return_api(aggregate_response(query, run(aggregated_search(query, year)),
-                qualified_volume_search_result, year))
+            expand = request.args.get('expand_relations', 'true')
+            if expand not in ('true', 'false'):
+                raise InvalidKeyValue('expand_relations', 'Expected boolean')
+            receipts = run(aggregated_search(query, year,
+                selected_provider=None if provider == 'all' else provider or 'comicvine',
+                expand_relations=expand == 'true'))
+            result = aggregate_response(query, receipts, qualified_volume_search_result, year)
+            if request.args.get('artwork') == 'true':
+                from backend.features.metadata_artwork import ARTWORK
+                result['artwork_ticket'] = ARTWORK.register(r for g in receipts for r in g.results)
+                for group, receipt in zip(result['providers'], receipts):
+                    for row, item in zip(group['results'], receipt.results):
+                        row['artwork_state'] = 'pending' if item.artwork_hint else 'available' if item.cover_link else 'unavailable'
+            return return_api(result)
         if provider is not None and provider not in PROVIDERS:
             raise InvalidKeyValue('provider', provider)
         # The no-provider legacy route retains its exact CV shape and call.
