@@ -33,6 +33,7 @@ from backend.internals.settings import Settings
 
 
 def main():
+    force = '--force' in sys.argv
     errors,consoles,logs=[],[],[]
     network=[]
     original_send=requests.Session.send
@@ -47,6 +48,7 @@ def main():
             if r.levelno>=logging.ERROR: logs.append(r.getMessage())
     capture=Capture();LOGGER.addHandler(capture)
     with TemporaryDirectory(prefix='kapowarr-8m-browser-') as directory,sources() as fixture,patch.object(requests.Session,'send',admitted_send):
+        fixture['state']['omit_issue'] = force
         base=Path(directory);library=base/'library';folder=library/'Batman';incoming=base/'incoming'
         folder.mkdir(parents=True);incoming.mkdir()
         set_db_location(str(base/'db'));server=Server();server.app.logger.addHandler(capture)
@@ -147,12 +149,22 @@ def main():
                     with page.expect_response(lambda r:f'/issues/{issue}/release-search?' in r.url) as search_response:
                         page.locator(f'tr[data-id="{issue}"] .action-column > :nth-child(2)').click()
                     result=search_response.value.json()['result'];assert result['results'][0]['quality']['result']=='provisional_upgrade'
-                    candidate_row=page.locator('#search-result-table tbody tr').filter(has_text=f'Batman #{issue} (2020) (HD-Digital)')
+                    candidate_row=page.locator('#search-result-table tbody tr').filter(has_text=f'Batman{"" if force else " #"+str(issue)} (2020) (HD-Digital)')
                     candidate_row.get_by_text('provisional upgrade',exact=False).wait_for()
                     with page.expect_response(lambda r:'/api/release-search/' in r.url and r.request.method=='POST') as grab_response:
-                        candidate_row.get_by_role('button',name='Download',exact=True).click()
+                        if force:
+                            assert candidate_row.get_by_role('button',name='Download',exact=True).is_disabled()
+                            candidate_row.get_by_role('button',name='Download anyway',exact=True).click()
+                            candidate_row.get_by_role('button',name='Confirm download anyway',exact=True).click()
+                        else:
+                            candidate_row.get_by_role('button',name='Download',exact=True).click()
                     receipt=grab_response.value.json()['result']
                     assert receipt['state']=='tracking',receipt
+                    with server.app.app_context():
+                        decision=get_db().execute('SELECT authorization,issue_ids FROM wanted_decisions WHERE id=?',
+                                                  (receipt['decision_id'],)).fetchone()
+                        assert decision[0]==('forced_manual' if force else 'manual')
+                        assert json.loads(decision[1])==[issue]
                     original=(folder/f'Batman {issue:03}.cbz').read_bytes()
                     source=incoming/f'Batman {issue:03} (2020).cbz';comic(source,edge)
                     downloads=DownloadStore(DBConnection.default_file)

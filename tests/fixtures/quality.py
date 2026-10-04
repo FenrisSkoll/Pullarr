@@ -34,7 +34,8 @@ def sources():
         requested=query.get('q',[''])[0]
         numbers=re.findall(r'(?<!\d)([1-3])(?!\d)',requested)
         number=int(numbers[-1]) if numbers else state['issue']
-        return 200,rss(item(title=f'Batman #{number} (2020) ({state["label"]}).cbz',
+        label = '' if state.get('omit_issue') else f' #{number}'
+        return 200,rss(item(title=f'Batman{label} (2020) ({state["label"]}).cbz',
             guid=f'quality-{number}-{state["label"]}',url=indexer+'/nzb')),{}
     with fake_http(response) as (indexer,calls),fake_sab() as (sab,remote):
         yield dict(indexer=indexer,sab=sab,remote=remote,calls=calls,state=state)

@@ -57,6 +57,18 @@ def run(kind, false_hd=False, profile='legacy'):
                     response=requests.post(origin+'/api/wanted',params={'api_key':key},
                         json=dict(action='search',volume_id=1,issue_id=1),timeout=10)
                     assert response.status_code==200
+                    for _ in range(120):
+                        row=db.execute("SELECT outcome FROM wanted_searches WHERE outcome='no_acceptable_getcomics_release' LIMIT 1").fetchone()
+                        if row: break
+                        time.sleep(.5)
+                    assert row and remote['submitted']==0, 'Remote protocols must remain manual-only'
+                    response=requests.post(origin+'/api/issues/1/release-search',params={'api_key':key},timeout=30)
+                    assert response.status_code==200
+                    search=response.json()['result']
+                    selected=next(r for r in search['results'] if r['download_eligible'])
+                    response=requests.post(origin+f'/api/release-search/{search["search_id"]}/{selected["selection_id"]}',
+                        params={'api_key':key},json=dict(action='download'),timeout=30)
+                    assert response.status_code==200 and response.json()['result']['state']=='tracking'
                     for _ in range(240):
                         row=db.execute('SELECT state,error FROM acquisition_provenance WHERE client_kind=? ORDER BY created_at DESC LIMIT 1',(kind,)).fetchone()
                         if row and row[0] in ('imported','rejected'): break
@@ -74,7 +86,7 @@ def run(kind, false_hd=False, profile='legacy'):
                         process.terminate(); process.wait(timeout=15)
             content=output_path.read_text(encoding='utf-8')
             assert 'Traceback' not in content and '[ERROR]' not in content,'Unexpected normal-entrypoint error'
-            print(f'Normal Pullarr workers: {kind}, profile={profile}, false-HD={false_hd}, imported/rejected as expected, one submission, integrity/FKs PASS',flush=True)
+            print(f'Normal Pullarr workers: {kind}, profile={profile}, false-HD={false_hd}, automatic abstention, explicit manual acquisition imported/rejected as expected, one submission, integrity/FKs PASS',flush=True)
     finally:
         if runtime_db is not None: runtime_db.close()
         fixture.doCleanups()

@@ -29,11 +29,13 @@ from backend.internals.server import Server
 from backend.internals.settings import Settings
 
 
-def main(false_hd=False):
+def main(false_hd=False, force=False):
     errors, external = [], []
     atlas = REPO / '.devdata' / 'phase9a-atlas'
     atlas.mkdir(parents=True,exist_ok=True)
     with TemporaryDirectory(prefix='pullarr-9a-browser-') as directory, services('5.2.4') as remote:
+        if force:
+            remote['title'] = 'Batman (2020) (HD-Digital)'
         root = Path(directory)
         folder, incoming = root / 'library' / 'Batman', root / 'incoming'
         folder.mkdir(parents=True); incoming.mkdir()
@@ -101,7 +103,13 @@ def main(false_hd=False):
                 page.locator('#issues-list tr[data-id="1"] .action-column button').nth(1).click()
                 page.get_by_label('Sort results').select_option('source_desc')
                 page.get_by_label('Sort results').select_option('source_asc')
-                page.locator('#manual-search-window').get_by_role('button',name='Download',exact=True).click()
+                if force:
+                    assert page.locator('#manual-search-window').get_by_role('button',name='Download',exact=True).is_disabled()
+                    page.locator('#manual-search-window').get_by_role('button',name='Download anyway',exact=True).click()
+                    assert remote['submitted']==0
+                    page.get_by_role('button',name='Confirm download anyway',exact=True).click()
+                else:
+                    page.locator('#manual-search-window').get_by_role('button',name='Download',exact=True).click()
                 page.get_by_text('Dispatched to the download queue.',exact=True).wait_for()
                 assert remote['submitted']==1
                 remote['completed']=True
@@ -117,6 +125,7 @@ def main(false_hd=False):
                     runtime.tick()
                 assert (incoming / remote['files'][0]).exists()
                 with server.app.app_context():
+                    assert get_db().execute('SELECT authorization FROM wanted_decisions').fetchone()[0] == ('forced_manual' if force else 'manual')
                     assert QualityStore(get_db()).issue_states([1])[0]['cutoff_satisfied'] is not false_hd
                     if false_hd:
                         assert old.read_bytes() == original
@@ -154,10 +163,10 @@ def main(false_hd=False):
                 browser.close()
             assert not errors,errors
             assert not external,external
-            print(f'Expanded clients Chromium PASS (false-HD={false_hd}): desktop/narrow keyboard Settings/Test, masked secrets, hostile text, automatic torrent abstention, manual source sorting/download, seeding/import separation and reviewed cleanup; zero unexpected browser errors/external requests')
+            print(f'Expanded clients Chromium PASS (false-HD={false_hd}, forced={force}): desktop/narrow keyboard Settings/Test, masked secrets, hostile text, automatic torrent abstention, manual source sorting/download, seeding/import separation and reviewed cleanup; zero unexpected browser errors/external requests')
         finally:
             http.shutdown()
 
 
 if __name__=='__main__':
-    main('--false-hd' in sys.argv)
+    main('--false-hd' in sys.argv, '--force' in sys.argv)

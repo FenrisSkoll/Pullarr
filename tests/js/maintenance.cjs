@@ -10,6 +10,7 @@ class Element {
     showModal() { this.open = true; }
     close() { this.open = false; }
     focus() { this.focused = true; }
+    scrollIntoView() { this.scrolled = true; }
     set innerHTML(_) { throw Error('Untrusted HTML'); }
 }
 const context = vm.createContext({module: {exports: {}}, document: {createElement: tag => new Element(tag)}, console, setTimeout});
@@ -163,6 +164,8 @@ const page = {total: 143, offset: 0, limit: 50, revision: 1, items: [{finding: {
     // Blocked recovery is not an inverse and has no force/confirm control.
     controller.action = async () => ({preview: {eligible: false, manual_inspection_required: true, reasons: ['reconciliation_conflict']}});
     await controller.historyPreview(entry, 'recovery');
+    assert.ok(controller.el('specialized').focused);
+    assert.ok(controller.el('specialized').scrolled);
     assert.ok(nodes(controller.el('specialized')).some(n => n.textContent === 'Manual inspection required'));
     assert.ok(!find(controller.el('specialized'), 'Continue Recovery'));
     assert.ok(!find(controller.el('specialized'), 'Force Complete'));
