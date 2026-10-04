@@ -71,10 +71,12 @@ def main():
                     page.locator('#run-import-button').click()
                     expect(page.locator('.proposal-list tr[data-rowid]')).to_have_count(3)
                     page.locator('#import-button').click()
-                    expect(page.locator('#library-import-results')).to_contain_text('3 files imported or associated.')
+                    expect(page.locator('#library-import-results')).to_contain_text('Imported 3 files into 1 publications.')
                     with server.app.app_context():
                         row = get_db().execute('SELECT id,folder,custom_folder FROM volumes').fetchone()
-                        assert row[1:] == (str(folder),True), row
+                        assert row[1] and Path(row[1]).is_dir() and not row[2], row
+                        folder=Path(row[1])
+                        paths=[folder/p.name for p in paths]
                         volume_id = row[0]
                         assert get_db().execute('SELECT COUNT(*) FROM issues_files').fetchone()[0] == 3
                     page.goto(origin+f'/volumes/{volume_id}')
@@ -136,7 +138,7 @@ def main():
                     assert not errors,errors
                     assert not dialogs,dialogs
                     browser.close()
-                print('Reliability Chromium PASS: exact three-book import, atomic adopted folder, volume API/page, nonmutating scan, explicit Apply, Batman Book 1 search and manual GetComics selection, unrelated title rejection, source sort/filter, unchanged files, no native dialogs or HTTP 500')
+                print('Reliability Chromium PASS: exact three-book import, atomic canonical folder, volume API/page, nonmutating scan, explicit Apply, Batman Book 1 search and manual GetComics selection, unrelated title rejection, source sort/filter, unchanged files, no native dialogs or HTTP 500')
             finally:
                 http.shutdown()
 

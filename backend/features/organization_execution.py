@@ -222,6 +222,8 @@ class OrganizationExecutor:
             fingerprints=[plan.folder_decision.fingerprint, plan.rename_decision.fingerprint],
             preconditions=[[p.name, list(p.expected), p.validated_at_plan_time, p.revalidate_at_apply] for p in plan.preconditions],
             inverse=False)
+        if any(c.source == 'library-import-selection/v1' for c in selected.contributions):
+            intent['library_import'] = True
         if repair_authority is not None:
             from dataclasses import asdict
 
@@ -289,6 +291,8 @@ class OrganizationExecutor:
                         'database_fingerprint', 'volume_folder_before', 'effects', 'links_after', 'xml',
                         'xml_before', 'preview', 'policies', 'fingerprints', 'preconditions', 'inverse', 'database_before'}
             if not required.issubset(intent) or type(intent['inverse']) is not bool:
+                raise ValueError()
+            if 'library_import' in intent and type(intent['library_import']) is not bool:
                 raise ValueError()
             if any(type(intent[k]) is not int or intent[k] < 0 for k in ('source_size', 'source_mtime_ns')):
                 raise ValueError()
@@ -432,7 +436,7 @@ class OrganizationExecutor:
         while not parent.exists():
             parent = parent.parent
         safe_path(str(parent))
-        if parent.stat().st_dev != current['device']:
+        if parent.stat().st_dev != current['device'] and not intent.get('library_import'):
             raise OrganizationError(ExecutionCode.UNSUPPORTED, 'Cross-filesystem move')
         if intent['xml'] is not None:
             inspection = inspect_comicinfo(intent['source'])
@@ -511,6 +515,9 @@ class OrganizationExecutor:
             from backend.features.organization_directory import DirectoryEffect
             return DirectoryEffect(self).reconcile(job, intent, ordinal, value)
         kind = job.steps[ordinal].kind
+        if kind == EffectKind.RELOCATE.value and value.get('import_copy_identity'):
+            from backend.features.organization_import_move import reconcile
+            return reconcile(intent, value)
         if kind == EffectKind.RELOCATE.value:
             source, target = os.path.lexists(intent['source']), os.path.lexists(intent['target'])
             if not source and target and matches(intent['target'], value['artifact_before']):
@@ -630,6 +637,12 @@ class OrganizationExecutor:
             self._scope(path)
         if not matches(self._current_path(job, intent), value['artifact_before']):
             raise OrganizationError(ExecutionCode.SOURCE)
+        if kind == EffectKind.RELOCATE.value and intent.get('library_import'):
+            from backend.features.organization_import_move import (
+                execute, requires_copy)
+            if value.get('import_copy_identity') or requires_copy(intent['source'], intent['folder']):
+                execute(self, job, intent, ordinal, value)
+                return
         if kind == EffectKind.DIRECTORY.value:
             for path in value['missing']:
                 self._scope(path)

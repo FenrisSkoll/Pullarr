@@ -269,3 +269,5 @@ main:has(#wanted-results) > button {margin:.35rem 0;}
 .local-issue-review[hidden] { display: none; }
 .local-issue-review button { margin: .35rem .35rem .35rem 0; }
 .local-issue-choices { max-height: 18rem; overflow-y: auto; padding-block: .5rem; }
+
+#volume-description, #volume-description-mobile, #issue-info-desc { white-space: pre-line; }

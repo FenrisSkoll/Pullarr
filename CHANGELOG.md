@@ -1,5 +1,30 @@
 # Release notes
 
+## 1.5.2 — local matching and Library Import reliability
+
+- Display provider descriptions as bounded, readable plain text in volume and
+  issue views, using the same safe conversion as metadata search. Stored metadata
+  and legacy API descriptions remain unchanged.
+- Reconcile compatible split publication titles and punctuation in managed Local
+  Scan. Recognize explicit volume-number filenames only when the managed issue
+  catalog proves collected-edition numbering; preserve exact identity conflicts.
+- Apply ready local associations in one guarded database transaction without
+  organizer jobs, archive hashing, quality rescans, moves or metadata requests.
+  Fresh scans recognize committed associations. Isolate malformed files and evict
+  old preview receipts instead of making every volume temporarily unavailable.
+- Save ordinary manual issue selections immediately. Require a specific inline
+  confirmation only when replacing an existing association or overriding an exact
+  embedded issue identity; preserve the preview and bounded stale/error feedback.
+- Preserve each Library Import row's corrected provider identity. Split a source
+  folder into independently registered publications and canonical managed folders.
+  Import moves files without renaming; Import and Rename also applies naming rules.
+  Reuse established folders, protect collisions and journal cross-filesystem copies.
+- Reuse Delete Empty Folders for optional, non-recursive cleanup after all selected
+  imports from a source folder succeed. Roots, managed folders, recovery workspaces
+  and directories containing any remaining content are preserved. Default is off.
+- No database migration or new configuration key (schema72). Import destinations
+  required for actual files are created regardless of empty-folder precreation.
+
 ## 1.5.1 — managed-volume Local Scan issue review
 
 - Repair Review issue match: open an inline issue picker with filename, ComicInfo,

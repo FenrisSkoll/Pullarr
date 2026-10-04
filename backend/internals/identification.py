@@ -28,7 +28,7 @@ def load_matching_records(registered_providers: Collection[str], cursor: Any = N
         volumes = cursor.execute('''SELECT id,title,year,volume_number,publisher,
             special_version,metadata_provider,comicvine_id,last_cv_fetch FROM volumes''' + volume_scope + ' ORDER BY id', ids).fetchall()
         issues = cursor.execute('''SELECT i.id,i.volume_id,i.issue_number,i.calculated_issue_number,
-            n.raw_label,n.provenance,n.source_field,n.interpretation,n.numeric_text,n.policy
+            n.raw_label,n.provenance,n.source_field,n.interpretation,n.numeric_text,n.policy,i.title
             FROM issues i LEFT JOIN issue_number_facts n ON n.issue_id=i.id'''
             + child_scope + ' ORDER BY i.id', ids).fetchall()
         volume_refs = cursor.execute('''SELECT volume_id,provider,provider_id,last_fetch
@@ -54,5 +54,5 @@ def load_matching_records(registered_providers: Collection[str], cursor: Any = N
         result.append(LocalMatchVolume(vid, authority, title, year, number, publisher,
                                       SpecialVersion(special), tuple(ref for ref, _ in vr[vid])))
     return tuple(result), tuple(LocalMatchIssue(iid, vid, (label or '') if provenance is not None else raw, calculated, tuple(ir.get(iid, ())),
-        None if provenance is None else IssueNumberFacts(label, provenance, field, NumberKind(kind), numeric, policy))
-        for iid, vid, raw, calculated, label, provenance, field, kind, numeric, policy in issues)
+        None if provenance is None else IssueNumberFacts(label, provenance, field, NumberKind(kind), numeric, policy), title)
+        for iid, vid, raw, calculated, label, provenance, field, kind, numeric, policy, title in issues)

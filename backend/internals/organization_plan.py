@@ -10,11 +10,11 @@ from backend.internals.db import get_db
 from backend.internals.identification import load_matching_records
 
 
-def load_planning_records(registered_providers: Collection[str], cursor: Any = None):
+def load_planning_records(registered_providers: Collection[str], cursor: Any = None, *, volume_ids=None):
     cursor = get_db() if cursor is None else cursor
     cursor.execute('SAVEPOINT organizer_planning_read')
     try:
-        volumes, issues = load_matching_records(registered_providers, cursor)
+        volumes, issues = load_matching_records(registered_providers, cursor, volume_ids=volume_ids)
         extras = cursor.execute('SELECT id,root_folder,folder,custom_folder,comicvine_id FROM volumes ORDER BY id').fetchall()
         issue_extras = cursor.execute('''SELECT i.id,i.title,
             CASE WHEN n.selected_date_field IS NULL THEN i.date
@@ -40,6 +40,8 @@ def load_planning_records(registered_providers: Collection[str], cursor: Any = N
     naming = NamingSettings(**values)
     volume_index = {v.id: v for v in volumes}
     issue_index = {i.id: i for i in issues}
+    extras = [r for r in extras if r[0] in volume_index]
+    issue_extras = [r for r in issue_extras if r[0] in issue_index]
     bindings = {}
     general = {}
     for fid, vid, iid, forced, file_type in links:

@@ -52,5 +52,23 @@ const text=node=>node.textContent+node.children.map(text).join('');
     panel.replaceChildren();ui.preview(panel,{plans:[reviewed]},async()=>({jobs:[]}),{load:async()=>{throw {code:'stale_preview'};}});
     await get(panel,'button','Review issue match').onclick();assert.ok(text(panel).includes('This preview is stale.'));
     assert.ok(text(panel).includes('Local files preview'));
+    for (const kind of ['existing','embedded']) {
+        let overrides=0;
+        const conflict={...detail,existing:kind==='existing'?[{issue_id:2,label:'2',forced:false}]:[],embedded_issue_ids:kind==='embedded'?[2]:[]};
+        panel.replaceChildren();ui.preview(panel,{plans:[reviewed]},async()=>({jobs:[]}),{
+            load:async()=>conflict,
+            save:async(row,ids,override)=>{assert.equal(override,true);assert.deepEqual(ids,[1]);overrides++;return {plans:[]};}
+        });
+        await get(panel,'button','Review issue match').onclick();
+        walk(panel).filter(n=>n.tag==='input').forEach(n=>n.checked=false);
+        walk(panel).find(n=>n.tag==='input'&&n.value==='1').checked=true;
+        const saveOverride=get(panel,'button','Save association');await saveOverride.onclick();
+        assert.equal(overrides,0);
+        assert.equal(saveOverride.textContent,kind==='existing'?'Replace association':'Override embedded identity');
+        await saveOverride.onclick();assert.equal(overrides,1);
+    }
+    panel.replaceChildren();ui.preview(panel,{plans:[{...plans[0],status:'no_changes'}]},async()=>{throw Error('No mutation');});
+    assert.equal(get(panel,'button','Apply ready associations').disabled,true);
+    assert.ok(text(panel).includes('Already associated'));
     console.log('Local organization: nonmutating preview, explicit Apply, focus, double-click lock, partial review, safe labels PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});

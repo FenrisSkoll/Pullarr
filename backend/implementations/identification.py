@@ -40,6 +40,23 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
     if authority not in (PublicationAuthority.IMPORT_SELECTION, PublicationAuthority.MANAGED_VOLUME):
         raise ValueError('Explicit publication authority required')
     volume = snapshot.volumes[volume_id]
+    document = candidate.comicinfo.document
+    # The legacy parser removes format words such as Omnibus. An exact literal
+    # publication prefix before the year corroborates them without fuzzy matching.
+    literal = search(r'^(.*?)\s*\([0-9]{4}\)', candidate.filename.raw_stem) if candidate.filename else None
+    literal_title = bool(literal and title_key(literal[1]) == title_key(volume.title))
+    if literal_title and document and title_key(document.series or '') == title_key(volume.title):
+        candidate = replace(candidate, diagnostics=tuple(d for d in candidate.diagnostics
+            if not (d.code == DiagnosticCode.BIBLIOGRAPHIC_DISAGREEMENT
+                and d.provenance.locator.endswith('/Series/filename'))))
+    # Only the already-selected publication can corroborate a split Series/Title.
+    split_title = bool(document and document.series and document.title
+        and title_key(document.series + ' ' + document.title) == title_key(volume.title)
+        and candidate.filename and title_key(candidate.filename.series or '') == title_key(volume.title))
+    if split_title:
+        candidate = replace(candidate, diagnostics=tuple(d for d in candidate.diagnostics
+            if not (d.code == DiagnosticCode.BIBLIOGRAPHIC_DISAGREEMENT
+                and d.provenance.locator.endswith(('/Series/filename', '/Series/local_association')))))
     coverage, reason = _coverage(candidate, volume, snapshot, prefer_filename_issue=True)
     if (candidate.existing and coverage and reason in (MatchReason.ISSUE_RAW, MatchReason.ISSUE_NUMERIC)
             and all(a.volume_id == volume_id for a in candidate.existing.associations)
@@ -49,6 +66,10 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
         candidate = replace(candidate, diagnostics=tuple(d for d in candidate.diagnostics
             if not (d.code == DiagnosticCode.BIBLIOGRAPHIC_DISAGREEMENT
                     and d.provenance.locator.endswith('/Number/local_association'))))
+    if not coverage and reason in (MatchReason.ISSUE_MISSING, MatchReason.NUMBER_UNAVAILABLE):
+        collected = _collected_coverage(candidate, volume, snapshot)
+        if collected:
+            coverage, reason = collected, MatchReason.ISSUE_NUMERIC
     ordinary = identify(candidate, snapshot)
     option = next((m for m in ordinary.alternatives if m.local_volume_id == volume_id), None)
     reasons = []
@@ -67,7 +88,13 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
         reasons.extend(option.rejections)
         # Selecting a publication deliberately can correct a filename title.
         # A scoped scan, however, still calls attention to semantic disagreement.
-        reasons.extend(r for r in option.review_reasons if r in (
+        option_reviews = option.review_reasons
+        if (MatchReason.IDENTITY_CONFLICT in option_reviews and _claims(candidate)
+                and all(volume_id in snapshot.identities.get(ref, ()) for ref in _claims(candidate))):
+            # Exact issue disagreement within this fixed publication is an
+            # explicit issue override, never permission to switch publication.
+            option_reviews = tuple(MatchReason.EVIDENCE_CONFLICT if r == MatchReason.IDENTITY_CONFLICT else r for r in option_reviews)
+        reasons.extend(r for r in option_reviews if r in (
             MatchReason.EVIDENCE_CONFLICT, MatchReason.UNKNOWN_IDENTITY,
             MatchReason.IDENTITY_CONFLICT) or authority == PublicationAuthority.MANAGED_VOLUME
             and r == MatchReason.TITLE_CONFLICT)
@@ -78,6 +105,8 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
             reasons.append(MatchReason.EVIDENCE_CONFLICT)
     if candidate.existing and not reasons and ordinary.selected and ordinary.selected.local_volume_id == volume_id:
         coverage = ordinary.selected.local_issue_ids or coverage
+    if split_title or literal_title and (not document or not document.series or title_key(document.series) == title_key(volume.title)):
+        reasons = [r for r in reasons if r != MatchReason.TITLE_CONFLICT]
     if not coverage:
         reasons.append(reason)
     selected = PublicationMatch(volume_id, volume.authority, coverage,
@@ -86,6 +115,36 @@ def identify_authorized(candidate, snapshot, volume_id, authority):
         title=volume.title, year=volume.year)
     return IdentificationResult(candidate, MatchState.REVIEW if reasons else MatchState.AUTOMATIC,
         selected, (selected,), selected.review_reasons, snapshot.snapshot_id)
+
+
+def _collected_coverage(candidate, volume, snapshot):
+    """Catalog-proven Volume/Book labels; never a global ComicInfo.Volume rule."""
+    filename, document = candidate.filename, candidate.comicinfo.document
+    if not filename or filename.legacy_issue_number is not None or not filename.volume_number:
+        return ()
+    if document and document.number is not None or any(r.kind == ResourceKind.ISSUE for r in _claims(candidate)):
+        return ()
+    tokens = findall(r'(?i)(?<!\w)v(?:ol(?:ume)?\.?\s*)?0*([0-9]+)(?!\w)', filename.raw_stem)
+    if len(tokens) != 1 or int(tokens[0]) != filename.volume_number:
+        return ()
+    number = int(tokens[0])
+    catalog = snapshot.children[volume.id]
+    def collected_label(item):
+        words = {'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,'eight':8,'nine':9,'ten':10}
+        match = search(r'^(?:volume|vol|book|part) (\d+|one|two|three|four|five|six|seven|eight|nine|ten)$', title_key(item.title or ''))
+        return (int(match[1]) if match[1].isdigit() else words[match[1]]) if match else None
+    if not catalog or any(collected_label(i) is None or collected_label(i) != numeric_label(i.raw_number) for i in catalog):
+        return ()
+    matches = [i for i in catalog if numeric_label(i.raw_number) == number]
+    if len(matches) != 1:
+        return ()
+    if document and document.volume and numeric_label(document.volume) != number:
+        return ()
+    if document and document.title:
+        stated = findall(r'(?i)\b(?:vol(?:ume)?\.?|book|part)\s*0*([0-9]+)\b', document.title)
+        if stated and any(int(n) != number for n in stated):
+            return ()
+    return (matches[0].id,)
 
 
 @dataclass(frozen=True)

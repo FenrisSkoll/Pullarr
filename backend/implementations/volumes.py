@@ -1176,7 +1176,8 @@ class Library:
         special_version: Union[SpecialVersion, None] = None,
         auto_search: bool = False,
         organizer_registration: bool = False,
-        legacy_default_classification: bool = False
+        legacy_default_classification: bool = False,
+        import_destination: bool = False
     ) -> int:
         """Add a volume to the library.
 
@@ -1396,9 +1397,17 @@ class Library:
                       if legacy_default_classification else ApplicationKind.EXPLICIT)
                 control(cursor, volume_id, True, 'legacy_default_add' if legacy_default_classification else 'explicit_add')
 
-            # Explicit Library Import establishes its adopted folder in the
-            # same transaction as publication registration.
-            if organizer_registration and volume_folder is not None:
+            # Import establishes a usable destination in the registration
+            # transaction. Other organizer callers retain explicit adoption.
+            if import_destination:
+                from backend.implementations.acquisition_paths import contained
+                folder = contained(generate_volume_folder_path(root_folder.folder, volume.get_data()), root_folder.folder)
+                owners = cursor.execute("SELECT folder FROM volumes WHERE id<>? AND folder<>''", (volume_id,)).fetchall()
+                if any(normcase(realpath(row[0])) == normcase(realpath(folder)) for row in owners):
+                    raise ValueError('Import destination already has a publication owner')
+                # Required for incoming files, independent of empty-folder precreation.
+                create_folder(folder)
+            elif organizer_registration and volume_folder is not None:
                 from backend.implementations.acquisition_paths import contained
                 folder = contained(volume_folder, root_folder.folder)
                 if not isdir(folder):

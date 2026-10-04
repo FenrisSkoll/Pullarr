@@ -53,6 +53,7 @@ def issue_identity_result(issue: Any, qualified: bool) -> Any:
     if not qualified:
         return issue
     data = issue.todict()
+    data["description_text"] = description_text(data.get("description"))
     provider = ProviderIdentityDB.selected_provider(issue.volume_id)
     refs = {
         i.provider: i.provider_id for i in ProviderIdentityDB.issue_identities(issue.id)}
@@ -87,6 +88,9 @@ def volume_identity_results(rows: List[Dict[str, Any]], qualified: bool) -> List
             if provider == 'comicvine':
                 result.append(row)
             continue
+        row = dict(row, description_text=description_text(row.get('description')))
+        if 'issues' in row:
+            row['issues'] = [dict(i, description_text=description_text(i.get('description'))) for i in row['issues']]
         if provider not in refs:
             raise MetadataIdentityError('Missing selected volume identity')
         data = dict(row, metadata_source={

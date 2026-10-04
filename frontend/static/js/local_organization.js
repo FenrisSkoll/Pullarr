@@ -1,6 +1,9 @@
 /* Local publication authority is server-owned; this module presents receipts. */
 const LocalOrganizationUI = (() => {
     const reasons = {
+        local_file_unavailable: 'File is unavailable. Refresh Local Scan after checking it.',
+        local_file_changed: 'File changed during inspection. Refresh Local Scan.',
+        blocking_candidate_diagnostic: 'Archive or local metadata could not be inspected.',
         multiple_issue_matches: 'Issue number is ambiguous.',
         issue_coverage_unresolved: 'Issue could not be determined.',
         unsupported_number_semantics: 'Issue numbering needs review.',
@@ -30,7 +33,7 @@ const LocalOrganizationUI = (() => {
         for (const plan of plans) {
             const row = text(parent, 'div', '');
             const ready = ['ready', 'no_changes', 'associated'].includes(plan.status);
-            text(row, 'p', `${name(plan.source)} → ${ready ? (plan.status === 'associated' ? 'Associated: ' : '') + ((plan.issue_labels || []).join(', ') || 'Ready to associate') : 'Needs review'}`);
+            text(row, 'p', `${name(plan.source)} → ${ready ? (plan.status === 'associated' ? 'Associated: ' : plan.status === 'no_changes' ? 'Already associated: ' : '') + ((plan.issue_labels || []).join(', ') || 'Ready to associate') : 'Needs review'}`);
             if (plan.publication) text(row, 'p', `Selected publication: ${plan.publication}`);
             if (!ready) {
                 const reason = (plan.identification_reasons || []).map(code => reasons[code]).find(Boolean);
@@ -49,7 +52,9 @@ const LocalOrganizationUI = (() => {
         parent.replaceChildren();
         const completed = (value.jobs || []).filter(job => job.state === 'completed');
         const failures = (value.jobs || []).filter(job => job.state !== 'completed');
-        text(parent, 'h3', `${completed.length} files imported or associated.`);
+        const publications = new Set(completed.map(j => j.volume_id).filter(Number.isSafeInteger));
+        text(parent, 'h3', publications.size ? `Imported ${completed.length} files into ${publications.size} publications.` : `${completed.length} files imported or associated.`);
+        for (const job of completed) if (job.publication) text(parent, 'p', `${name(job.source)} → ${job.publication}`);
         if (value.review?.length) text(parent, 'p', `${value.review.length} files need issue matching or folder review.`);
         rows(parent, value.review || []);
         if (failures.length) text(parent, 'p', `${failures.length} operations need recovery. Check Maintenance history before retrying.`);
@@ -57,6 +62,7 @@ const LocalOrganizationUI = (() => {
     }
     const reviewErrors = {
         stale_preview: 'This preview is stale. Refresh Local Scan and try again.',
+        override_required: 'Review the existing or embedded issue association before replacing it.',
         invalid_issue_selection: 'Choose valid issues from this managed volume.',
         publication_or_file_conflict: 'Publication identity or file ownership conflicts require separate review. This issue action cannot override them.',
         file_busy: 'This file or volume has another operation in progress. Try a fresh Local Scan after it finishes.'
@@ -79,7 +85,7 @@ const LocalOrganizationUI = (() => {
             const cancel = text(panel, 'button', 'Cancel'); cancel.type = 'button';
             cancel.onclick = () => {
                 panel.hidden = true; panel.remove(); reviewing = false; trigger.disabled = false;
-                button.disabled = !value.plans.some(p => ['ready', 'no_changes'].includes(p.status)); trigger.focus();
+                button.disabled = !value.plans.some(p => p.status === 'ready'); trigger.focus();
             };
             panel.focus(); panel.scrollIntoView?.({block:'nearest'});
             try {
@@ -118,14 +124,26 @@ const LocalOrganizationUI = (() => {
                 const save = text(panel, 'button', 'Save association'); save.type = 'button';
                 save.disabled = !!detail.blocked;
                 if (detail.blocked) status.textContent = reviewErrors[detail.blocked];
+                let overrideSelection = '';
                 save.onclick = async () => {
                     if (save.disabled || !current()) return;
                     const ids = inputs.filter(i => i.checked).map(i => Number(i.value));
                     if (!ids.length) { status.textContent = reviewErrors.invalid_issue_selection; return; }
+                    const previous = detail.existing.map(e => e.issue_id).filter(Number.isSafeInteger).sort((a,b)=>a-b);
+                    const embedded = (detail.embedded_issue_ids || []).slice().sort((a,b)=>a-b);
+                    const selection = JSON.stringify(ids.slice().sort((a,b)=>a-b));
+                    const replacing = previous.length && JSON.stringify(previous) !== selection;
+                    const contradicting = embedded.length && JSON.stringify(embedded) !== selection;
+                    if ((replacing || contradicting) && overrideSelection !== selection) {
+                        overrideSelection = selection;
+                        status.textContent = replacing ? 'This replaces the existing issue association shown above. Confirm the selected issues.' : 'This overrides the embedded exact issue identity shown above. Confirm the selected issues.';
+                        save.textContent = replacing ? 'Replace association' : 'Override embedded identity';
+                        return;
+                    }
                     save.disabled = true; cancel.disabled = true; find.disabled = true;
                     status.textContent = 'Saving association…';
                     try {
-                        const updated = await reviewAPI.save(plan.row_id, ids);
+                        const updated = await reviewAPI.save(plan.row_id, ids, !!(replacing || contradicting));
                         if (!current()) return;
                         parent.replaceChildren(); preview(parent, {...updated,message:'Association saved.'}, apply, reviewAPI);
                     } catch (error) {
@@ -137,7 +155,7 @@ const LocalOrganizationUI = (() => {
         };
         rows(parent, value.plans, reviewAPI ? open : null);
         const button = text(parent, 'button', 'Apply ready associations'); button.type = 'button';
-        button.disabled = !value.plans.some(p => ['ready', 'no_changes'].includes(p.status));
+        button.disabled = !value.plans.some(p => p.status === 'ready');
         button.onclick = async () => {
             if (button.disabled || reviewing) return;
             applying = true;
@@ -152,7 +170,10 @@ const LocalOrganizationUI = (() => {
                 preview(parent, {...value,plans,message:`${completed.length} files imported or associated.`,
                     reviewMessage:`${applied.review?.length || 0} files need issue matching or folder review.`}, apply, reviewAPI);
             }
-            catch (_) { progress.textContent = 'Association could not be confirmed. Inspect Maintenance history before retrying.'; }
+            catch (error) {
+                progress.textContent = reviewErrors[error.code] || 'Association could not be confirmed. Refresh Local Scan and try again.';
+                applying = false; button.disabled = false;
+            }
         };
         parent.tabIndex = -1; parent.focus(); parent.scrollIntoView?.({block: 'nearest'});
     }

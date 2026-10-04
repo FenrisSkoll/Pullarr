@@ -6,6 +6,7 @@ from zipfile import ZipFile
 
 from Tbackend.features import organization_execution as fixtures
 
+from backend.base.acquisition_intake import IntakeFailure
 from backend.features.local_issue_review import LocalReviewError, review_issue
 from backend.features.local_organization import (_sessions, apply_preview,
                                                  scan_preview)
@@ -92,8 +93,19 @@ class LocalIssueReviewTests(TestCase):
         self.preview()
         self.assertEqual(self.value['plans'][0]['status'],'review_required')
         self.assertTrue(any(e['value']=='comicvine:202' for e in self.review()['evidence']))
-        self.review(issue_ids=[1])
+        with self.assertRaisesRegex(LocalReviewError,'override_required'): self.review(issue_ids=[1])
+        self.review(issue_ids=[1],override=True)
         self.assertEqual(self.db.execute('SELECT issue_id FROM issues_files').fetchall(),[(1,)])
+
+    def test_existing_and_embedded_issue_conflict_requires_specific_override(self):
+        self.write(1,extra='<Web>https://comicvine.gamespot.com/issue/4000-202/</Web>')
+        self.db.execute('INSERT INTO files(id,filepath,size) VALUES(1,?,?)',(str(self.paths[0]),self.paths[0].stat().st_size))
+        self.db.execute('INSERT INTO issues_files(file_id,issue_id,forced) VALUES(1,3,0)')
+        self.preview()
+        self.assertIsNone(self.review()['blocked'])
+        with self.assertRaisesRegex(LocalReviewError,'override_required'):self.review(issue_ids=[1])
+        self.review(issue_ids=[1],override=True)
+        self.assertEqual(self.db.execute('SELECT issue_id,forced FROM issues_files').fetchall(),[(1,1)])
 
     def test_semantic_title_conflict_retains_managed_volume(self):
         self.write(1,series='Superman: Rebirth Deluxe Edition');self.preview()
@@ -121,7 +133,8 @@ class LocalIssueReviewTests(TestCase):
         self.db.execute('INSERT INTO issues_files VALUES(1,2,1)')
         self.preview()
         self.assertEqual(self.review()['existing'],[dict(issue_id=2,label='2',forced=True)])
-        self.review(issue_ids=[1]);self.review(issue_ids=[1])
+        with self.assertRaisesRegex(LocalReviewError,'override_required'): self.review(issue_ids=[1])
+        self.review(issue_ids=[1],override=True);self.review(issue_ids=[1])
         self.assertEqual(self.db.execute('SELECT * FROM issues_files').fetchall(),[(1,1,1)])
 
     def test_catalog_change_and_external_association_change_are_stale(self):
@@ -188,7 +201,6 @@ class LocalIssueReviewTests(TestCase):
         self.preview();path=self.paths[0];path.unlink()
         try:path.symlink_to(self.fixture.source)
         except OSError:self.skipTest('Host does not permit test symlinks')
-        from backend.base.acquisition_intake import IntakeFailure
         with self.assertRaises(IntakeFailure):self.review(issue_ids=[1])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM files').fetchone()[0],0)
 
@@ -213,9 +225,9 @@ class LocalIssueReviewTests(TestCase):
             self.review(issue_ids=[1])
 
     def test_changed_source_cannot_be_retained_with_older_parsed_evidence(self):
-        from backend.base.acquisition_intake import IntakeFailure
         from backend.features.local_organization import retain_preview
         self.preview();session=_sessions[self.value['id']]
         with self.paths[0].open('ab') as stream:stream.write(b'changed')
-        with self.assertRaises(IntakeFailure):
-            retain_preview(self.database,session.roots,session.batch,volume_id=1)
+        value=retain_preview(self.database,session.roots,session.batch,volume_id=1)
+        self.assertEqual(value['plans'][0]['identification_reasons'],['local_file_changed'])
+        self.assertEqual([p['status'] for p in value['plans'][1:]],['ready','ready'])

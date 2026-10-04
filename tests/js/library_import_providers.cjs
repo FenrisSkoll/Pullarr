@@ -25,7 +25,7 @@ await vm.runInContext(`
     importLibrary('fake-app-key', true);
 `, harness.context);
 values = JSON.parse(JSON.stringify(harness.submitted().data));
-assert.ok(values.every(v => v.provider === 'metron' && v.provider_id === 'opaque:unchanged'));
+assert.deepEqual(values.map(v => [v.provider,v.provider_id]),[['metron','opaque:unchanged'],['metron','2127']]);
 assert.equal(harness.submitted().params.rename_files, true);
 console.log('Library Import mixed-provider selection, namespace and multi-select contracts passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

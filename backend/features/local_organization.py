@@ -1,8 +1,8 @@
 """Explicit local preview/apply sessions reusing the Phase 4 domain pipeline.
 
-Transient previews expire on restart. Once created, OrganizationJob journals,
-not this session, own mutations and recovery. Registration is a separate,
-explicit metadata operation and is not rolled back by later file review.
+Transient previews expire on restart. Import file effects belong to durable
+OrganizationJobs; managed associations use a scoped database transaction.
+Registration establishes a usable folder and survives later issue-level review.
 """
 
 import json
@@ -40,6 +40,9 @@ class LocalSession:
     volume_id: int | None = None
     stamps: dict[int, tuple] = field(default_factory=dict)
     reviewed: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    association_forced: dict[int, bool] = field(default_factory=dict)
+    source_directories: dict[str, tuple[int, int]] = field(default_factory=dict)
+    issue_catalog: tuple = ()
 
 
 _sessions: dict[str, LocalSession] = {}
@@ -52,6 +55,7 @@ def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBat
         ids = sorted({i for p in plans for i in p['issue_ids']})
         labels = {r[0]: '#'+r[1]+(' '+r[2] if r[2] else '') for r in db.execute(
             'SELECT id,issue_number,title FROM issues WHERE id IN (SELECT value FROM json_each(?))', (json.dumps(ids),))}
+        catalog = tuple(db.execute('SELECT id,issue_number,title FROM issues WHERE volume_id=? ORDER BY id', (volume_id,))) if volume_id is not None else ()
     for index, (value, plan) in enumerate(zip(plans, batch.plans)):
         value['row_id'] = str(index)
         value['review_available'] = volume_id is not None
@@ -64,6 +68,9 @@ def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBat
         for key in tuple(_sessions):
             if _sessions[key].expires < time.monotonic():
                 del _sessions[key]
+        # Eviction makes only the oldest receipt stale, never all volumes.
+        while len(_sessions) >= 16 or (sum(len(s.batch.plans) for s in _sessions.values()) + len(batch.plans) > 4000 and _sessions):
+            del _sessions[next(iter(_sessions))]
         if len(_sessions) >= 16 or sum(len(s.batch.plans) for s in _sessions.values()) + len(batch.plans) > 4000:
             raise IntakeFailure(E.CONFIGURATION)
         key = uuid4().hex
@@ -73,13 +80,17 @@ def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBat
                 try:
                     stat = os.stat(plan.source_path, follow_symlinks=False)
                 except OSError:
-                    raise IntakeFailure(E.UNSTABLE) from None
+                    plans[index].update(status='review_required', review_available=False,
+                        identification_reasons=['local_file_unavailable'])
+                    continue
                 observed = plan.identification.candidate.file
                 if (stat.st_size, stat.st_mtime_ns) != (observed.size, observed.mtime_ns):
-                    raise IntakeFailure(E.UNSTABLE)
+                    plans[index].update(status='review_required', review_available=False,
+                        identification_reasons=['local_file_changed'])
+                    continue
                 stamps[index] = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
         _sessions[key] = LocalSession(str(Path(database).absolute()), roots, batch, time.monotonic() + 600,
-                                      reviews=reviews or [], presentation=plans, volume_id=volume_id, stamps=stamps)
+                                      reviews=reviews or [], presentation=plans, volume_id=volume_id, stamps=stamps, issue_catalog=catalog)
         return dict(id=key, expires_in=600, plans=plans + (reviews or []),
                     enumeration_complete=True)
 
@@ -93,6 +104,9 @@ def apply_preview(database: str, identifier: str) -> dict:
         replay = session.claimed
         # A failed or interrupted apply is never blindly replayed.
         session.claimed = True
+    if session.volume_id is not None:
+        from backend.features.local_issue_review import apply_associations
+        return apply_associations(database, identifier)
     executor = OrganizationExecutor(database, session.roots)
     try:
         for index, plan in enumerate(session.batch.plans if not replay else ()):
@@ -102,8 +116,13 @@ def apply_preview(database: str, identifier: str) -> dict:
         outcomes = []
         for index, job in tuple(session.jobs.items()):
             result = executor.store.get(job) if replay else executor.apply_job(job)
-            outcomes.append(dict(source=session.batch.plans[index].source_path,
+            plan = session.batch.plans[index]
+            outcomes.append(dict(source=plan.source_path, target=plan.target_path,
+                                 publication=plan.identification.selected.title,
+                                 volume_id=plan.identification.selected.local_volume_id,
                                  job_id=job, state=result.state.value))
+        from backend.features.import_folder_cleanup import cleanup_sources
+        cleanup_sources(executor, session, outcomes)
         return dict(id=identifier, jobs=outcomes, replay=replay,
                     review=[p for i, p in enumerate(session.presentation) if i not in session.jobs and i not in session.reviewed]
                     + session.reviews)
@@ -119,11 +138,16 @@ def scan_preview(database: str, volume_id: int) -> dict:
         if row is None or not row[0]:
             raise IntakeFailure(E.CONFIGURATION)
         folder = contained(row[0], row[1])
-        artifacts = observe_artifacts((folder,), row[1])
+        try:
+            artifacts = observe_artifacts((folder,), row[1])
+        except IntakeFailure as error:
+            if error.code != E.UNSUPPORTED_ARTIFACT:
+                raise
+            artifacts = ()
         scope = DiscoveryScope(uuid4().hex, folder, kind=DiscoveryKind.LIBRARY_SCAN)
         policy = PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', move=False, rename=False)
         batch = preview_local_artifacts(db, tuple(a.path for a in artifacts), scope, policy, volume_id=volume_id,
-                                       authority=PublicationAuthority.MANAGED_VOLUME)
+                                       authority=PublicationAuthority.MANAGED_VOLUME) if artifacts else OrganizationBatch(())
         # No missing-path cleanup, even following a complete enumeration.
         return retain_preview(database, (row[1],), batch, volume_id=volume_id)
     finally:
@@ -162,23 +186,21 @@ def import_preview(database: str, matches: object, rename: bool) -> dict:
         reviews = []
         for identity in dict.fromkeys(a[0] for a in authorized):
             group = [a for a in authorized if a[0] == identity]
-            parents = {os.path.normcase(os.path.realpath(Path(a[1]).parent)) for a in group}
             reason = None
             existing = None
-            if len(parents) != 1 or len({a[2] for a in group}) != 1:
+            if len({a[2] for a in group}) != 1:
                 reason = 'folder_assignment_required'
             else:
                 _, path, root_id, root = group[0]
-                folder = str(Path(path).parent)
                 try:
                     existing = ProviderIdentityDB.find_selected_volume(identity.provider, identity.provider_id)
                     if existing is not None:
                         row = db.execute('SELECT folder FROM volumes WHERE id=?', (existing,)).fetchone()
-                        if row is None or not row[0] or os.path.normcase(os.path.realpath(row[0])) not in parents:
+                        if row is None or not row[0] or not Path(row[0]).is_dir():
                             reason = 'existing_volume_folder_conflict'
                     else:
                         existing = Library.add_metadata(identity, root_id, True,
-                            volume_folder=folder, organizer_registration=True)
+                            organizer_registration=True, import_destination=True)
                         commit()
                 except ValueError:
                     reason = 'publication_registration_conflict'
@@ -196,8 +218,15 @@ def import_preview(database: str, matches: object, rename: bool) -> dict:
         if contexts:
             first_scope = next(iter(contexts.values()))[0]
             batch = preview_local_artifacts(db, tuple(contexts), first_scope,
-                PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', rename=rename, move=rename),
+                PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', rename=rename, move=True),
                 path_contexts=contexts, authority=PublicationAuthority.IMPORT_SELECTION)
-        return retain_preview(database, tuple(r[1] for r in roots), batch, reviews)
+        value = retain_preview(database, tuple(r[1] for r in roots), batch, reviews)
+        with _lock:
+            session = _sessions[value['id']]
+            for _, source, _, _ in authorized:
+                parent = str(Path(source).parent)
+                stat = os.stat(parent, follow_symlinks=False)
+                session.source_directories[parent] = (stat.st_dev, stat.st_ino)
+        return value
     finally:
         db.close()

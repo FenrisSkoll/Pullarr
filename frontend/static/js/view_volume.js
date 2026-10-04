@@ -236,8 +236,8 @@ function fillPage(data, api_key) {
 	path.dataset.volume_folder = data.volume_folder;
 
 	// Descriptions
-	ViewEls.vol_data.description.textContent = data.description;
-	ViewEls.vol_data.mobile_description.textContent = data.description;
+	ViewEls.vol_data.description.textContent = data.description_text || '';
+	ViewEls.vol_data.mobile_description.textContent = data.description_text || '';
 
 	// fill issue lists
 	fillTable(data.issues, api_key);
@@ -311,12 +311,12 @@ async function refreshVolume(api_key) {
         if (!response.ok) throw response;
         const preview = (await response.json()).result;
         panel.replaceChildren();
-        const reviewRequest = async (method, row, ids, query = '') => {
+        const reviewRequest = async (method, row, ids, query = '', override = false) => {
             const endpoint = `/volumes/${volume_id}/local-scan/${encodeURIComponent(preview.id)}/review/${encodeURIComponent(row)}`;
             try {
                 const body = method === 'GET'
                     ? await fetchAPI(endpoint, api_key, query ? {q:encodeURIComponent(query)} : {})
-                    : await (await sendAPI('POST', endpoint, api_key, {}, {issue_ids:ids})).json();
+                    : await (await sendAPI('POST', endpoint, api_key, {}, {issue_ids:ids,override})).json();
                 return body.result;
             } catch (error) {
                 const body = error?.json ? await error.json().catch(() => ({})) : {};
@@ -325,20 +325,26 @@ async function refreshVolume(api_key) {
         };
         LocalOrganizationUI.preview(panel, preview, async () => {
             const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
-            if (!applied.ok) throw applied;
+            if (!applied.ok) { const body = await applied.json().catch(() => ({})); throw {code:body.result?.code}; }
             const result = (await applied.json()).result;
             await fetchAPI(`/volumes/${volume_id}`, api_key).then(json => fillPage(json.result, api_key));
             return result;
         }, {
             load: (row, query) => reviewRequest('GET', row, null, query),
-            save: async (row, ids) => {
-                const updated = await reviewRequest('POST', row, ids);
+            save: async (row, ids, override) => {
+                const updated = await reviewRequest('POST', row, ids, '', override);
                 await fetchAPI(`/volumes/${volume_id}`, api_key).then(json => fillPage(json.result, api_key));
                 return updated;
             }
         });
-    } catch (_) {
-        panel.textContent = 'Local files could not be inspected. Check the managed folder and try a fresh preview.';
+    } catch (error) {
+        const body = error?.json ? await error.json().catch(() => ({})) : {};
+        const messages = {path_unavailable:'Managed folder is unavailable.',permission_denied:'Managed folder access was denied.',
+            stale_preview:'Local Scan preview became stale; refresh and try again.',unsafe_path:'Managed folder contains an unsafe path.',
+            identification:'Association lookup failed.',configuration:'Local Scan configuration is unavailable.',
+            association_lookup_failed:'Association lookup failed. Refresh Local Scan and try again.',
+            local_inspection_failed:'Local metadata could not be inspected. Check the server diagnostic and refresh.'};
+        panel.textContent = messages[body.result?.code] || 'Local files could not be inspected. Check the managed folder and try a fresh preview.';
     } finally { button_info.button.disabled = false; }
 };
 
@@ -887,7 +893,7 @@ function showIssueInfo(issue_id, api_key) {
 	.then(json => {
 		document.querySelector('#issue-info-title').innerText =
 			`${json.result.title} - #${json.result.issue_number} - ${json.result.date_display ?? json.result.date ?? ''}`;
-		document.querySelector('#issue-info-desc').textContent = json.result.description;
+		document.querySelector('#issue-info-desc').textContent = json.result.description_text || '';
 		const files_table = document.querySelector('#issue-files-list');
 		files_table.innerHTML = '';
 		json.result.files.forEach(f => {

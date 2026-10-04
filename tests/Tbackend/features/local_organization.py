@@ -79,16 +79,17 @@ class LocalOrganizationTests(TestCase):
         self.assertEqual(result['plans'][0]['status'], 'review_required', result)
         self.assertEqual(apply_preview(self.fixture.dbpath, result['id'])['jobs'], [])
 
-    def test_import_different_immediate_parents_never_adopts_common_ancestor(self):
+    def test_import_registration_failure_preserves_different_source_parents(self):
         first = self.fixture.folder / self.fixture.source.name
         self.fixture.source.rename(first)
         second = self.fixture.library / 'Another'
         second.mkdir()
         copy = second / first.name
         copy.write_bytes(first.read_bytes())
-        with patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('must not register')):
+        with patch('backend.implementations.volumes.Library.add_metadata', side_effect=ValueError('registration refused')), \
+                patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume',return_value=None):
             result = import_preview(self.fixture.dbpath, [dict(filepath=str(p), provider='comicvine', provider_id='101') for p in (first,copy)], False)
-        self.assertTrue(all(p['identification_reasons']==['folder_assignment_required'] for p in result['plans']), result)
+        self.assertTrue(all(p['identification_reasons']==['publication_registration_conflict'] for p in result['plans']), result)
         self.assertEqual(self.fixture.db.execute('SELECT folder FROM volumes').fetchone()[0], str(self.fixture.folder))
 
     def test_existing_publication_import_and_rename(self):
@@ -283,16 +284,18 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
         matches = [dict(filepath=str(p), provider='comicvine', provider_id='103802') for p in sources]
         preview = import_preview(path, matches, False)
         row = self.db.execute('SELECT id,folder,custom_folder FROM volumes').fetchone()
-        self.assertEqual(row[1:], (str(folder), True))
+        destination=Path(row[1])
+        self.assertNotEqual(destination,folder)
+        self.assertTrue(destination.is_dir())
+        self.assertFalse(row[2])
         self.assertEqual([p['issue_ids'] for p in preview['plans']], [[1],[2],[3]], preview)
         self.assertTrue(all(p['status']=='ready' for p in preview['plans']), preview)
         result = apply_preview(path, preview['id'])
         self.assertEqual([j['state'] for j in result['jobs']], ['completed']*3, result)
-        self.assertTrue(all(p.exists() for p in sources))
+        self.assertTrue(all(not p.exists() and (destination/p.name).exists() for p in sources))
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 3)
-        self.assertEqual(Volume(row[0]).get_public_data()['folder'], str(folder))
-        retry = import_preview(path, matches, False)
-        apply_preview(path, retry['id'])
+        self.assertEqual(Volume(row[0]).get_public_data()['folder'], str(destination))
+        apply_preview(path, preview['id'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 1)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 3)
         self.scan.assert_not_called()

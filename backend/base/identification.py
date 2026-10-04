@@ -82,6 +82,7 @@ class LocalMatchIssue:
     references: Tuple[ProviderReference, ...] = ()
     # Keep historical repr-based job fingerprints stable for legacy projections.
     number_facts: Optional[IssueNumberFacts] = field(default=None, repr=False)
+    title: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

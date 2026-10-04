@@ -243,11 +243,8 @@ function editCVMatch(
 };
 
 function editMetadataMatch(identity, site_url, title, year, issue_count) {
-	let target_td;
-	if (selectedRows.has(editMatchId))
-		target_td = selectedRows
-	else
-		target_td = [editMatchId]
+	// Editing a row never silently overwrites other selected rows' authority.
+	const target_td = [editMatchId];
 
 	target_td.forEach(rowid => {
 		const tr = liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"]`)

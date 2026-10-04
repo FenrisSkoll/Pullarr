@@ -1,21 +1,36 @@
 # Library, acquisition and archive workflows
 
 Library Import treats each checked row's displayed provider-qualified publication
-as the operator's selection. **Import** adopts the files' existing immediate parent
-folder without renaming or moving them. Files selected for one new publication
-must share that parent; a filesystem common ancestor is not sufficient. An existing
-volume using another folder is left unchanged and reported for review.
+as the operator's selection. **Import** moves each selected file into the selected
+publication's canonical managed folder, preserving its filename. **Import and
+Rename** additionally applies the configured file naming policy. One discovery
+folder can contain several publications: correcting one row never changes another
+row's selection. Existing publications retain their established managed folders.
+An invalid existing folder requires repair rather than silent reassignment.
+
+Destinations use the normal Library & Organization folder policy, including its
+configured suffixes. Folders needed for incoming files are created even when
+**Create Empty Volume Folders** is off; that preference controls empty precreation.
+**Delete Empty Folders** (off by default) also controls Library Import source
+cleanup. Cleanup only removes the unchanged, empty immediate source directory
+after all selected moves succeed; it never recursively removes content or deletes
+roots, managed folders or directories referenced by live recovery work. Conflicting
+destinations preserve the source for review. Cross-filesystem imports copy in
+bounded chunks, verify payloads, then retire only the source directory entry.
 
 Publication registration and a valid folder commit together. Exact embedded issue
 identity, ComicInfo numbering and safe unique filename numbering determine issue
 associations. Unresolved files remain in review while ready files import; a valid
-adopted volume can remain even when some issues need review. Related publications
+managed volume can remain even when some issues need review. Related publications
 and provider namespaces remain distinct.
 
 From a volume page, **Preview Local Scan** uses that managed volume's authority,
 checks contradictory evidence and displays read-only results. **Apply ready
 associations** is the mutation boundary. It neither refreshes provider metadata nor
-renames files nor removes missing-file records.
+renames or moves files nor removes missing-file records. Ready associations commit
+in a scoped database transaction without archive rehashing, quality analysis or
+OrganizationJobs. A fresh preview recognizes committed associations. Old transient
+previews can expire or be evicted; refresh them before applying.
 
 **Review issue match** opens an inline panel within that preview. It displays the
 filename, relevant ComicInfo values, existing associations and issues from the
@@ -23,6 +38,12 @@ fixed managed volume. Cancel makes no changes; **Save association** records the
 explicit issue selection atomically and returns to the same preview. Other ready
 rows remain usable. A stale preview requires a fresh Local Scan; publication
 identity, unsafe-path and ownership conflicts cannot be overridden by this picker.
+Ordinary issue selection saves immediately. Replacing an existing issue association
+or an embedded exact issue identity requires the specifically labelled confirmation.
+Publication identity conflicts remain blocked. Compatible punctuation and split
+Series/Title evidence can corroborate the fixed managed publication. A `v001`
+filename can identify issue 1 only when the managed catalog proves Volume/Book/Part
+numbering; ComicInfo Volume is not generally an issue number.
 
 ## Release acquisition
 

@@ -119,14 +119,14 @@
 						<th><label for="create-vf-input">Create Empty <br>Volume Folders</label></th>
 						<td>
 							<input type="checkbox" id="create-vf-input">
-							<p>Create missing volume folders during file scan.</p>
+							<p>Create missing volume folders during file scan. Library Import always creates a destination needed to receive imported files.</p>
 						</td>
 					</tr>
 					<tr>
 						<th><label for="delete-empty-folders-input">Delete Empty Folders</label></th>
 						<td>
 							<input type="checkbox" id="delete-empty-folders-input">
-							<p>Delete empty folders in the volume folder during file scan. If "Create Empty Volume Folders" is disabled and the volume folder is empty, it'll also be deleted.</p>
+							<p>Delete empty folders in the volume folder during file scan. If "Create Empty Volume Folders" is disabled and the volume folder is empty, it'll also be deleted. After Library Import, also delete fully emptied source folders when all selected moves succeeded. Library roots, managed folders and folders containing any remaining content are preserved. Leave unchecked to keep empty source folders.</p>
 						</td>
 					</tr>
 				</tbody>

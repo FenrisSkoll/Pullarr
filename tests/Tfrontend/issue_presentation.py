@@ -44,7 +44,8 @@ class PresentationAPI(PresentationHarness, TestCase):
         self.assertEqual(self.get('/issues/%d' % issue.id, False), legacy['issues'][0])
         projected = deepcopy(enriched)
         for row in [projected] + projected['issues']:
-            for key in ('metadata_source', 'external_ids', 'display_title', 'display_title_source'):
+            self.assertEqual(row['description_text'], row['description'])  # fixture is already plain text
+            for key in ('metadata_source', 'external_ids', 'display_title', 'display_title_source', 'description_text'):
                 row.pop(key, None)
         self.assertEqual(projected, legacy)
         self.assertEqual(volume.get_issues()[0].title, 'TPB')

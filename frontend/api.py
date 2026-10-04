@@ -1060,8 +1060,11 @@ def api_intake_job(identifier, artifact):
 @error_handler
 @auth
 def api_local_organization(volume_id=None, identifier=None):
+    from sqlite3 import IntegrityError, OperationalError
+
     from backend.base.acquisition_intake import IntakeFailure
     from backend.base.organization_job import OrganizationError
+    from backend.features.local_issue_review import LocalReviewError
     from backend.features.local_organization import (apply_preview,
                                                      import_preview,
                                                      scan_preview)
@@ -1077,8 +1080,16 @@ def api_local_organization(volume_id=None, identifier=None):
                 return return_api({}, 'InvalidRenamePolicy', 400)
             result = import_preview(DBConnection.default_file, request.get_json(silent=True), rename == 'true')
         return return_api(result)
-    except (IntakeFailure, OrganizationError):
-        return return_api({}, 'OrganizationReviewRequired', 409)
+    except LocalReviewError as error:
+        return return_api({'code':error.code}, 'OrganizationReviewRequired', 409)
+    except (IntakeFailure, OrganizationError) as error:
+        return return_api({'code':error.code.value}, 'OrganizationReviewRequired', 409)
+    except (IntegrityError, OperationalError) as error:
+        LOGGER.error('Local association database unavailable for volume %s: %s', volume_id, type(error).__name__)
+        return return_api({'code':'association_lookup_failed'}, 'OrganizationReviewRequired', 409)
+    except (OSError, ValueError) as error:
+        LOGGER.error('Local organization request failed for volume %s: %s', volume_id, type(error).__name__)
+        return return_api({'code':'local_inspection_failed'}, 'OrganizationReviewRequired', 409)
 
 
 @api.route('/volumes/<int:volume_id>/local-scan/<identifier>/review/<int:index>', methods=['GET', 'POST'])
@@ -1094,12 +1105,12 @@ def api_local_issue_review(volume_id, identifier, index):
                                                      review_issue)
     from backend.internals.db import DBConnection
     data = request.get_json(silent=True) if request.method == 'POST' else None
-    if request.method == 'POST' and (not isinstance(data, dict) or set(data) != {'issue_ids'} or not isinstance(data['issue_ids'], list)):
+    if request.method == 'POST' and (not isinstance(data, dict) or (set(data) - {'issue_ids','override'} or 'issue_ids' not in data) or not isinstance(data['issue_ids'], list)):
         return return_api({'code':'invalid_issue_selection'}, 'LocalIssueReview', 400)
     try:
         result = review_issue(DBConnection.default_file, volume_id, identifier, index,
                               issue_ids=data['issue_ids'] if data is not None else None,
-                              query=request.args.get('q', ''))
+                              query=request.args.get('q', ''), override=data.get('override', False) if data else False)
         return return_api(result)
     except LocalReviewError as error:
         return return_api({'code':error.code}, 'LocalIssueReview', 409)
