@@ -1,5 +1,32 @@
 # Release notes
 
+## 1.5.0 — library and acquisition workflow reliability
+
+- Stream CBR → CBZ conversion and exact member verification without page, member,
+  expanded-size, pixel or dimension admission ceilings. Preserve page and metadata
+  payloads, member order, containment, exclusive publication and shared seed bytes.
+- Scope archive workspaces to their journal owners. Recover proven interrupted
+  operations at startup under one durable executor claim; ambiguous/orphan evidence
+  remains for inspection. Successful conversion cleans its recovery artifacts;
+  healthy CBZs are never automatically repacked. Improve recovery focus and status.
+- Honor explicit Library Import publication selections and managed-volume scan
+  authority while retaining issue evidence and conflict checks. Adopt one existing
+  immediate-parent folder atomically with new registration, preserve existing
+  volume folders, and retain ready rows alongside issue-level review.
+- Replace native import/local-scan dialogs with inline outcomes and a read-only
+  local scan preview followed by explicit Apply. Handle unestablished legacy
+  folders without an uncaught volume-page error.
+- Restrict automatic grabs to acceptable GetComics candidates, with no NZB/torrent
+  fallback. Resolve manual clients independently, offer explicit client selection,
+  and support confirmed bibliographic overrides for NZB and torrent downloads
+  while retaining original evaluations, exact targets and operational gates.
+- Add manual source sorting/filtering, readable sizes and source/query provenance.
+  Use advertised comic/book categories and bounded canonical issue-title queries;
+  normalize harmless punctuation without discarding meaningful publication words.
+- No database migration (schema72). Large archives can consume substantial host
+  resources; processing buffers and worker concurrency remain bounded. The Unraid
+  CA template continues to follow `ghcr.io/fenrisskoll/pullarr:latest`.
+
 ## 1.4.0 — metadata search artwork and relationships
 
 - Present ComicVine search descriptions as readable, bounded plain text; stored

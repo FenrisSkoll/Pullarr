@@ -76,10 +76,13 @@ class PreparationTests(TestCase):
             self.prepare(source)
         self.assertTrue(source.exists())
 
-    def test_expansion_bound_preserves_source(self):
+    def test_preparation_has_no_expanded_capacity_policy(self):
+        from backend.implementations import acquisition_preparation
         source = self.archive()
-        with patch('backend.implementations.acquisition_preparation.MAX_OUTPUT', 2), self.assertRaises(IntakeFailure):
-            self.prepare(source)
+        self.assertFalse(hasattr(acquisition_preparation, 'MAX_OUTPUT'))
+        self.assertFalse(hasattr(acquisition_preparation, 'MAX_INPUT'))
+        self.assertFalse(hasattr(acquisition_preparation, 'MAX_MEMBERS'))
+        self.assertEqual(self.prepare(source), (source,))
         self.assertTrue(source.exists())
 
     def test_ancillary_only_archive_is_not_a_comic(self):

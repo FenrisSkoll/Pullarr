@@ -11,6 +11,12 @@ from backend.base.issue_facts import IssueNumberFacts
 POLICY_ID = 'kapowarr-identification/v1'
 
 
+class PublicationAuthority(Enum):
+    HYPOTHESIS = 'local-target-hypothesis/v1'
+    IMPORT_SELECTION = 'library-import-selection/v1'
+    MANAGED_VOLUME = 'managed-volume-scan/v1'
+
+
 class MatchState(Enum):
     AUTOMATIC = 'automatic_match'
     REVIEW = 'review_required'

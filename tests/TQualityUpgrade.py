@@ -150,6 +150,11 @@ class UpgradeTests(TestCase):
             service=WantedAutomation(self.h.dbpath,searches=searches)
             self.addCleanup(service.close)
             result=service.run_target(1,1,allow_grab=True)
+            self.assertEqual(result['state'],'no_acceptable_getcomics_release')
+            preview=service.search_manual(1,1)
+            row=preview['results'][0]
+            session=searches.lookup(preview['search_id'],row['selection_id'])
+            result=service.grab(session,session.selections[row['selection_id']],automatic=False)
             self.assertEqual(result['state'],'tracking',(result,self.db.execute('SELECT error FROM wanted_searches').fetchall()))
             record=self.db.execute('SELECT id,nzo_id FROM acquisition_downloads').fetchone()
             fixture['remote']['queue'].clear()

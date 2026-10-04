@@ -191,7 +191,10 @@ def parse_capabilities(data: bytes) -> SearchCapabilities:
                         e.get('id', '').isdecimal() and len(e.get('id')) < 9}))
     return SearchCapabilities(search is not None and search.get('available') == 'yes'
                               and 'q' in search.get('supportedParams', 'q').split(','),
-                              min(100, int(value)), categories)
+                              min(100, int(value)), categories,
+                              tuple((int(e.get('id')), e.get('name', '')[:256]) for e in root.iter()
+                                    if e.tag in ('category', 'subcat') and e.get('id', '').isdecimal()
+                                    and len(e.get('id')) < 9 and e.get('name')))
 
 
 def _text(element, name, maximum=2048):

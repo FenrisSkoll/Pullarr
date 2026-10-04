@@ -17,7 +17,9 @@ from backend.base.organization_job import OrganizationError
 from backend.base.quality import QualityError
 from backend.features.organization_archive import (register_archive, review,
                                                    sibling_names,
-                                                   target_registered)
+                                                   target_registered,
+                                                   workspace_findings,
+                                                   workspace_owner)
 from backend.features.organization_execution import OrganizationExecutor
 from backend.implementations.archive_normalization import (ArchiveFailure,
                                                            inspect)
@@ -27,6 +29,52 @@ MAX_SCAN = 1000
 MAX_BATCH = 100
 MAX_HANDLES = 16
 TTL = 1800
+
+
+def recover_interrupted_archives(database, *, cancelled=lambda: False):
+    """Startup/explicit-worker entrypoint, never called by a read endpoint.
+
+    At most 100 recorded jobs per invocation, one executor at a time. Ambiguous
+    evidence remains untouched for manual inspection. No conversion is repeated.
+    """
+    service = ArchiveMaintenance(database)
+    with service.connection() as db:
+        jobs = [r[0] for r in db.execute('''SELECT id FROM organization_jobs
+            WHERE state IN ('pending','running','recovery_required')
+            AND json_extract(intent,'$.archive_effect')='archive-normalization/v1'
+            ORDER BY created_at,id LIMIT 100''')]
+    if not jobs:
+        return []
+    executor = service.executor()
+    outcomes = []
+    try:
+        for identifier in jobs:
+            if cancelled():
+                break
+            try:
+                result = executor.apply_job(identifier, automatic_archive_recovery=True, cancelled=cancelled)
+                outcomes.append(dict(id=identifier, state=result.state.value, reason=result.error))
+            except (OrganizationError, OSError, sqlite3.Error) as error:
+                reason = error.code.value if isinstance(error, OrganizationError) else 'recovery_unavailable'
+                outcomes.append(dict(id=identifier, state='recovery_required', reason=reason))
+    finally:
+        executor.close()
+    return outcomes
+
+
+class ArchiveRecoveryTask(Task):
+    action = 'maintenance_archive_recovery'
+    display_title = 'Recover interrupted archive maintenance'
+    volume_id = None
+    issue_id = None
+    stop = False
+
+    def __init__(self, database):
+        self.database = database
+        self.message = 'Checking recorded archive operations'
+
+    def run(self):
+        recover_interrupted_archives(self.database, cancelled=lambda: self.stop)
 
 
 class ArchiveTask(Task):
@@ -151,7 +199,7 @@ class ArchiveMaintenance:
         siblings = sibling_names(path)
         collision = (target != Path(path) and any(name.casefold() == target.name.casefold() for name in siblings)
                      or target_registered(executor.store.db, fid, str(target)))
-        workspace = any(name.startswith('.pullarr-archive-') for name in siblings)
+        workspace = workspace_owner(executor.store.db, fid)
         value = dict(file_id=fid, filename=Path(path).name, target=target.name,
             container=facts['container'], size=authority['old']['size'], pages=facts['pages'],
             metadata=facts['metadata'], shared_source=authority['sharing']['shared'],
@@ -161,6 +209,7 @@ class ArchiveMaintenance:
             page_payloads='preserve_exact_bytes', metadata_action='preserve_bytes',
             order='preserve_source_member_order', source_retention='shared_source_unchanged',
             apply_available=not collision and not workspace)
+        value['workspace_findings'] = workspace_findings(executor.store.db, path)
         return value
 
     def run(self, task):
@@ -186,7 +235,7 @@ class ArchiveMaintenance:
                         identifier = register_archive(executor, fid, selection['confirmation'],
                             'archive:'+task.payload['review_id']+':'+str(fid), cancelled=task.cancelled.is_set)
                         # Cancellation after registration leaves a recoverable pending job.
-                        job = executor.store.get(identifier) if task.stop else executor.apply_job(identifier)
+                        job = executor.store.get(identifier) if task.stop else executor.apply_job(identifier, cancelled=task.cancelled.is_set)
                         result = dict(file_id=fid, job_id=identifier, status=job.state.value,
                                       reason=job.error, history_domain='organization')
                     else:

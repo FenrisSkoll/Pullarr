@@ -66,7 +66,7 @@ async function setupWanted(key) {
             configuration = config.result.configuration;
             form.elements.mode.value = configuration.mode;
             form.elements.sab_client_id.replaceChildren();
-            wantedText(form.elements.sab_client_id, 'option', 'No SAB client selected').value = '';
+            wantedText(form.elements.sab_client_id, 'option', 'Use the sole enabled NZB client').value = '';
             for (const client of clients.result) {
                 const option = wantedText(form.elements.sab_client_id, 'option', `${client.name}${client.enabled ? '' : ' (disabled)'}`);
                 option.value = client.id;

@@ -301,12 +301,10 @@ class ComicInfoArchives(TestCase):
             result = inspect_comicinfo(str(self.path))
         self.assertEqual(result.diagnostics[0].code, ComicInfoCode.ENCRYPTED)
 
-    def test_central_directory_bound_precedes_zipfile_open(self):
+    def test_central_directory_has_no_capacity_policy(self):
         self.archive(xml())
-        with patch('backend.implementations.comicinfo_archive.MAX_DIRECTORY', 1), \
-                patch('backend.implementations.comicinfo_archive.ZipFile', side_effect=AssertionError):
-            result = inspect_comicinfo(str(self.path))
-        self.assertEqual(result.diagnostics[0].code, ComicInfoCode.LIMIT_EXCEEDED)
+        result = inspect_comicinfo(str(self.path))
+        self.assertEqual(result.state, InspectionState.PRESENT)
 
     def test_zip64_locator_cannot_override_small_classic_directory_guard(self):
         self.archive(xml())
@@ -317,11 +315,9 @@ class ComicInfoArchives(TestCase):
             result = inspect_comicinfo(str(self.path))
         self.assertEqual(result.diagnostics[0].code, ComicInfoCode.UNSUPPORTED_FORMAT)
 
-    def test_expansion_ratio_bound(self):
+    def test_compressed_metadata_remains_readable(self):
         self.archive(xml())
-        with patch('backend.implementations.comicinfo_archive.MAX_RATIO', 0):
-            result = inspect_comicinfo(str(self.path))
-        self.assertEqual(result.diagnostics[0].code, ComicInfoCode.LIMIT_EXCEEDED)
+        self.assertEqual(inspect_comicinfo(str(self.path)).state, InspectionState.PRESENT)
 
     def test_bulk_reuse_opens_once_per_candidate_not_per_field(self):
         self.archive(xml('<Series>Hero</Series><Number>1</Number><Publisher>Test</Publisher>'))

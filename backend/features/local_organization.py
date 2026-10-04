@@ -5,15 +5,18 @@ not this session, own mutations and recovery. Registration is a separate,
 explicit metadata operation and is not rolled back by later file review.
 """
 
+import json
 import os
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
 
 from backend.base.acquisition_intake import IntakeErrorCode as E, IntakeFailure
+from backend.base.identification import PublicationAuthority
 from backend.base.import_candidate import DiscoveryKind, DiscoveryScope
 from backend.base.organization_plan import (OrganizationBatch,
                                             PlanningPolicy, PlanStatus)
@@ -32,13 +35,26 @@ class LocalSession:
     expires: float
     jobs: dict[int, str] = field(default_factory=dict)
     claimed: bool = False
+    reviews: list[dict] = field(default_factory=list)
+    presentation: list[dict] = field(default_factory=list)
 
 
 _sessions: dict[str, LocalSession] = {}
 _lock = RLock()
 
 
-def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBatch) -> dict:
+def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBatch, reviews=None) -> dict:
+    plans = [compact_plan(p) for p in batch.plans]
+    with closing(sqlite3.connect(database)) as db:
+        ids = sorted({i for p in plans for i in p['issue_ids']})
+        labels = {r[0]: '#'+r[1]+(' '+r[2] if r[2] else '') for r in db.execute(
+            'SELECT id,issue_number,title FROM issues WHERE id IN (SELECT value FROM json_each(?))', (json.dumps(ids),))}
+    for value, plan in zip(plans, batch.plans):
+        selected = plan.identification.selected
+        value['issue_labels'] = [labels[i] for i in value['issue_ids'] if i in labels]
+        if selected:
+            value['publication'] = selected.title
+            value['authority'] = dict(provider=selected.provider_identity.provider, id=selected.provider_identity.provider_id)
     with _lock:
         for key in tuple(_sessions):
             if _sessions[key].expires < time.monotonic():
@@ -46,8 +62,9 @@ def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBat
         if len(_sessions) >= 16 or sum(len(s.batch.plans) for s in _sessions.values()) + len(batch.plans) > 4000:
             raise IntakeFailure(E.CONFIGURATION)
         key = uuid4().hex
-        _sessions[key] = LocalSession(str(Path(database).absolute()), roots, batch, time.monotonic() + 600)
-        return dict(id=key, expires_in=600, plans=[compact_plan(p) for p in batch.plans],
+        _sessions[key] = LocalSession(str(Path(database).absolute()), roots, batch, time.monotonic() + 600,
+                                      reviews=reviews or [], presentation=plans)
+        return dict(id=key, expires_in=600, plans=plans + (reviews or []),
                     enumeration_complete=True)
 
 
@@ -57,22 +74,22 @@ def apply_preview(database: str, identifier: str) -> dict:
         if (session is None or session.database != str(Path(database).absolute())
                 or session.expires < time.monotonic()):
             raise IntakeFailure(E.CONFIGURATION)
-        if session.claimed:
-            return dict(id=identifier, jobs=list(session.jobs.values()), replay=True)
+        replay = session.claimed
         # A failed or interrupted apply is never blindly replayed.
         session.claimed = True
     executor = OrganizationExecutor(database, session.roots)
     try:
-        for index, plan in enumerate(session.batch.plans):
+        for index, plan in enumerate(session.batch.plans if not replay else ()):
             if plan.status in (PlanStatus.READY, PlanStatus.NO_CHANGES):
                 session.jobs[index] = executor.create_job(plan, batch_id='local-preview:' + identifier)
         outcomes = []
-        for index, job in session.jobs.items():
-            result = executor.apply_job(job)
+        for index, job in tuple(session.jobs.items()):
+            result = executor.store.get(job) if replay else executor.apply_job(job)
             outcomes.append(dict(source=session.batch.plans[index].source_path,
                                  job_id=job, state=result.state.value))
-        return dict(id=identifier, jobs=outcomes,
-                    review=[compact_plan(p) for i, p in enumerate(session.batch.plans) if i not in session.jobs])
+        return dict(id=identifier, jobs=outcomes, replay=replay,
+                    review=[p for i, p in enumerate(session.presentation) if i not in session.jobs]
+                    + session.reviews)
     finally:
         executor.close()
 
@@ -88,7 +105,8 @@ def scan_preview(database: str, volume_id: int) -> dict:
         artifacts = observe_artifacts((folder,), row[1])
         scope = DiscoveryScope(uuid4().hex, folder, kind=DiscoveryKind.LIBRARY_SCAN)
         policy = PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', move=False, rename=False)
-        batch = preview_local_artifacts(db, tuple(a.path for a in artifacts), scope, policy, volume_id=volume_id)
+        batch = preview_local_artifacts(db, tuple(a.path for a in artifacts), scope, policy, volume_id=volume_id,
+                                       authority=PublicationAuthority.MANAGED_VOLUME)
         # No missing-path cleanup, even following a complete enumeration.
         return retain_preview(database, (row[1],), batch)
     finally:
@@ -122,24 +140,47 @@ def import_preview(database: str, matches: object, rename: bool) -> dict:
             if len(observed) != 1 or observed[0].path != safe:
                 raise IntakeFailure(E.UNSUPPORTED_ARTIFACT)
             authorized.append((identity, safe, root_id, root))
-        volumes = {}
         contexts = {}
         operation = uuid4().hex
-        for identity, path, root_id, root in authorized:
-            if identity not in volumes:
+        reviews = []
+        for identity in dict.fromkeys(a[0] for a in authorized):
+            group = [a for a in authorized if a[0] == identity]
+            parents = {os.path.normcase(os.path.realpath(Path(a[1]).parent)) for a in group}
+            reason = None
+            existing = None
+            if len(parents) != 1 or len({a[2] for a in group}) != 1:
+                reason = 'folder_assignment_required'
+            else:
+                _, path, root_id, root = group[0]
+                folder = str(Path(path).parent)
                 try:
                     existing = ProviderIdentityDB.find_selected_volume(identity.provider, identity.provider_id)
+                    if existing is not None:
+                        row = db.execute('SELECT folder FROM volumes WHERE id=?', (existing,)).fetchone()
+                        if row is None or not row[0] or os.path.normcase(os.path.realpath(row[0])) not in parents:
+                            reason = 'existing_volume_folder_conflict'
+                    else:
+                        existing = Library.add_metadata(identity, root_id, True,
+                            volume_folder=folder, organizer_registration=True)
+                        commit()
                 except ValueError:
-                    raise IntakeFailure(E.IDENTIFICATION) from None
-                if existing is None:
-                    existing = Library.add_metadata(identity, root_id, True, organizer_registration=True)
-                    commit()
-                volumes[identity] = existing
-            contexts[path] = (DiscoveryScope(operation, root), volumes[identity])
-        first_scope = next(iter(contexts.values()))[0]
-        batch = preview_local_artifacts(db, tuple(contexts), first_scope,
-            PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', rename=rename),
-            path_contexts=contexts)
-        return retain_preview(database, tuple(r[1] for r in roots), batch)
+                    reason = 'publication_registration_conflict'
+                except Exception:
+                    reason = 'publication_registration_unavailable'
+            for _, path, root_id, root in group:
+                if reason:
+                    reviews.append(dict(status='review_required', source=path, target=None,
+                        volume_id=existing, issue_ids=[], effects=[], diagnostics=[],
+                        identification_reasons=[reason], authority=dict(provider=identity.provider, id=identity.provider_id)))
+                else:
+                    assert existing is not None
+                    contexts[path] = (DiscoveryScope(operation, root), existing)
+        batch = OrganizationBatch(())
+        if contexts:
+            first_scope = next(iter(contexts.values()))[0]
+            batch = preview_local_artifacts(db, tuple(contexts), first_scope,
+                PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', rename=rename, move=rename),
+                path_contexts=contexts, authority=PublicationAuthority.IMPORT_SELECTION)
+        return retain_preview(database, tuple(r[1] for r in roots), batch, reviews)
     finally:
         db.close()

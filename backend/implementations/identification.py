@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from hashlib import sha256
 from math import isfinite
-from re import findall, search
+from re import findall, search, sub
 from types import MappingProxyType
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 from unicodedata import normalize
@@ -13,7 +13,8 @@ from backend.base.definitions import SpecialVersion
 from backend.base.identification import (IdentificationResult, LocalMatchIssue,
                                          LocalMatchVolume, MatchBand,
                                          MatchContribution, MatchReason,
-                                         MatchState, PublicationMatch)
+                                         MatchState, PublicationAuthority,
+                                         PublicationMatch)
 from backend.base.import_candidate import (ClaimRole, DiagnosticKind,
                                            ImportCandidate, InspectionState,
                                            ProviderReference, ResourceKind)
@@ -26,7 +27,51 @@ AUTO_MARGIN = 30
 
 def title_key(value: str) -> str:
     """No token deletion, article removal or fuzzy equivalence."""
-    return ' '.join(normalize('NFC', value).casefold().split())
+    return ' '.join(sub(r'[:.\-\u2013\u2014]+', ' ', normalize('NFC', value).casefold()).split())
+
+
+def identify_authorized(candidate, snapshot, volume_id, authority):
+    """Explicit publication selection; issue evidence and conflicts still apply.
+
+    This boundary is only used by Library Import and a managed-volume scan.
+    Acquisition hints and generic hypotheses continue through identify().
+    """
+    if authority not in (PublicationAuthority.IMPORT_SELECTION, PublicationAuthority.MANAGED_VOLUME):
+        raise ValueError('Explicit publication authority required')
+    volume = snapshot.volumes[volume_id]
+    ordinary = identify(candidate, snapshot)
+    option = next((m for m in ordinary.alternatives if m.local_volume_id == volume_id), None)
+    reasons = []
+    if ordinary.state == MatchState.BLOCKED:
+        reasons.extend(ordinary.reasons)
+    if candidate.existing and any(a.volume_id != volume_id for a in candidate.existing.associations):
+        reasons.append(MatchReason.INVALID_LOCAL)
+    if candidate.conflicts:
+        reasons.append(MatchReason.EVIDENCE_CONFLICT)
+    for ref in _claims(candidate):
+        owners = snapshot.identities.get(ref, ())
+        if volume_id not in owners:
+            reasons.append(MatchReason.IDENTITY_CONFLICT if owners or ref.provider == volume.authority.provider
+                           else MatchReason.UNKNOWN_IDENTITY)
+    if option:
+        reasons.extend(option.rejections)
+        # Selecting a publication deliberately can correct a filename title.
+        # A scoped scan, however, still calls attention to semantic disagreement.
+        reasons.extend(r for r in option.review_reasons if r in (
+            MatchReason.EVIDENCE_CONFLICT, MatchReason.UNKNOWN_IDENTITY,
+            MatchReason.IDENTITY_CONFLICT) or authority == PublicationAuthority.MANAGED_VOLUME
+            and r == MatchReason.TITLE_CONFLICT)
+    coverage, reason = _coverage(candidate, volume, snapshot, prefer_filename_issue=True)
+    if candidate.existing and not reasons and ordinary.selected and ordinary.selected.local_volume_id == volume_id:
+        coverage = ordinary.selected.local_issue_ids or coverage
+    if not coverage:
+        reasons.append(reason)
+    selected = PublicationMatch(volume_id, volume.authority, coverage,
+        (MatchContribution(MatchReason.FORCED, authority.value), MatchContribution(reason, 'issue.coverage')),
+        review_reasons=tuple(dict.fromkeys(reasons)), band=MatchBand.EXACT,
+        title=volume.title, year=volume.year)
+    return IdentificationResult(candidate, MatchState.REVIEW if reasons else MatchState.AUTOMATIC,
+        selected, (selected,), selected.review_reasons, snapshot.snapshot_id)
 
 
 @dataclass(frozen=True)
@@ -105,7 +150,7 @@ def _claims(candidate: ImportCandidate) -> Tuple[ProviderReference, ...]:
 
 
 def _coverage(candidate: ImportCandidate, volume: LocalMatchVolume,
-              snapshot: MatchingSnapshot) -> Tuple[Tuple[int, ...], MatchReason]:
+              snapshot: MatchingSnapshot, *, prefer_filename_issue=False) -> Tuple[Tuple[int, ...], MatchReason]:
     issues = snapshot.children[volume.id]
     refs = [r for r in _claims(candidate) if r.kind == ResourceKind.ISSUE]
     if refs:
@@ -149,7 +194,7 @@ def _coverage(candidate: ImportCandidate, volume: LocalMatchVolume,
         return (), MatchReason.ISSUE_MISSING
     filename = candidate.filename
     number_or_range = filename.legacy_issue_number if filename else None
-    if filename and volume.special_version == SpecialVersion.VOLUME_AS_ISSUE:
+    if filename and volume.special_version == SpecialVersion.VOLUME_AS_ISSUE and not (prefer_filename_issue and number_or_range is not None):
         number_or_range = filename.volume_number
     if number_or_range is not None:
         endpoints = number_or_range if isinstance(number_or_range, tuple) else (number_or_range, number_or_range)

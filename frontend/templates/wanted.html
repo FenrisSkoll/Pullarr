@@ -6,11 +6,11 @@
     <h1>Wanted / Upgrades</h1>
     <p>Missing means monitored without qualifying ownership. Upgrade means an existing direct file is below its explicitly enabled Quality Profile cutoff. Reaching cutoff does not change monitoring. Download completion alone is not verified import. Review and uncertain downloads hold reservations.</p>
     <form id="wanted-config">
-        <label>Background automation <select name="mode"><option value="off">Off (default)</option><option value="search_only">Search only</option><option value="grab">Search and grab unique acceptable results</option></select></label>
-        <label>Preferred SABnzbd client (Usenet) <select name="sab_client_id"><option value="">Use enabled NZBGet client, if configured</option></select></label>
-        <button type="submit">Save automation policy</button>
+        <label>Background automation <select name="mode"><option value="off">Off (default)</option><option value="search_only">Search only</option><option value="grab">Search and automatically grab from GetComics only</option></select></label>
+        <label>Default manual NZB client (SABnzbd) <select name="sab_client_id"><option value="">Use the sole enabled NZB client</option></select></label>
+        <button type="submit">Save acquisition preferences</button>
     </form>
-    <p>Torrents use the enabled qBittorrent client. Without a compatible enabled client, acquisition is blocked. Configure clients and path mappings in Settings.</p>
+    <p>Automatic grabs use GetComics only. NZB and torrent results require explicit Manual Search selection. Manual downloads use the sole enabled compatible client or the selected manual default. Configure SABnzbd/NZBGet, qBittorrent and path mappings in Settings.</p>
     <p>Search and grab now explicitly queues a bounded automatic selection even when background automation is off. Interactive search is available on the volume page and never grabs until you choose a result.</p>
     <select id="wanted-filter" aria-label="State"><option value="">All monitored / active</option><option value="upgrade">Upgrade</option><option value="due">Search due</option><option value="cooldown">Waiting for retry</option><option value="searching">Searching</option><option value="downloading">Downloading</option><option value="importing">Importing</option><option value="review">Review held</option><option value="owned">Owned</option></select>
     <button id="wanted-refresh">Refresh</button><button id="wanted-previous">Previous 100</button><button id="wanted-next">Next 100</button>

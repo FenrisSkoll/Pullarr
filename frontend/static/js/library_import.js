@@ -318,7 +318,9 @@ function searchMetadata() {
 	});
 };
 
-function importLibrary(api_key, rename=false) {
+let importPending = false;
+async function importLibrary(api_key, rename=false) {
+	if (importPending) return;
 	const data = [...liEls.proposalList.querySelectorAll(
 		'tr:has(input[type="checkbox"]:checked)'
 	)]
@@ -332,30 +334,30 @@ function importLibrary(api_key, rename=false) {
 			};
 		});
 
-	hide([liEls.views.list], [liEls.views.loading]);
-	document.getElementById('import-error').innerText = '';
-	sendAPI('POST', '/libraryimport/preview', api_key, {rename_files: rename}, data)
-	.then(async response => {
-		if (!response.ok) throw response;
-		const preview = (await response.json()).result;
-		const message = preview.plans.map(plan =>
-			`${plan.status}: ${plan.source}\n→ ${plan.target || 'Review required'}\nVolume ${plan.volume_id}; issues ${JSON.stringify(plan.issue_ids)}\nEffects: ${JSON.stringify(plan.effects)}\n${JSON.stringify(plan.diagnostics)}`
-		).join('\n\n');
-		if (!window.confirm(`Organization preview (no files moved yet):\n\n${message}\n\nApply only ready plans? Review files will remain unchanged.`)) return;
-		const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
-		if (!applied.ok) throw applied;
-		const result = (await applied.json()).result;
-		if (result.review?.length || result.jobs.some(job => job.state !== 'completed')) {
-			window.alert(`Organization needs review. Artifacts and existing journals are retained.\n${JSON.stringify(result, null, 2)}`);
-		}
-	})
-	.then(() => hide([liEls.views.loading], [liEls.views.start]))
-	.catch(e => {
-		hide([liEls.views.loading], [liEls.views.list]);
-		document.getElementById('import-error').innerText = e.status === 409
-			? 'Identity conflict: no automatic merge or provider switch. Earlier groups may already be imported.'
-			: 'Import stopped. Check the selected provider credentials/rate limits. Earlier groups may already be imported; review before retrying.';
-	});
+    if (!data.length) return;
+    importPending = true;
+    liEls.buttons.import.disabled = liEls.buttons.importRename.disabled = true;
+    const status = document.getElementById('import-error');
+    status.innerText = 'Importing selected files…';
+    const panel = LocalOrganizationUI.panel(status, 'library-import-results');
+    try {
+        const response = await sendAPI('POST', '/libraryimport/preview', api_key, {rename_files: rename}, data);
+        if (!response.ok) throw response;
+        const preview = (await response.json()).result;
+        const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
+        if (!applied.ok) throw applied;
+        const result = (await applied.json()).result;
+        const completed = new Set(LocalOrganizationUI.result(panel, result).map(job => job.source));
+        for (const row of liEls.proposalList.querySelectorAll('tr[data-rowid]')) {
+            if (completed.has(rowidToFilepath[row.dataset.rowid]?.filepath)) row.remove();
+        }
+        status.innerText = 'Import finished. See results below.';
+    } catch (_) {
+        status.innerText = 'Import could not be confirmed. Check the selected provider and Maintenance history before retrying.';
+    } finally {
+        importPending = false;
+        liEls.buttons.import.disabled = liEls.buttons.importRename.disabled = false;
+    }
 };
 
 // code run on load

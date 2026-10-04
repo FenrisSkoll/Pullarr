@@ -100,6 +100,38 @@ def target_registered(db, fid, target):
                       (fid, target)).fetchone() is not None
 
 
+def workspace_owner(db, fid):
+    """Journal ownership is per artifact, never inferred from sibling names."""
+    return db.execute('''SELECT id FROM organization_jobs
+        WHERE state<>'completed' AND json_extract(intent,'$.archive_effect')=?
+        AND json_extract(intent,'$.file_id')=? ORDER BY created_at,id LIMIT 1''',
+        (VERSION, fid)).fetchone()
+
+
+def workspace_findings(db, path):
+    """Observe exact journal references; orphan names never grant deletion authority."""
+    from backend.internals.organization_jobs import read_intent
+    folder = Path(path).parent
+    workspaces = {str(folder / name) for name in sibling_names(path) if name.startswith('.pullarr-archive-')}
+    if not workspaces:
+        return []
+    known = set()
+    ambiguous = False
+    for row in db.execute('''SELECT id FROM organization_jobs WHERE
+        json_extract(intent,'$.source') IN (SELECT value FROM json_each(?))
+        OR json_extract(intent,'$.backup') IN (SELECT value FROM json_each(?))''',
+        (json.dumps(sorted(workspaces)), json.dumps(sorted(workspaces)))).fetchall():
+        try:
+            intent = read_intent(db, row[0])
+            known.update(p for p in (intent.get('source'), intent.get('backup')) if p in workspaces)
+        except OrganizationError:
+            ambiguous = True
+    # Without a valid journal, matching filenames or payloads alone cannot prove
+    # whether an original was retired or which provider/library entry owns it.
+    return ([dict(reason='orphan_workspace_manual_inspection', count=len(workspaces-known))]
+            if workspaces-known or ambiguous else [])
+
+
 def register_archive(executor, fid, confirmation, batch_id, *, cancelled=lambda: False):
     existing = executor.store.db.execute('SELECT id,intent FROM organization_jobs WHERE batch_id=?', (batch_id,)).fetchone()
     if existing:
@@ -118,7 +150,7 @@ def register_archive(executor, fid, confirmation, batch_id, *, cancelled=lambda:
     if target_registered(executor.store.db, fid, target):
         raise ArchiveFailure('target_occupied')
     siblings = sibling_names(original)
-    if any(name.startswith('.pullarr-archive-') for name in siblings):
+    if workspace_owner(executor.store.db, fid):
         raise ArchiveFailure('archive_workspace_review_required')
     if target != original and any(name.casefold() == Path(target).name.casefold() for name in siblings):
         raise ArchiveFailure('target_occupied')
@@ -137,6 +169,20 @@ def register_archive(executor, fid, confirmation, batch_id, *, cancelled=lambda:
                 raise ArchiveFailure('stale_preview')
             if target_registered(executor.store.db, fid, target):
                 raise ArchiveFailure('target_occupied')
+            if workspace_owner(executor.store.db, fid):
+                raise ArchiveFailure('archive_workspace_review_required')
+            previous = executor.store.db.execute('''SELECT facts FROM file_quality_assessments
+                WHERE file_id=? AND fingerprint=? ORDER BY id DESC LIMIT 1''',
+                (fid, converted['old']['sha256'])).fetchone()
+            if previous:
+                facts = json.loads(previous[0])
+                # Exact ordered member preservation carries established raster
+                # observations forward without decoding the same pages again.
+                if facts.get('integrity') == 'valid' and facts.get('pages') == converted['pages']:
+                    for key in ('validation', 'readable', 'unreadable', 'codecs',
+                                'spreads', 'short_edge', 'long_edge', 'pixel_area'):
+                        if key in facts:
+                            converted['facts'][key] = facts[key]
             intent = dict(version=EXECUTOR_POLICY, archive_effect=VERSION, effects=EFFECTS,
                 source=prepared, target=target, original=original, backup=backup,
                 file_id=fid, volume_id=fresh['ownership']['volumes'][0][0], inverse=False,
@@ -163,6 +209,7 @@ class ArchiveEffect:
                 or intent.get('effects') != EFFECTS or intent.get('inverse') is not False
                 or not intent.get('receipt', {}).get('pages_preserved')):
             raise OrganizationError(ExecutionCode.CORRUPT)
+
         for key in ('source', 'target', 'original', 'backup'):
             self.e._scope(intent[key])
         if (len({intent[k] for k in ('source', 'target', 'backup')}) != 3
@@ -171,6 +218,32 @@ class ArchiveEffect:
                 or not Path(intent['source']).name.startswith('.pullarr-archive-')
                 or not Path(intent['backup']).name.startswith('.pullarr-archive-')):
             raise OrganizationError(ExecutionCode.CORRUPT)
+
+    def recovery_admission(self, job, intent):
+        """Prove every surviving artifact before continuing recorded effects."""
+        self.validate(intent)
+        self.check_database(job, intent)
+        for key, expected in (('source', 'incoming'), ('backup', 'old')):
+            if os.path.lexists(intent[key]) and not matches(intent[key], intent[expected]):
+                raise OrganizationError(ExecutionCode.SOURCE)
+        original, target = intent['original'], intent['target']
+        if original != target and os.path.lexists(original) and not matches(original, intent['old']):
+            raise OrganizationError(ExecutionCode.SOURCE)
+        published = matches(target, intent['incoming'])
+        prepared = matches(intent['source'], intent['incoming'])
+        if os.path.lexists(target) and not published and not (
+                original == target and matches(original, intent['old'])):
+            raise OrganizationError(ExecutionCode.CONFLICT)
+        if prepared == published:
+            raise OrganizationError(ExecutionCode.CONFLICT)
+        # Retirement may already have removed the old copy, but only after the
+        # transactional file-path checkpoint. Earlier states require old bytes.
+        if job.steps[2].state != StepState.SUCCEEDED and not (
+                matches(intent['backup'], intent['old']) or matches(original, intent['old'])):
+            raise OrganizationError(ExecutionCode.SOURCE)
+        for seed in intent['sharing']['seeds']:
+            if not matches(seed['path'], seed['identity']):
+                raise OrganizationError(ExecutionCode.SOURCE)
 
     def check_database(self, job, intent):
         expected = json.loads(canonical(intent['ownership']))

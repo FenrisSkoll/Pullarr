@@ -35,13 +35,31 @@ class WantedAutomation:
     def close(self):
         self.store.close()
 
-    def protocol_client(self, protocol):
+    def protocol_choices(self, protocol):
+        if protocol not in ('nzb', 'torrent'):
+            return ()
+        return tuple(c for c in (*load_sab_clients(self.store.db), *load_managed_clients(self.store.db))
+                     if c.enabled and getattr(c, 'protocol', 'nzb') == protocol)
+
+    def protocol_client(self, protocol, client_id=None):
+        if protocol not in ('nzb', 'torrent'):
+            return None
         config = load_automation(self.store.db)
-        if protocol == 'nzb' and config['sab_client_id']:
-            choices = [c for c in load_sab_clients(self.store.db) if c.enabled and c.key == config['sab_client_id']]
-        else:
-            choices = [c for c in load_managed_clients(self.store.db) if c.enabled and c.protocol == protocol]
+        choices = list(self.protocol_choices(protocol))
+        if client_id is not None:
+            choices = [c for c in choices if c.key == client_id]
+            return self.client_factory(choices[0]) if len(choices) == 1 else None
+        preferred = [c for c in choices if protocol == 'nzb' and c.key == config['sab_client_id']]
+        if preferred:
+            choices = preferred
         return self.client_factory(choices[0]) if len(choices) == 1 else None
+
+    @staticmethod
+    def automatic_evaluations(session, evaluations=None):
+        """Only retained configured GetComics selections authorize automation."""
+        return tuple(e for e in (session.evaluations if evaluations is None else evaluations)
+            if e.candidate.candidate_id in session.ddl_ids
+            and e.candidate.acquisition.mechanism == AcquisitionMechanism.DIRECT_DOWNLOAD)
 
     @staticmethod
     def failure_code(error):
@@ -51,7 +69,7 @@ class WantedAutomation:
             return error.code.value
         return str(error)  # WantedConflict contains only internal constant IDs.
 
-    def unavailable(self, session, *, check_client=False):
+    def unavailable(self, session, *, check_client=False, client_id=None, manual_choices=False):
         blocks = {(r[0], r[1], r[2]) for r in self.store.db.execute(
             '''SELECT source_kind,source_key,candidate_id FROM wanted_blocks
                WHERE candidate_id IN (SELECT value FROM json_each(?))''',
@@ -64,8 +82,8 @@ class WantedAutomation:
             blocked.update(s.evaluation.candidate.candidate_id for s in ddl.selections.values() if s.raw['link'] in links)
         config = load_automation(self.store.db)
         try:
-            client = self.protocol_client('nzb')
-            torrent_client = self.protocol_client('torrent')
+            client = self.protocol_client('nzb', client_id)
+            torrent_client = self.protocol_client('torrent', client_id)
         except DownloadFailure:
             client, torrent_client = None, None
         if client and check_client:
@@ -95,10 +113,10 @@ class WantedAutomation:
                     unavailable.add(e.candidate.candidate_id)
         unavailable.update(e.candidate.candidate_id for e in session.evaluations
                            if e.candidate.acquisition.mechanism not in (AcquisitionMechanism.NZB, AcquisitionMechanism.TORRENT, AcquisitionMechanism.DIRECT_DOWNLOAD))
-        if torrent_client is None:
+        if torrent_client is None and not (manual_choices and self.protocol_choices('torrent')):
             unavailable.update(e.candidate.candidate_id for e in session.evaluations
                                if e.candidate.acquisition.mechanism == AcquisitionMechanism.TORRENT)
-        if client is None:
+        if client is None and not (manual_choices and self.protocol_choices('nzb')):
             unavailable.update(e.candidate.candidate_id for e in session.evaluations
                                if e.candidate.acquisition.mechanism == AcquisitionMechanism.NZB)
         return frozenset(unavailable), frozenset(blocked), client
@@ -139,11 +157,31 @@ class WantedAutomation:
         identifier, session = self.searches.search(volume_id, issue_id,
             quality_context=search_quality_context(volume_id,issue_id,self.store.db.cursor()))
         session.run_id = self.store.begin_search(session.target, 'manual')
-        unavailable, blocked, _ = self.unavailable(session)
+        unavailable, blocked, _ = self.unavailable(session, manual_choices=True)
         self.store.finish_search(session.run_id, 'manual_results', sources=session.source_receipts,
                                  counts=self.counts(session), cooldown=False)
         preview = self.searches.preview(identifier, unavailable=unavailable, blocked=blocked)
-        choice = select_automatically(session.evaluations, search_state=session.state, unavailable=unavailable)
+        for result in preview['results']:
+            protocol = result['mechanism']
+            choices = self.protocol_choices(protocol) if protocol in ('nzb', 'torrent') else ()
+            selected = self.protocol_client(protocol) if choices else None
+            result['clients'] = [dict(id=c.key, name=c.name) for c in choices]
+            result['selected_client_id'] = selected.config.key if selected else None
+            result['unavailable_reason'] = None
+            if result['blocked']:
+                result['unavailable_reason'] = 'blocklisted'
+            elif not result['operationally_available']:
+                mechanism = result['mechanism']
+                try:
+                    choices = [c for c in (*load_sab_clients(self.store.db), *load_managed_clients(self.store.db))
+                               if c.enabled and getattr(c, 'protocol', 'nzb') == mechanism]
+                    result['unavailable_reason'] = (
+                        'no_enabled_' + mechanism + '_client' if not choices else
+                        'manual_' + mechanism + '_client_selection_required' if len(choices) > 1 else
+                        'acquisition_policy_blocked')
+                except DownloadFailure:
+                    result['unavailable_reason'] = 'client_configuration_invalid'
+        choice = select_automatically(self.automatic_evaluations(session), search_state=session.state, unavailable=unavailable)
         preview['automatic_policy'] = {'outcome': choice.reason.value,
                                        'fingerprint': choice.policy_fingerprint}
         return preview
@@ -199,8 +237,8 @@ class WantedAutomation:
                 # proven missing member so background work cannot overlap it.
                 proven.add(issue.id)
                 continue
-            decision = select_automatically(evaluate_releases(target,
-                (e.candidate for e in session.evaluations), session.policy),
+            decision = select_automatically(self.automatic_evaluations(session, evaluate_releases(target,
+                (e.candidate for e in session.evaluations), session.policy)),
                 search_state=session.state, unavailable=unavailable)
             if decision.selected and decision.selected.candidate.candidate_id == evaluation.candidate.candidate_id:
                 proven.add(issue.id)
@@ -210,7 +248,10 @@ class WantedAutomation:
                 raise WantedConflict('coverage_preference_conflict')
         return tuple(sorted(proven))
 
-    def grab(self, session, evaluation, *, automatic, force=False, offering_id=None, cancelled=lambda: False):
+    def grab(self, session, evaluation, *, automatic, force=False, offering_id=None, client_id=None, cancelled=lambda: False):
+        if automatic and (force or evaluation.candidate.candidate_id not in session.ddl_ids
+                          or evaluation.candidate.acquisition.mechanism != AcquisitionMechanism.DIRECT_DOWNLOAD):
+            raise WantedConflict('automatic_force_forbidden' if force else 'automatic_getcomics_only')
         key = evaluation.candidate.candidate_id
         if key in session.receipts:
             return session.receipts[key]
@@ -218,14 +259,16 @@ class WantedAutomation:
         if evaluation.quality_receipt and json.loads(evaluation.quality_receipt)['result'] in ('not_allowed','equal','downgrade'):
             raise WantedConflict('quality_not_allowed')
         original_configuration = load_automation(self.store.db)
-        unavailable, blocked, client = self.unavailable(session, check_client=automatic)
-        if evaluation.candidate.candidate_id in unavailable and not (force and evaluation.candidate.candidate_id in session.ddl_ids):
+        unavailable, blocked, client = self.unavailable(session, client_id=client_id)
+        selected_client = self.protocol_client(evaluation.candidate.acquisition.mechanism.value, client_id)
+        if evaluation.candidate.candidate_id in unavailable:
             raise WantedConflict('operationally_unavailable')
         if not force and evaluation.state != Compatibility.COMPATIBLE:
             raise WantedConflict('incompatible_selection')
         if automatic and force:
             raise WantedConflict('automatic_force_forbidden')
-        if force and evaluation.candidate.candidate_id not in session.ddl_ids:
+        from backend.features.direct_downloads import force_available
+        if force and not force_available(evaluation):
             raise WantedConflict('force_unavailable')
         ids = (session.target.issue_ids if force else
                self.covered_ids(session, evaluation, unavailable, automatic=automatic))
@@ -244,7 +287,7 @@ class WantedAutomation:
             reason = self.store.db.execute('SELECT acquisition_reason FROM wanted_decisions WHERE id=?', (decision,)).fetchone()[0]
             if ids:
                 quality_store.selected(ids[0], evaluation.candidate, reason=reason, identifier=decision,
-                    decision=dict(authorization='automatic' if automatic else 'manual', score=evaluation.score,
+                    decision=dict(authorization='automatic' if automatic else 'forced_manual' if force else 'manual', score=evaluation.score,
                         issue_ids=list(ids),
                         components=[dict(axis=c.axis,rule=c.rule.value,outcome=c.outcome.value,points=c.points,
                                          gate=c.gate.value if c.gate else None) for c in evaluation.components],
@@ -277,8 +320,12 @@ class WantedAutomation:
                 if count != len(ids):
                     raise WantedConflict('target_changed')
             _, latest_blocks, _ = self.unavailable(session)
-            if evaluation.candidate.candidate_id in latest_blocks and not force:
+            if evaluation.candidate.candidate_id in latest_blocks:
                 raise WantedConflict('blocked')
+            if selected_client is not None:
+                current_client = self.protocol_client(evaluation.candidate.acquisition.mechanism.value, client_id)
+                if current_client is None or current_client.config != selected_client.config:
+                    raise WantedConflict('client_configuration_changed')
         try:
             validate_before_effect()
         except (DDLError, WantedConflict):
@@ -289,13 +336,13 @@ class WantedAutomation:
         try:
             mechanism = evaluation.candidate.acquisition.mechanism
             if mechanism in (AcquisitionMechanism.NZB, AcquisitionMechanism.TORRENT):
-                client = self.protocol_client(mechanism.value)
-                if force or client is None:
+                client = self.protocol_client(mechanism.value, client_id)
+                if client is None:
                     raise WantedConflict('nzb_client_unavailable')
                 target = replace(session.target, issue_ids=ids)
                 grab_evaluation = evaluate_release(target, evaluation.candidate, session.policy) if ids != session.target.issue_ids else evaluation
                 intent = create_grab_intent(evaluation.candidate, grab_evaluation, target,
-                                           session.policy, client.config, request_id=decision)
+                                           session.policy, client.config, request_id=decision, force=force)
                 with self.store.transaction():
                     self.store.db.execute("INSERT INTO wanted_acquisitions VALUES(?,?,?)", (decision, getattr(client.config, 'kind', 'sabnzbd'), decision))
                 downloads = DownloadStore(self.store.path)
@@ -395,8 +442,8 @@ class WantedAutomation:
                 quality_context=search_quality_context(volume_id,issue_id,self.store.db.cursor()))
             session.run_id = run_id
             self.source_backoff(session)
-            unavailable, _, _ = self.unavailable(session, check_client=allow_grab)
-            choice = select_automatically(session.evaluations, search_state=session.state, unavailable=unavailable)
+            unavailable, _, _ = self.unavailable(session)
+            choice = select_automatically(self.automatic_evaluations(session), search_state=session.state, unavailable=unavailable)
             self.store.finish_search(run_id, choice.reason.value, sources=session.source_receipts, counts=self.counts(session))
             search_finished = True
             if not cancelled() and allow_grab and choice.selected:

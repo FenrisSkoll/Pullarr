@@ -7,20 +7,20 @@ from typing import Optional, Tuple
 
 from backend.base.release_evaluation import ReleaseEvaluation
 
-AUTO_SELECTION_POLICY = 'kapowarr-auto-selection/v1'
+AUTO_SELECTION_POLICY = 'pullarr-getcomics-auto-selection/v2'
 
 
 class SelectionReason(Enum):
     UNIQUE_BEST = 'unique_best'
     SEARCH_INCOMPLETE = 'search_incomplete'
-    NO_ACCEPTABLE_RELEASE = 'no_acceptable_release'
+    NO_ACCEPTABLE_RELEASE = 'no_acceptable_getcomics_release'
     OPERATIONALLY_BLOCKED = 'operationally_blocked'
     QUALITY_TIE = 'quality_tie'
 
 
 @dataclass(frozen=True)
 class AutoSelectionPolicy:
-    """V1 deliberately requires a complete bounded search, not worldwide best.
+    """V2 ranks the caller's retained GetComics-only candidate set.
 
     Compatible exact/containing coverage is eligible. Claimed packs are not.
     Points are preferences, never confidence. No additional score threshold.
@@ -34,7 +34,7 @@ class AutoSelectionPolicy:
 
     @property
     def fingerprint(self) -> str:
-        return sha256((self.version + '|complete|exact,containing|unique-quality|no-threshold').encode()).hexdigest()
+        return sha256((self.version + '|getcomics-only|complete|exact,containing|unique-quality|no-force').encode()).hexdigest()
 
 
 @dataclass(frozen=True)

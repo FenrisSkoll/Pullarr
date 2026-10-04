@@ -135,6 +135,7 @@ class WantedIssue:
     year: Optional[int] = None
     owned: Optional[bool] = None
     number_facts: Optional[IssueNumberFacts] = field(default=None, repr=False)
+    title: Optional[str] = None
 
     def __post_init__(self) -> None:
         if type(self.id) is not int or self.id <= 0 or not _is_type(self.raw_number, str):

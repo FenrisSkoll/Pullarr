@@ -29,6 +29,13 @@ const ArchiveMaintenanceUI = (() => {
             input.checked = checked; input.setAttribute('aria-label', `Select ${name}`);
         }
         async start() {
+            document.addEventListener('pullarr-archive-reconciled', () => {
+                if (!this.busy) {
+                    this.review = null;
+                    this.el('results').replaceChildren();
+                    this.load();
+                }
+            });
             this.el('volume-form').onsubmit = async event => {
                 event.preventDefault();
                 const generation = ++this.volumeGeneration;
@@ -113,6 +120,8 @@ const ArchiveMaintenanceUI = (() => {
                 const result = await this.api('GET', `/maintenance/archives/tasks/${id}`, null, {offset, status});
                 if (generation !== this.resultGeneration || id !== this.task || status !== this.el('filter').value) return;
                 const body = this.table(this.el('results'), ['File', 'State', 'Pages / metadata', 'Source / history']);
+                if (result.items.some(row => row.workspace_findings?.length))
+                    text(this.el('results'), 'p', 'Unreferenced archive workspace found. Leave it intact for manual inspection; other files can still be converted.');
                 for (const row of result.items) {
                     const tr = text(body, 'tr', ''); text(tr, 'td', row.filename || `Selected file ${row.file_id}`);
                     text(tr, 'td', label(row.reason || row.status)); text(tr, 'td', `${row.pages ?? '—'} · ${(row.metadata || []).join(', ') || 'No metadata observed'}`);

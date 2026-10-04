@@ -395,7 +395,10 @@ const MaintenanceUI = (() => {
             // reference; completed task is not assumed to mean completed job.
             for (;;) {
                 const status = await this.api('GET', `/maintenance/action-tasks/${delivery.id}`);
-                if (['queued', 'running'].includes(status.state)) { await this.sleep(2000); continue; }
+                if (['queued', 'running'].includes(status.state)) {
+                    this.message(`${label(status.state)} — checking the recorded operation. Please wait.`);
+                    await this.sleep(2000); continue;
+                }
                 if (status.state !== 'complete') throw {reason: status.reason};
                 return status.result;
             }
@@ -542,6 +545,7 @@ const MaintenanceUI = (() => {
             if (!validConfirmation(identity)) { this.error({reason: 'invalid_request'}); return; }
             const retrying = identity === this.retryConfirmation;
             this.pending = true; this.el('confirm-submit').disabled = true; this.el('retry-action').disabled = true;
+            this.message(identity.kind === 'recovery' ? 'Continuing the recorded recovery…' : 'Applying the confirmed operation…');
             this.retryConfirmation = identity;
             try {
                 this.storage.setItem(this.storageKey + '-confirmation', JSON.stringify(identity));
@@ -567,7 +571,10 @@ const MaintenanceUI = (() => {
                 this.retryConfirmation = null;
                 await this.history();
                 await this.showDomainResult(result);
-                this.message(result.state === 'no_changes' ? 'No changes; no jobs were created.' : 'Domain result received. Inspect batch/job state; recovery may still be required.');
+                this.message(['complete','completed'].includes(result.state) || ['complete','completed'].includes(result.entry?.state) ? 'Operation completed.' :
+                    result.state === 'no_changes' ? 'No changes; no jobs were created.' : 'Operation returned. The current job state is shown below.');
+                if (identity.kind === 'recovery' && typeof document.dispatchEvent === 'function')
+                    document.dispatchEvent(new Event('pullarr-archive-reconciled'));
             } catch (error) {
                 this.el('confirm').close(); this.el('retry-action').hidden = false;
                 this.error(error);
@@ -737,6 +744,9 @@ const MaintenanceUI = (() => {
                 if (preview.eligible && !preview.manual_inspection_required) button(container, title, () => this.confirm({kind: operation, id: entry.id,
                     body: {digest: preview.digest, confirmed: true}}, operation === 'recovery' ?
                     'Continue the original recorded operation. No new target is calculated.' : `${title}. This is a new journaled operation, not universal undo.`, title));
+                container.tabIndex = -1;
+                container.focus();
+                container.scrollIntoView?.({behavior: 'smooth', block: 'start'});
             } catch (error) { if (this.current('specialized', generation)) this.error(error); }
         }
         async batch(id, offset = 0) {

@@ -231,7 +231,7 @@ function fillPage(data, api_key) {
 
 	// Path
 	const path = ViewEls.vol_data.path;
-	path.innerText = data.folder;
+	path.innerText = data.folder || 'Folder not established. Review the volume folder setting.';
 	path.dataset.root_folder = data.root_folder;
 	path.dataset.volume_folder = data.volume_folder;
 
@@ -300,25 +300,27 @@ function toggleMonitored(api_key) {
 //
 // Tasks
 //
-function refreshVolume(api_key) {
-	const button_info = task_to_button[`refresh_and_scan#${volume_id}`];
-	const icon = button_info.button.querySelector('img');
-	const previousIcon = icon.src;
-	icon.src = button_info.loading_icon;
-	icon.classList.add('spinning');
-
-	sendAPI('POST', `/volumes/${volume_id}/organization-scan`, api_key)
-	.then(async response => {
-		if (!response.ok) throw response;
-		const preview = (await response.json()).result;
-		const lines = preview.plans.map(plan => `${plan.status}: ${plan.source}\nVolume ${plan.volume_id}; issues ${JSON.stringify(plan.issue_ids)}\nEffects: ${JSON.stringify(plan.effects)}\n${JSON.stringify(plan.diagnostics)}`);
-		if (window.confirm(`Local scan preview: no provider refresh, move, rename or missing-file removal.\n\n${lines.join('\n\n')}\n\nApply ready additive associations?`)) {
-			const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
-			if (!applied.ok) throw applied;
-		}
-	})
-	.catch(() => window.alert('Scan requires review. No missing-file cleanup was performed.'))
-	.finally(() => { icon.classList.remove('spinning'); icon.src = previousIcon; });
+async function refreshVolume(api_key) {
+    const button_info = task_to_button[`refresh_and_scan#${volume_id}`];
+    if (button_info.button.disabled) return;
+    button_info.button.disabled = true;
+    const panel = LocalOrganizationUI.panel(button_info.button.parentNode, 'volume-local-scan-results');
+    panel.textContent = 'Inspecting local files…';
+    try {
+        const response = await sendAPI('POST', `/volumes/${volume_id}/organization-scan`, api_key);
+        if (!response.ok) throw response;
+        const preview = (await response.json()).result;
+        panel.replaceChildren();
+        LocalOrganizationUI.preview(panel, preview, async () => {
+            const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
+            if (!applied.ok) throw applied;
+            const result = (await applied.json()).result;
+            await fetchAPI(`/volumes/${volume_id}`, api_key).then(json => fillPage(json.result, api_key));
+            return result;
+        });
+    } catch (_) {
+        panel.textContent = 'Local files could not be inspected. Check the managed folder and try a fresh preview.';
+    } finally { button_info.button.disabled = false; }
 };
 
 function autosearchVolume(api_key) {

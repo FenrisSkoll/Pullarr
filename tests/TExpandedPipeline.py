@@ -16,7 +16,7 @@ from backend.internals.release_sources import load_sources
 
 
 class ExpandedPipelineTests(TestCase):
-    def workflow(self, false_hd=False, after=None, kind='qbittorrent', failed=False, profile='legacy'):
+    def workflow(self, false_hd=False, after=None, kind='qbittorrent', failed=False, profile='legacy', force=False):
         fixture = quality_fixture.UpgradeTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
@@ -29,12 +29,24 @@ class ExpandedPipelineTests(TestCase):
                 patch('backend.features.direct_downloads.get_db',side_effect=db.cursor), \
                 patch('backend.internals.identification.get_db',side_effect=db.cursor):
             client = configure(db, remote, fixture.h.incoming, kind=kind)
+            if force:
+                remote['title'] = 'Batman (2020) (HD-Digital)'
             searches = UnifiedReleaseSearch(target_loader=load_target,nzb_loader=load_sources,ddl_loader=lambda:{})
             self.addCleanup(searches.close_all)
             service = WantedAutomation(fixture.h.dbpath,searches=searches)
             self.addCleanup(service.close)
             result = service.run_target(1,1,allow_grab=True)
+            self.assertEqual(result['state'], 'no_acceptable_getcomics_release')
+            self.assertEqual(remote['submitted'], 0)
+            preview = service.search_manual(1,1)
+            row = preview['results'][0]
+            session = searches.lookup(preview['search_id'], row['selection_id'])
+            if force:
+                self.assertFalse(row['download_eligible'])
+                self.assertTrue(row['force_eligible'])
+            result = service.grab(session, session.selections[row['selection_id']], automatic=False, force=force)
             self.assertEqual(result['state'],'tracking', (result,db.execute('SELECT error FROM wanted_searches').fetchall()))
+            self.assertEqual(db.execute('SELECT authorization FROM wanted_decisions').fetchone()[0], 'forced_manual' if force else 'manual')
             remote['completed'] = True
             if failed:
                 remote['nzb_status'] = 'FAILURE/UNPACK'
@@ -69,6 +81,12 @@ class ExpandedPipelineTests(TestCase):
 
     def test_true_upgrade_preserves_seeding_payload(self):
         self.workflow()
+
+    def test_forced_manual_undetermined_torrent_retains_exact_identity(self):
+        self.workflow(force=True)
+
+    def test_forced_manual_undetermined_nzb_retains_exact_identity(self):
+        self.workflow(kind='nzbget', force=True)
 
     def test_false_hd_preserves_current_and_suppresses_retry(self):
         self.workflow(True)

@@ -25,7 +25,8 @@ class LocalOrganizationTests(TestCase):
     def manual(self, rename):
         fixture = self.fixture
         # Library Import only admits configured roots, not arbitrary paths.
-        source = fixture.library / fixture.source.name
+        fixture.folder.mkdir(exist_ok=True)
+        source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
         with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', return_value=1), \
                 patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('No provider registration')):
@@ -45,6 +46,50 @@ class LocalOrganizationTests(TestCase):
     def test_existing_publication_import_preserves_basename(self):
         source, result = self.manual(False)
         self.assertEqual(Path(result['plans'][0]['target']).name, source.name)
+
+    def test_batman_three_books_local_authority_and_partial_review(self):
+        from zipfile import ZipFile
+        fixture = self.fixture
+        fixture.db.execute("UPDATE volumes SET title='Batman: Rebirth Deluxe Edition',year=2017")
+        fixture.db.execute("UPDATE issues SET title='Book 1',date='2017-01-01'")
+        for number in (2, 3):
+            fixture.db.execute('INSERT INTO issues(id,volume_id,comicvine_id,issue_number,calculated_issue_number,title,date) VALUES(?,1,?,?,?,?,?)',
+                (number, 200+number, str(number), number, f'Book {number}', '2017-01-01'))
+        for number in (1, 2, 3):
+            with ZipFile(fixture.folder / f'Batman - Rebirth Deluxe Edition (2017) - {number:03} - Book {number}.cbz', 'w') as archive:
+                archive.writestr('page.jpg', b'unchanged synthetic page')
+        with ZipFile(fixture.folder / 'Mystery.cbz', 'w') as archive:
+            archive.writestr('page.jpg', b'unresolved page')
+        preview = scan_preview(fixture.dbpath, 1)
+        self.assertEqual([p['issue_ids'] for p in preview['plans'][:3]], [[1], [2], [3]], preview)
+        self.assertTrue(all(p['volume_id'] == 1 for p in preview['plans']), preview)
+        self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM files').fetchone()[0], 0)
+        applied = apply_preview(fixture.dbpath, preview['id'])
+        self.assertEqual([j['state'] for j in applied['jobs']], ['completed']*3, applied)
+        self.assertEqual(len(applied['review']), 1)
+        self.assertEqual(fixture.db.execute('SELECT issue_id FROM issues_files ORDER BY issue_id').fetchall(), [(1,), (2,), (3,)])
+        again = scan_preview(fixture.dbpath, 1)
+        self.assertTrue(all(p['status'] != 'ready' for p in again['plans']), again)
+
+    def test_local_scan_conflicting_title_keeps_local_volume_context(self):
+        source = self.fixture.folder / 'Superman 001 (2020).cbz'
+        self.fixture.source.rename(source)
+        result = scan_preview(self.fixture.dbpath, 1)
+        self.assertEqual(result['plans'][0]['volume_id'], 1, result)
+        self.assertEqual(result['plans'][0]['status'], 'review_required', result)
+        self.assertEqual(apply_preview(self.fixture.dbpath, result['id'])['jobs'], [])
+
+    def test_import_different_immediate_parents_never_adopts_common_ancestor(self):
+        first = self.fixture.folder / self.fixture.source.name
+        self.fixture.source.rename(first)
+        second = self.fixture.library / 'Another'
+        second.mkdir()
+        copy = second / first.name
+        copy.write_bytes(first.read_bytes())
+        with patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('must not register')):
+            result = import_preview(self.fixture.dbpath, [dict(filepath=str(p), provider='comicvine', provider_id='101') for p in (first,copy)], False)
+        self.assertTrue(all(p['identification_reasons']==['folder_assignment_required'] for p in result['plans']), result)
+        self.assertEqual(self.fixture.db.execute('SELECT folder FROM volumes').fetchone()[0], str(self.fixture.folder))
 
     def test_existing_publication_import_and_rename(self):
         self.manual(True)
@@ -77,7 +122,8 @@ class LocalOrganizationTests(TestCase):
 
     def test_explicit_new_registration_precedes_preview_without_file_effects(self):
         fixture = self.fixture
-        source = fixture.library / fixture.source.name
+        fixture.folder.mkdir(exist_ok=True)
+        source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
         def registration(identity, root_id, monitored, **options):
             self.assertTrue(source.exists())
@@ -98,7 +144,8 @@ class LocalOrganizationTests(TestCase):
 
         from frontend.api import api
         fixture = self.fixture
-        source = fixture.library / fixture.source.name
+        fixture.folder.mkdir(exist_ok=True)
+        source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
         app = Flask(__name__)
         app.register_blueprint(api, url_prefix='/api')
@@ -123,12 +170,14 @@ class LocalOrganizationTests(TestCase):
     def test_cross_reference_does_not_authorize_registration_or_authority_switch(self):
         from backend.base.acquisition_intake import IntakeFailure
         fixture = self.fixture
-        source = fixture.library / fixture.source.name
+        fixture.folder.mkdir(exist_ok=True)
+        source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
         with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', side_effect=ValueError), \
-                patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('authority switch')), \
-                self.assertRaises(IntakeFailure):
-            import_preview(fixture.dbpath, [{'filepath': str(source), 'provider': 'metron', 'provider_id': '101'}], False)
+                patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('authority switch')):
+            result = import_preview(fixture.dbpath, [{'filepath': str(source), 'provider': 'metron', 'provider_id': '101'}], False)
+            self.assertEqual(result['plans'][0]['identification_reasons'], ['publication_registration_conflict'])
+            self.assertEqual(apply_preview(fixture.dbpath, result['id'])['jobs'], [])
         self.assertTrue(source.exists())
         self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM organization_jobs').fetchone()[0], 0)
 
@@ -147,6 +196,37 @@ class LocalOrganizationTests(TestCase):
 
 
 class RegistrationBoundaryTests(ImportHarness, TestCase):
+    def test_selected_comicvine_identity_cannot_be_substituted_by_fetch(self):
+        with self.assertRaisesRegex(ValueError, 'identity differs'):
+            Library.add_metadata(ProviderVolumeIdentity('comicvine', '999'), 1, True,
+                                 volume_folder=str(self.root), organizer_registration=True)
+        self.assert_empty_library()
+
+    def test_legacy_empty_folder_has_bounded_public_diagnostic(self):
+        from backend.implementations.volumes import Volume
+        identifier = Library.add_metadata(ProviderVolumeIdentity('comicvine', '2127'), 1, True,
+                                          volume_folder=str(self.root), organizer_registration=True)
+        self.db.execute("UPDATE volumes SET folder='' WHERE id=?", (identifier,))
+        data = Volume(identifier).get_public_data()
+        self.assertEqual(data['volume_folder'], '')
+        self.assertEqual(data['folder_diagnostic'], 'folder_not_established')
+
+    def test_registration_adopts_existing_folder_atomically(self):
+        folder = self.root / 'Batman - Rebirth Deluxe Edition (2017)'
+        folder.mkdir()
+        identifier = Library.add_metadata(ProviderVolumeIdentity('comicvine', '2127'), 1, True,
+            volume_folder=str(folder), organizer_registration=True)
+        row = self.db.execute('SELECT folder,custom_folder FROM volumes WHERE id=?', (identifier,)).fetchone()
+        self.assertEqual(row, (str(folder), True))
+        self.scan.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_failed_folder_establishment_rolls_back_all_registration_rows(self):
+        with self.assertRaises(Exception):
+            Library.add_metadata(ProviderVolumeIdentity('comicvine', '2127'), 1, True,
+                volume_folder=str(self.root / 'missing'), organizer_registration=True)
+        self.assert_empty_library()
+
     def test_real_provider_registration_does_not_choose_or_mutate_folder(self):
         self.settings.create_empty_volume_folders = True
         identifier = Library.add_metadata(ProviderVolumeIdentity('comicvine', '2127'), 1, True,
@@ -156,7 +236,7 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
         self.process.assert_not_called()
         self.assertEqual(list(self.root.iterdir()), [])
 
-    def test_real_registration_then_shared_organizer_in_disposable_database(self):
+    def file_database(self):
         import sqlite3
         from dataclasses import fields
         from zipfile import ZipFile
@@ -179,6 +259,48 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
                        'frontend.metadata.get_db', 'backend.internals.db_models.get_db'):
             self.start_patch(target, side_effect=self.db.cursor)
         self.start_patch('backend.internals.db.commit', side_effect=self.db.commit)
+        return path
+
+    def test_batman_import_establishes_folder_and_three_issue_bindings(self):
+        from zipfile import ZipFile
+
+        from fixtures.comicvine_fetch import issue_response
+        from fixtures.comicvine_search import volume_response
+
+        from backend.implementations.volumes import Volume
+        path = self.file_database()
+        self.prepare_fetch(volume_response(id='103802', name='Batman: Rebirth Deluxe Edition',
+            start_year='2017', count_of_issues='3', aliases='', deck=''),
+            [issue_response(id=str(301+n), volume={'id':'103802'}, issue_number=str(n), name=f'Book {n}', cover_date='2017-01-01') for n in (1,2,3)])
+        folder = self.root / 'Batman - Rebirth Deluxe Edition (2017)'
+        folder.mkdir()
+        sources = []
+        for number in (1,2,3):
+            source = folder / f'Batman - Rebirth Deluxe Edition (2017) - {number:03} - Book {number}.cbz'
+            with ZipFile(source, 'w') as archive:
+                archive.writestr('page.jpg', b'unchanged synthetic page')
+            sources.append(source)
+        matches = [dict(filepath=str(p), provider='comicvine', provider_id='103802') for p in sources]
+        preview = import_preview(path, matches, False)
+        row = self.db.execute('SELECT id,folder,custom_folder FROM volumes').fetchone()
+        self.assertEqual(row[1:], (str(folder), True))
+        self.assertEqual([p['issue_ids'] for p in preview['plans']], [[1],[2],[3]], preview)
+        self.assertTrue(all(p['status']=='ready' for p in preview['plans']), preview)
+        result = apply_preview(path, preview['id'])
+        self.assertEqual([j['state'] for j in result['jobs']], ['completed']*3, result)
+        self.assertTrue(all(p.exists() for p in sources))
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 3)
+        self.assertEqual(Volume(row[0]).get_public_data()['folder'], str(folder))
+        retry = import_preview(path, matches, False)
+        apply_preview(path, retry['id'])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 1)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 3)
+        self.scan.assert_not_called()
+        self.process.assert_not_called()
+
+    def test_real_registration_then_shared_organizer_in_disposable_database(self):
+        from zipfile import ZipFile
+        path = self.file_database()
         source = Path(self.comic_file())
         with ZipFile(source, 'w') as archive:
             archive.writestr('page.jpg', b'disposable image')

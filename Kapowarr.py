@@ -147,6 +147,8 @@ def _main(
         download_handler = DownloadHandler()
         download_handler.load_downloads()
         task_handler = TaskHandler()
+        from backend.features.archive_maintenance import ArchiveRecoveryTask
+        task_handler.add(ArchiveRecoveryTask(DBConnection.default_file))
         task_handler.handle_intervals()
 
     restart_type = None

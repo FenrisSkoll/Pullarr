@@ -21,7 +21,7 @@ from backend.internals.wanted_configuration import save_automation
 class WantedProductionTests(SABHarness, TestCase):
     seed = intake_production.SABIntakeProduction.seed
 
-    def flow(self, wrong=False, manual=False, crash=None, race=None, pack=False, partial=False, failure=None, canonical=False):
+    def flow(self, wrong=False, manual=False, crash=None, race=None, pack=False, partial=False, failure=None, canonical=False, abstain=False, force=False):
         self.seed()
         if canonical:
             from backend.internals.issue_facts import mapped_facts, write_facts
@@ -46,7 +46,7 @@ class WantedProductionTests(SABHarness, TestCase):
 
         def response(path, query):
             return (200, NZB, {}) if path == '/nzb' else (
-                200, CAPS if query.get('t') == ['caps'] else rss(item(title='Batman #5-6 (2016).cbz' if pack else 'Batman #5 (2016).cbz', url=source_url + '/nzb')), {})
+                200, CAPS if query.get('t') == ['caps'] else rss(item(title='Batman (2016).cbz' if force else 'Batman #5-6 (2016).cbz' if pack else 'Batman #5 (2016).cbz', url=source_url + '/nzb')), {})
 
         with fake_http(response) as (source_url, calls), fake_sab() as (url, remote):
             remote['drop'] = failure == 'ambiguous'
@@ -54,7 +54,7 @@ class WantedProductionTests(SABHarness, TestCase):
             private = asdict(client.config)
             private.pop('key')
             self.store.db.execute('INSERT INTO config VALUES(?,?)', ('sab_client_v1:sab', json.dumps(private)))
-            save_automation(self.store.db, {'mode': 'grab', 'sab_client_id': 'sab'})
+            save_automation(self.store.db, {'mode': 'grab', 'sab_client_id': None})
             self.store.db.execute('INSERT INTO acquisition_path_mappings VALUES(?,?,?,?,?,?,?,?)',
                 ('map', 'sab', client.config.instance, '/complete', 'posix', str(self.incoming), 1, None))
             def current_target(volume, issue):
@@ -83,9 +83,24 @@ class WantedProductionTests(SABHarness, TestCase):
                     self.store.db.execute("INSERT INTO files VALUES(1,'/disposable/owned.cbz',1)")
                     self.store.db.execute('INSERT INTO issues_files VALUES(1,5,0)')
             service.checkpoint = checkpoint
+            def explicit_selection():
+                preview = service.search_manual(1, 5)
+                result = preview['results'][0]
+                self.assertTrue(result['operationally_available'], result)
+                if force:
+                    self.assertFalse(result['download_eligible'])
+                    self.assertTrue(result['force_eligible'])
+                session = searches.lookup(preview['search_id'], result['selection_id'])
+                return service.grab(session, session.selections[result['selection_id']], automatic=False, force=force)
+            if abstain:
+                service.tick()
+                self.assertEqual(len(remote['uploads']), 0)
+                self.assertEqual(service.store.db.execute('SELECT outcome FROM wanted_searches').fetchone()[0], 'no_acceptable_getcomics_release')
+                self.assertEqual(service.store.db.execute('SELECT COUNT(*) FROM wanted_decisions').fetchone()[0], 0)
+                return
             if crash:
                 with self.assertRaisesRegex(RuntimeError, 'simulated process exit'):
-                    service.tick()
+                    service.tick() if crash == 'search_claimed' else explicit_selection()
                 service.store.recover_claims()
                 expected = 1 if crash == 'acquisition_persisted' else 0
                 self.assertEqual(len(remote['uploads']), expected)
@@ -115,7 +130,7 @@ class WantedProductionTests(SABHarness, TestCase):
                     path = f'/api/release-search/{result["search_id"]}/{result["results"][0]["selection_id"]}?api_key=fixture-key'
                     self.assertEqual(http.get(path).status_code, 405)
                     self.assertEqual(http.post(path, json={'action': 'download', 'url': 'file:///bad'}).status_code, 400)
-                    self.assertEqual(http.post(path, json={'action': 'download', 'force': True}).status_code, 409)
+                    self.assertTrue(result['results'][0]['force_eligible'])
                     self.assertEqual(service.store.db.execute('SELECT COUNT(*) FROM wanted_decisions').fetchone()[0], 0)
                     self.assertEqual(http.post(path, json={'action': 'block'}).status_code, 200)
                     self.assertEqual(http.post(path, json={'action': 'download'}).status_code, 409)
@@ -126,11 +141,19 @@ class WantedProductionTests(SABHarness, TestCase):
                     self.assertEqual(http.get('/api/wanted/history?api_key=fixture-key').status_code, 200)
             else:
                 with patch('backend.features.search_full.auto_search', side_effect=AssertionError('legacy search')):
-                    service.tick()
-            if race:
+                    if race and race != 'unmonitor' or failure == 'ambiguous':
+                        from backend.base.download_job import DownloadFailure
+                        from backend.implementations.direct_download_source import \
+                            DDLError
+                        from backend.internals.wanted import WantedConflict
+                        with self.assertRaises((WantedConflict, DownloadFailure, DDLError)):
+                            explicit_selection()
+                    else:
+                        explicit_selection()
+            if race and race != 'unmonitor':
                 self.assertEqual(len(remote['uploads']), 0)
                 self.assertEqual(service.store.db.execute('SELECT state FROM wanted_decisions').fetchone()[0], 'review' if race == 'resolved_owned' else 'abandoned')
-                self.assertEqual(service.store.db.execute('SELECT outcome FROM wanted_searches').fetchone()[0], 'unique_best')
+                self.assertEqual(service.store.db.execute('SELECT outcome FROM wanted_searches').fetchone()[0], 'manual_results')
                 return
             self.assertEqual(len(remote['uploads']), 1)
             if failure == 'ambiguous':
@@ -141,7 +164,7 @@ class WantedProductionTests(SABHarness, TestCase):
                 return
             decision = service.store.db.execute('SELECT * FROM wanted_decisions').fetchone()
             acquisition = self.store.get(decision['id'])
-            self.assertEqual(decision['authorization'], 'manual' if manual else 'automatic')
+            self.assertEqual(decision['authorization'], 'forced_manual' if force else 'manual')
             self.assertEqual(decision['state'], 'tracking')
             if pack:
                 self.assertEqual(json.loads(decision['issue_ids']), [5, 6])
@@ -180,6 +203,12 @@ class WantedProductionTests(SABHarness, TestCase):
     def test_scheduler_sab_intake_organization_satisfaction(self):
         self.flow()
 
+    def test_automatic_only_nzb_abstains_without_sab_submission(self):
+        self.flow(abstain=True)
+
+    def test_forced_manual_sab_preserves_exact_target_and_normal_intake(self):
+        self.flow(force=True)
+
     def test_scheduler_wrong_artifact_keeps_reservation_and_does_not_repeat(self):
         self.flow(wrong=True)
 
@@ -207,7 +236,7 @@ class WantedProductionTests(SABHarness, TestCase):
     def test_ownership_race_stops_grab(self):
         self.flow(race='owned')
 
-    def test_unmonitor_race_stops_grab(self):
+    def test_explicit_manual_selection_does_not_require_background_monitoring(self):
         self.flow(race='unmonitor')
 
     def test_policy_race_stops_grab(self):

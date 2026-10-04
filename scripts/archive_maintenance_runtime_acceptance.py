@@ -94,19 +94,16 @@ executor.apply_job(sys.argv[3])
                         healthy=wait(api('POST','/maintenance/archives/scan',{'selected':[1]}))
                         assert healthy['items'][0]['status']=='healthy',healthy
                     else:
-                        def action(task):
-                            for _ in range(240):
-                                result=api('GET','/maintenance/action-tasks/'+task['id'])
-                                if result['state'] not in ('queued','running'):
-                                    assert result['state']=='complete',result
-                                    return result['result']
-                                time.sleep(.25)
-                            raise AssertionError('Recovery task timeout')
-                        path='/maintenance/history/organization/'+interrupted
-                        preview=action(api('POST',path+'/recovery-preview',{}))['preview']
-                        assert preview['eligible'],preview
-                        result=action(api('POST',path+'/recover',dict(digest=preview['digest'],confirmed=True)))
-                        assert result['entry']['state']=='complete',result
+                        # Startup is the only recovery trigger. Poll read-only
+                        # history and never send a recovery/preview mutation.
+                        for _ in range(240):
+                            result=api('GET','/maintenance/history/organization/'+interrupted)
+                            if result['entry']['state']=='complete':
+                                break
+                            time.sleep(.25)
+                        else:
+                            raise AssertionError('Automatic recovery timeout')
+                        assert not list(fixture.path.parent.glob('.pullarr-archive-*'))
                         jobs.append(interrupted)
                     history=api('GET','/maintenance/history/organization/'+jobs[0])
                     assert history['entry']['operation']=='archive_normalization',history
@@ -119,7 +116,7 @@ executor.apply_job(sys.argv[3])
                     if process.poll() is None:process.terminate();process.wait(timeout=15)
             content=output_path.read_text(encoding='utf-8')
             assert 'Traceback' not in content and '[ERROR]' not in content,'Unexpected runtime error'
-        print('Normal Pullarr/compatibility startup/reopen: archive scan/dry-run/shared CBR replacement, history, four process-exit checkpoint recoveries through HTTP after normal startup, no automatic rescan, stable ownership, source bytes and integrity/FKs PASS')
+        print('Normal startup PASS: scan/dry-run/shared CBR replacement, four process-exit checkpoints recovered automatically without recovery POST, no automatic rescan, stable ownership/source bytes, cleanup and integrity/FKs')
     finally:
         if db is not None:db.close()
         fixture.doCleanups()

@@ -116,6 +116,7 @@ class SearchCapabilities:
     search: bool = True
     limit: int = 100
     categories: Tuple[int, ...] = ()
+    category_names: Tuple[Tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)

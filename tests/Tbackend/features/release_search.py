@@ -351,7 +351,7 @@ class SearchIntegrationTests(TestCase):
         class FakeSource:
             source, priority, categories = c.source, 0, ()
             def capabilities(self):
-                return SearchCapabilities()
+                return SearchCapabilities(categories=(7030,))
             def search(self, request):
                 return SearchPage((c,), 1, 0, 1)
             def close(self):

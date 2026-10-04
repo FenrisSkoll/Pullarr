@@ -17,12 +17,6 @@ from backend.base.definitions import FileConstants
 from backend.base.import_candidate import FileObservation, InspectionState
 from backend.implementations.comicinfo import MAX_XML, parse_comicinfo
 
-MAX_ENTRIES = 20000
-MAX_ARCHIVE = 8 * 1024 ** 3
-MAX_EXPANDED = 16 * 1024 ** 3
-MAX_RATIO = 1000
-MAX_DIRECTORY = 8 * 1024 ** 2
-
 
 @dataclass(frozen=True)
 class ArchiveStamp:
@@ -49,17 +43,16 @@ def _stamp(path: str) -> ArchiveStamp:
     value = os.lstat(path)
     if not stat.S_ISREG(value.st_mode):
         raise ComicInfoError(ComicInfoCode.UNSAFE_MEMBER)
-    if value.st_size > MAX_ARCHIVE:
-        raise ComicInfoError(ComicInfoCode.LIMIT_EXCEEDED)
     return ArchiveStamp(value.st_size, value.st_mtime_ns, value.st_ctime_ns,
                         value.st_dev, value.st_ino)
 
 
 def _bounded_directory(path: str) -> None:
-    """Bound the classic ZIP directory before ZipFile allocates its entries.
+    """Validate the end record, including ZIP64, without a capacity policy.
 
-    This is only an admission guard; ZipFile still validates/reads the archive.
-    Multi-disk and ZIP64 require a future bounded backend and are declined.
+    ZipFile validates the directory and member offsets. Multi-disk archives are
+    unsupported; ZIP64 size/count fields are format features, not admission limits.
+    The tail buffer is fixed regardless of archive size.
     """
     with open(path, 'rb') as source:
         source.seek(0, os.SEEK_END)
@@ -73,23 +66,30 @@ def _bounded_directory(path: str) -> None:
         '<4s4H2LH', tail[offset:offset + 22])
     if len(tail) - offset != 22 + comment:
         raise ComicInfoError(ComicInfoCode.ARCHIVE_UNREADABLE)
+    if disk or start_disk or disk_count != count:
+        raise ComicInfoError(ComicInfoCode.UNSUPPORTED_FORMAT)
     if offset >= 20 and tail[offset - 20:offset - 16] == b'PK\x06\x07':
-        raise ComicInfoError(ComicInfoCode.UNSUPPORTED_FORMAT)
-    if disk or start_disk or disk_count != count or count == 65535 or directory_size == 0xffffffff or directory_offset == 0xffffffff:
-        raise ComicInfoError(ComicInfoCode.UNSUPPORTED_FORMAT)
-    if count > MAX_ENTRIES or directory_size > MAX_DIRECTORY:
-        raise ComicInfoError(ComicInfoCode.LIMIT_EXCEEDED)
+        _, zip_disk, record_offset, disks = struct.unpack('<4sLQL', tail[offset-20:offset])
+        if zip_disk or disks != 1:
+            raise ComicInfoError(ComicInfoCode.UNSUPPORTED_FORMAT)
+        with open(path, 'rb') as source:
+            source.seek(record_offset)
+            record = source.read(56)
+        if len(record) != 56 or record[:4] != b'PK\x06\x06':
+            raise ComicInfoError(ComicInfoCode.ARCHIVE_UNREADABLE)
+        _, length, _, _, disk, start_disk, disk_count, count, directory_size, directory_offset = struct.unpack('<4sQ2H2L4Q', record)
+        if length < 44 or disk or start_disk or disk_count != count:
+            raise ComicInfoError(ComicInfoCode.UNSUPPORTED_FORMAT)
+    elif count == 65535 or directory_size == 0xffffffff or directory_offset == 0xffffffff:
+        raise ComicInfoError(ComicInfoCode.ARCHIVE_UNREADABLE)
     if directory_offset + directory_size > size:
         raise ComicInfoError(ComicInfoCode.ARCHIVE_UNREADABLE)
 
 
 def _members(archive: ZipFile) -> Tuple[Tuple[ZipInfo, ...], Optional[ZipInfo]]:
     members = tuple(archive.infolist())
-    if len(members) > MAX_ENTRIES:
-        raise ComicInfoError(ComicInfoCode.LIMIT_EXCEEDED)
     seen = set()
     metadata = []
-    total = 0
     for member in members:
         name = member.filename
         normalized = name.replace('\\', '/')
@@ -106,16 +106,11 @@ def _members(archive: ZipFile) -> Tuple[Tuple[ZipInfo, ...], Optional[ZipInfo]]:
             raise ComicInfoError(ComicInfoCode.ENCRYPTED)
         if member.compress_type not in (ZIP_STORED, ZIP_DEFLATED):
             raise ComicInfoError(ComicInfoCode.UNSUPPORTED_FORMAT)
-        total += member.file_size
-        if total > MAX_EXPANDED or member.file_size > max(1, member.compress_size) * MAX_RATIO:
-            raise ComicInfoError(ComicInfoCode.LIMIT_EXCEEDED)
         if parts[-1].casefold() == 'comicinfo.xml' and not member.is_dir():
             metadata.append(member)
     if len(metadata) > 1:
         raise ComicInfoError(ComicInfoCode.MULTIPLE_DOCUMENTS)
     chosen = metadata[0] if metadata else None
-    if chosen is not None and chosen.file_size > MAX_XML:
-        raise ComicInfoError(ComicInfoCode.LIMIT_EXCEEDED)
     return members, chosen
 
 

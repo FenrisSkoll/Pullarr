@@ -44,20 +44,35 @@ def comic(path, rar=False, version=5):
 
 
 class ArchiveEngineTests(TestCase):
-    def test_misnamed_zip_still_verifies_images(self):
+    def test_container_conversion_does_not_require_raster_decoding(self):
         with TemporaryDirectory() as directory:
             path=Path(directory)/'actually-zip.cbr'
             with ZipFile(path,'w') as archive:archive.writestr('page.png',b'not an image')
-            with self.assertRaises(ArchiveFailure):inspect(str(path))
+            self.assertEqual(inspect(str(path))['status'], 'convertible')
+            from backend.implementations.file_quality import analyze
+            target = Path(directory)/'converted.cbz'
+            normalize(str(path), str(target))
+            with self.assertRaises(Exception): analyze(str(target))
 
-    def test_cumulative_rar_header_budget(self):
+    def test_container_conversion_preserves_pages_without_quality_codec_support(self):
+        with TemporaryDirectory() as directory:
+            source, target = Path(directory)/'source.cbr', Path(directory)/'result.cbz'
+            with ZipFile(source, 'w') as archive:
+                archive.writestr('page.avif', b'synthetic opaque page payload')
+            with patch('backend.implementations.file_quality.Image.open', side_effect=AssertionError('raster decode')):
+                result = normalize(str(source), str(target))
+            self.assertEqual(result['pages'], 1)
+            with ZipFile(target) as archive:
+                self.assertEqual(archive.read('page.avif'), b'synthetic opaque page payload')
+
+    def test_rar_header_buffer_is_bounded_without_cumulative_capacity_limit(self):
         from backend.base.acquisition_intake import IntakeFailure
-        from backend.implementations.acquisition_preparation import \
-            _BoundedHeaders
-        with patch('backend.implementations.acquisition_preparation.MAX_HEADER_BYTES',8):
-            stream=_BoundedHeaders(BytesIO(b'123456789'))
-            self.assertEqual(stream.read(8),b'12345678')
-            with self.assertRaises(IntakeFailure):stream.read(1)
+        from backend.implementations.acquisition_preparation import (
+            CHUNK, _BoundedHeaders)
+        stream = _BoundedHeaders(BytesIO(b'x' * (CHUNK + 1)))
+        self.assertEqual(len(stream.read(CHUNK)), CHUNK)
+        self.assertEqual(stream.read(1), b'x')
+        with self.assertRaises(IntakeFailure): stream.read(CHUNK + 1)
 
     def test_complete_child_extraction_and_unsafe_workspace(self):
         with TemporaryDirectory() as directory:
@@ -79,13 +94,13 @@ class ArchiveEngineTests(TestCase):
                 source, target = root/'input.cbz', root/'output.cbz'
                 comic(source)
                 with ZipFile(source,'a') as archive:
-                    archive.writestr(bad,b'fixture')
+                    info = ZipInfo()
+                    info.filename = info.orig_filename = bad
+                    archive.writestr(info,b'fixture')
                 with self.assertRaises(ArchiveFailure):
                     normalize(str(source),str(target))
                 if target.exists(): target.unlink()
             comic(source)
-            with patch('backend.implementations.archive_normalization.MAX_ENTRIES',1), self.assertRaises(ArchiveFailure):
-                normalize(str(source),str(target))
             with self.assertRaises(ArchiveFailure):
                 normalize(str(source),str(target),cancelled=lambda:True)
             if target.exists(): target.unlink()
@@ -118,7 +133,7 @@ class ArchiveEngineTests(TestCase):
     def test_unsafe_and_broken_inputs_preserved(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            for name, data in [('../escape.png', b'x'), ('/absolute.png', b'x'), ('bad.png', b'not an image'),
+            for name, data in [('../escape.png', b'x'), ('/absolute.png', b'x'),
                                ('ComicInfo.xml', b'<!DOCTYPE x><ComicInfo/>')]:
                 source, target = root/'source.cbz', root/'target.cbz'
                 comic(source)
@@ -133,6 +148,42 @@ class ArchiveEngineTests(TestCase):
 
 
 class ArchiveJournalTests(TestCase):
+    def test_io_failure_matrix_preserves_authority_and_recovers_registered_jobs(self):
+        import errno
+        import sqlite3
+
+        from backend.features.archive_maintenance import \
+            recover_interrupted_archives
+        failures = (
+            ('backend.implementations.archive_normalization._PayloadWriter.write', OSError(errno.ENOSPC, 'fixture full'), False),
+            ('backend.internals.organization_jobs.JobStore.create', OSError(errno.EIO, 'fixture journal failure'), False),
+            ('backend.features.organization_archive.rename_no_replace', OSError(errno.EIO, 'fixture publish failure'), True),
+            ('backend.features.organization_archive.QualityStore.assessment', sqlite3.OperationalError('fixture database failure'), True),
+            ('backend.features.organization_archive.os.unlink', PermissionError('fixture cleanup failure'), True),
+        )
+        for target, failure, registered in failures:
+            with self.subTest(target=target):
+                other = ArchiveJournalTests(); other.setUp()
+                try:
+                    original = other.path.read_bytes()
+                    if registered:
+                        identifier = other.register()
+                        with patch(target, side_effect=failure):
+                            result = other.h.executor.apply_job(identifier)
+                        self.assertEqual(result.state, JobState.RECOVERY)
+                        result = recover_interrupted_archives(other.h.dbpath)
+                        self.assertEqual(result[0]['state'], 'completed', result)
+                        self.assertTrue(other.path.with_suffix('.cbz').exists())
+                        self.assertFalse(other.path.exists())
+                    else:
+                        with patch(target, side_effect=failure), self.assertRaises((ArchiveFailure, OSError)):
+                            other.register()
+                        self.assertEqual(other.path.read_bytes(), original)
+                        self.assertEqual(other.h.db.execute('SELECT COUNT(*) FROM organization_jobs').fetchone()[0], 0)
+                    self.assertEqual(list(other.h.folder.glob('.pullarr-archive-*')), [])
+                finally:
+                    other.doCleanups()
+
     def setUp(self):
         self.h = fixture.ExecutionTests()
         self.h.setUp()
@@ -181,6 +232,99 @@ class ArchiveJournalTests(TestCase):
                 finally:
                     other.doCleanups()
 
+    def test_automatic_restart_matrix_and_exact_retry(self):
+        from backend.features.archive_maintenance import \
+            recover_interrupted_archives
+        for stage in ('after_started', 'after_effect'):
+            for ordinal in range(4):
+                with self.subTest(stage=stage, ordinal=ordinal):
+                    other = ArchiveJournalTests(); other.setUp()
+                    try:
+                        identifier = other.register()
+                        def interrupt(where, job, step):
+                            if where == stage and step == ordinal:
+                                raise fixture.Interrupted()
+                        other.h.executor.hook = interrupt
+                        with self.assertRaises(fixture.Interrupted):
+                            other.h.executor.apply_job(identifier)
+                        result = recover_interrupted_archives(other.h.dbpath)
+                        self.assertEqual(result[0]['state'], 'completed', result)
+                        self.assertEqual(recover_interrupted_archives(other.h.dbpath), [])
+                        self.assertEqual(other.h.db.execute('SELECT count(*) FROM organization_jobs').fetchone()[0], 1)
+                        self.assertFalse(list(other.h.folder.glob('.pullarr-archive-*')))
+                        self.assertEqual(other.h.db.execute('SELECT filepath FROM files WHERE id=1').fetchone()[0],
+                                         str(other.path.with_suffix('.cbz')))
+                    finally: other.doCleanups()
+
+    def test_interrupted_book_does_not_block_sibling_or_mutate_on_preview(self):
+        from backend.features.archive_maintenance import (
+            ArchiveMaintenance, recover_interrupted_archives)
+        identifier = self.register()
+        def interrupt(stage, job, step):
+            if stage == 'after_started' and step == 1: raise fixture.Interrupted()
+        self.h.executor.hook = interrupt
+        with self.assertRaises(fixture.Interrupted): self.h.executor.apply_job(identifier)
+        sibling = self.h.folder/'Batman - Deluxe Edition (2019) - 005 - Book 5.cbr'
+        comic(sibling, True)
+        self.h.db.execute('INSERT INTO files(id,filepath,size) VALUES(2,?,?)', (str(sibling), sibling.stat().st_size))
+        self.h.db.execute('INSERT INTO issues_files(file_id,issue_id) VALUES(2,1)')
+        before = tuple(self.h.folder.iterdir())
+        result = ArchiveMaintenance(self.h.dbpath)._preview(self.h.executor, 2, lambda: False)
+        self.assertEqual(result['status'], 'convertible', result)
+        self.assertEqual(tuple(self.h.folder.iterdir()), before)
+        self.assertEqual(self.h.executor.store.get(identifier).state, JobState.RUNNING)
+        self.assertEqual(recover_interrupted_archives(self.h.dbpath)[0]['state'], 'completed')
+        self.h.executor.hook = lambda *_: None
+        _, confirmation = review(self.h.executor, 2)
+        second = register_archive(self.h.executor, 2, confirmation, 'book-five')
+        self.assertEqual(self.h.executor.apply_job(second).state, JobState.COMPLETED)
+        self.assertFalse(list(self.h.folder.glob('.pullarr-archive-*')))
+
+    def test_automatic_recovery_refuses_changed_original_before_publication(self):
+        from backend.features.archive_maintenance import \
+            recover_interrupted_archives
+        identifier = self.register()
+        def interrupt(stage, job, step):
+            if stage == 'after_started' and step == 1: raise fixture.Interrupted()
+        self.h.executor.hook = interrupt
+        with self.assertRaises(fixture.Interrupted): self.h.executor.apply_job(identifier)
+        # Replace the directory entry, preserving the backup's old bytes.
+        self.path.unlink(); self.path.write_bytes(b'changed source')
+        result = recover_interrupted_archives(self.h.dbpath)
+        self.assertEqual(result[0]['state'], 'recovery_required')
+        self.assertFalse(self.path.with_suffix('.cbz').exists())
+        self.assertEqual(self.path.read_bytes(), b'changed source')
+
+    def test_concurrent_recovery_has_one_claimant(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from backend.features.archive_maintenance import \
+            recover_interrupted_archives
+        from backend.features.organization_execution import \
+            OrganizationExecutor
+        identifier = self.register()
+        entered, release = Event(), Event()
+        def worker():
+            def checkpoint(stage, job, step):
+                if stage == 'after_started' and step == 0:
+                    entered.set()
+                    if not release.wait(20): raise AssertionError('worker timeout')
+            executor = OrganizationExecutor(self.h.dbpath, (str(self.h.root),), checkpoint=checkpoint)
+            try: return executor.apply_job(identifier, automatic_archive_recovery=True)
+            finally: executor.close()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(worker)
+            try:
+                self.assertTrue(entered.wait(20))
+                second = pool.submit(recover_interrupted_archives, self.h.dbpath).result(timeout=20)
+                self.assertEqual(second[0]['reason'], 'executor_or_path_claimed')
+            finally: release.set()
+            self.assertEqual(first.result(timeout=20).state, JobState.COMPLETED)
+        self.assertEqual(recover_interrupted_archives(self.h.dbpath), [])
+        self.assertFalse(list(self.h.folder.glob('.pullarr-archive-*')))
+        self.assertEqual(self.h.db.execute('SELECT count(*) FROM organization_reservations').fetchone()[0], 0)
+
     def test_stale_preview(self):
         _, confirmation = review(self.h.executor, 1)
         with self.path.open('ab') as stream:
@@ -224,7 +368,7 @@ class ArchiveJournalTests(TestCase):
         self.assertEqual(self.h.executor.apply_job(self.register()).state,JobState.COMPLETED)
         self.assertEqual(db.execute('SELECT * FROM valid_file_content_coverage').fetchall(),before)
 
-    def test_registered_target_and_abandoned_workspace_block(self):
+    def test_registered_target_blocks_but_unowned_workspace_is_preserved(self):
         _,confirmation=review(self.h.executor,1)
         target=str(self.path.with_suffix('.cbz'))
         self.h.db.execute('INSERT INTO files(id,filepath,size) VALUES(2,?,1)',(target,))
@@ -232,8 +376,8 @@ class ArchiveJournalTests(TestCase):
             register_archive(self.h.executor,1,confirmation,'registered-target')
         self.h.db.execute('DELETE FROM files WHERE id=2')
         evidence=self.h.folder/'.pullarr-archive-abandoned.cbz'; evidence.write_bytes(b'evidence')
-        with self.assertRaisesRegex(ArchiveFailure,'archive_workspace_review_required'):
-            register_archive(self.h.executor,1,confirmation,'abandoned-workspace')
+        identifier = register_archive(self.h.executor,1,confirmation,'abandoned-workspace')
+        self.assertEqual(self.h.executor.apply_job(identifier).state, JobState.COMPLETED)
         self.assertEqual(evidence.read_bytes(),b'evidence')
 
     def test_unicode_registered_target_collision(self):

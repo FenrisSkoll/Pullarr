@@ -1,12 +1,11 @@
 """Bounded read-only raster archive observations. No paths from API callers."""
 
-import warnings
 from collections import Counter
 from dataclasses import asdict
 from hashlib import sha256
-from io import BytesIO
 from pathlib import Path
 from statistics import median
+from tempfile import TemporaryFile
 from zipfile import BadZipFile, ZipFile
 
 from PIL import Image, UnidentifiedImageError
@@ -18,11 +17,10 @@ from backend.implementations.comicinfo_archive import (_bounded_directory,
                                                        _members, _stamp)
 from backend.implementations.organization_filesystem import safe_path
 
-MAX_PAGES = 5000
-MAX_MEMBER_BYTES = 64 * 1024 * 1024
-MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
-MAX_PIXELS = 50_000_000
-MAX_EDGE = 30000
+# Archive size is limited by available host resources, not Pillow's raster policy.
+# Network artwork has its own explicit byte/dimension admission checks.
+Image.MAX_IMAGE_PIXELS = None
+CHUNK = 1024 * 1024
 IMAGE_SUFFIXES = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif'}
 
 
@@ -37,19 +35,21 @@ def aggregate(values):
 
 
 def analyze(path: str, *, cancelled=lambda: False, progress=lambda done, total: None,
-            verify_pixels=False):
+            verify_pixels=False, structural_only=False):
     """Only trusted service-admitted paths. Pixel validation is an import gate.
 
     Routine analysis uses lazy Image.open/verify and full archive-member CRCs,
     not raster rendering. Upgrade admission additionally validates decodability.
-    One bounded image is held at a time; source bytes are never rewritten.
+    Payloads are spooled to disk with fixed buffers; source bytes are never rewritten.
+    Structural inspection does not decode pages. Explicit pixel validation may
+    need raster memory proportional to an individual image.
     """
     safe_path(path)
     before = _stamp(path)
     if cancelled():
         raise QualityError('cancelled')
     result = dict(analyzer=ANALYZER_VERSION, container=Path(path).suffix.lower().lstrip('.'),
-                  integrity='unavailable', validation='pixels' if verify_pixels else 'headers_and_crc',
+                  integrity='unavailable', validation='container_crc' if structural_only else 'pixels' if verify_pixels else 'headers_and_crc',
                   pages=0, readable=0, unreadable=0, codecs={}, metadata=[], spreads=0,
                   short_edge={}, long_edge={}, pixel_area={}, size=before.size, stamp=asdict(before))
     digest = sha256()
@@ -68,11 +68,9 @@ def analyze(path: str, *, cancelled=lambda: False, progress=lambda done, total: 
         _bounded_directory(path)
         with ZipFile(path) as archive:
             members, _ = _members(archive)
-            if sum(m.file_size for m in members) > MAX_EXPANDED_BYTES:
-                raise QualityError('analysis_bound')
             page_count = sum(Path(m.filename).suffix.casefold() in IMAGE_SUFFIXES for m in members if not m.is_dir())
-            if not 1 <= page_count <= MAX_PAGES:
-                raise QualityError('page_bound')
+            if not page_count:
+                raise QualityError('no_pages')
             result['pages'] = page_count
             for member in members:
                 if cancelled():
@@ -81,35 +79,53 @@ def analyze(path: str, *, cancelled=lambda: False, progress=lambda done, total: 
                     continue
                 is_page = Path(member.filename).suffix.casefold() in IMAGE_SUFFIXES
                 metadata = Path(member.filename).name.casefold()
-                if member.file_size > MAX_MEMBER_BYTES:
-                    raise QualityError('analysis_bound')
-                # Full bounded member read validates CRC, including non-page data.
-                with archive.open(member) as source:
-                    data = source.read(MAX_MEMBER_BYTES+1)
-                if len(data) != member.file_size or len(data) > MAX_MEMBER_BYTES:
-                    raise QualityError('archive_invalid')
-                if metadata in ('comicinfo.xml', 'metroninfo.xml'):
-                    if len(data) > MAX_XML:
-                        raise QualityError('metadata_bound')
-                    if metadata == 'comicinfo.xml':
-                        parse_comicinfo(data)
-                    else:
-                        # Diagnostic presence only, but the same encoding-aware
-                        # declaration/depth guard validates XML before admission.
-                        _tree(data, expected_root=None)
-                    result['metadata'].append(metadata)
-                if not is_page:
-                    continue
-                with warnings.catch_warnings():
-                    warnings.simplefilter('error', Image.DecompressionBombWarning)
-                    with Image.open(BytesIO(data)) as image:
+                # CRC validation and spooling use fixed buffers. The seekable
+                # disk spool avoids ZipExtFile/Pillow whole-member buffering.
+                with TemporaryFile() as spool:
+                    count = 0
+                    tail = b''
+                    with archive.open(member) as source:
+                        while block := source.read(CHUNK):
+                            if cancelled():
+                                raise QualityError('cancelled')
+                            count += len(block)
+                            if count > member.file_size:
+                                raise QualityError('archive_invalid')
+                            if not structural_only and is_page:
+                                spool.write(block)
+                            if metadata in ('comicinfo.xml', 'metroninfo.xml') and member.file_size <= MAX_XML:
+                                spool.write(block)
+                            stripped = block.rstrip()
+                            if stripped:
+                                tail = (tail + stripped)[-2:]
+                    if count != member.file_size:
+                        raise QualityError('archive_invalid')
+                    if metadata in ('comicinfo.xml', 'metroninfo.xml'):
+                        # Large XML is retained byte-for-byte; optional metadata
+                        # parsing remains bounded and cannot reject the container.
+                        if member.file_size <= MAX_XML:
+                            spool.seek(0)
+                            data = spool.read(MAX_XML + 1)
+                            if metadata == 'comicinfo.xml':
+                                parse_comicinfo(data)
+                            else:
+                                _tree(data, expected_root=None)
+                        result['metadata'].append(metadata)
+                    if not is_page:
+                        continue
+                    if structural_only:
+                        progress(sum(codecs.values()) + 1, page_count)
+                        codecs['uninspected'] += 1
+                        continue
+                    spool.seek(0)
+                    with Image.open(spool) as image:
                         width, height = image.size
-                        if min(width, height) < 1 or max(width, height) > MAX_EDGE or width*height > MAX_PIXELS:
-                            raise QualityError('dimension_bound')
+                        if min(width, height) < 1:
+                            raise QualityError('image_invalid')
                         codec = image.format or 'unknown'
                         if codec not in ('JPEG', 'PNG', 'WEBP') or getattr(image, 'n_frames', 1) != 1:
                             raise QualityError('unsupported_page')
-                        if codec == 'JPEG' and not data.rstrip().endswith(b'\xff\xd9'):
+                        if codec == 'JPEG' and tail != b'\xff\xd9':
                             raise QualityError('image_invalid')
                         if verify_pixels:
                             image.load()
@@ -126,7 +142,7 @@ def analyze(path: str, *, cancelled=lambda: False, progress=lambda done, total: 
     except QualityError:
         raise
     except (BadZipFile, ComicInfoError, UnidentifiedImageError, OSError, ValueError,
-            Image.DecompressionBombWarning, Image.DecompressionBombError):
+            SyntaxError):
         raise QualityError('archive_invalid') from None
     if before != _stamp(path):
         raise QualityError('file_changed')

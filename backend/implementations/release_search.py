@@ -50,6 +50,16 @@ when a source returns a wrong release. Source acquisition never evaluates hits.
     aliases = sorted({a for a in p.aliases if ' '.join(a.split()).casefold() != title.casefold()})
     if aliases:
         variants[-1] = ' '.join(filter(None, (' '.join(aliases[0].split()), suffix)))
+    if len(target.issue_ids) == 1:
+        issue = next(i for i in target.catalog if i.id == target.issue_ids[0])
+        from re import fullmatch
+
+        from backend.implementations.identification import title_key
+        if issue.title and fullmatch(r'(?:book|volume|part)\s+\d+', title_key(issue.title)):
+            issue_title = ' '.join(issue.title.split())
+            issue_year = str(issue.year or p.year or '')
+            variants = [' '.join(filter(None, (title, issue_title, issue_year))),
+                        f'{title} {issue_title}', *variants]
     unique, seen = [], set()
     for query in variants:
         if query.casefold() not in seen:
@@ -66,7 +76,23 @@ def search_source(target: WantedTarget, source: ReleaseSearchSource,
         caps = source.capabilities()
         if not caps.search or (source.categories and not set(source.categories) <= set(caps.categories)):
             raise SourceFailure(SearchError.UNSUPPORTED)
-        plan = plan_queries(target, source.categories, limits)
+        names = dict(caps.category_names)
+        forbidden = {c for c in caps.categories if 2000 <= c < 3000 or 5000 <= c < 6000
+                     or any(word in names.get(c, '').casefold().split('/') for word in ('movies', 'tv'))}
+        categories = source.categories
+        if set(categories) & forbidden:
+            raise SourceFailure(SearchError.CONFIGURATION)
+        if not categories:
+            categories = tuple(c for c in caps.categories if c not in forbidden
+                and (c == 7030 or 'comic' in names.get(c, '').casefold()))
+            if not categories:
+                categories = tuple(c for c in caps.categories if c in (7020, 7000)
+                    or names.get(c, '').casefold() in ('books', 'ebooks', 'books/ebooks'))
+                if 7020 in categories:
+                    categories = (7020,)
+            if not categories:
+                raise SourceFailure(SearchError.UNSUPPORTED)
+        plan = plan_queries(target, categories, limits)
         for planned in plan:
             offset, pages_seen = 0, set()
             for page_number in range(limits.pages):

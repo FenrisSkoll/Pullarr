@@ -32,6 +32,7 @@ class CoverageTests(TestCase):
             other = facts.candidate('Batman #6 (2016).cbz')
             candidates.append(replace(other, source=replace(other.source, key='exact-source')))
         session = SimpleNamespace(target=target, policy=ScoringPolicy(), state=SearchState.COMPLETE,
+            ddl_ids={c.candidate_id: str(i) for i,c in enumerate(candidates)},
             evaluations=evaluate_releases(target, candidates))
         return service, session
 

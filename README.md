@@ -85,7 +85,9 @@ Add Comics includes bounded lazy artwork and explicit continuation discovery;
 see [metadata search](docs/metadata-search.md) for provider capabilities and limits.
 NZBGet 21+ and qBittorrent 5.x / Web API 2.9.3+ are the supported added clients.
 Create the desired qBittorrent category first. Managed clients permit one enabled
-client per protocol; explicitly selected legacy SABnzbd retains Usenet precedence.
+client per protocol. Manual Search uses the sole enabled compatible client, the
+saved manual NZB default, or an explicit client choice. Automatic grabs use
+GetComics only; NZB and torrent downloads always require manual selection.
 
 Map remote client paths to **paths actually mounted inside Pullarr**. A remote
 path mapping cannot create a Docker mount. For torrent hardlinks, both source and
@@ -106,6 +108,11 @@ Maintenance is explicit: select files, scan, review, then confirm. Healthy CBZs
 are not automatically rewritten. Supported page payloads are JPEG, PNG and WebP.
 Encrypted/multipart or unsafe archives require review. Batches are bounded;
 recovery protects interrupted operations, not unlimited undo after completion.
+Proven interrupted archive jobs resume at startup; ambiguous journals and orphan
+workspaces remain for inspection without blocking unrelated files. Archive page,
+member, expanded-size and image-dimension capacity ceilings are not imposed.
+Large or hostile archives can consume significant CPU, RAM, disk and time; stream
+buffers and worker concurrency remain bounded. See [workflow details](docs/reliability-workflows.md).
 There is **no PDF conversion, page editor, arbitrary split/combine or image
 recompression**. qBittorrent is the only supported torrent client.
 

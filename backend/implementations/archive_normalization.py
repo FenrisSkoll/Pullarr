@@ -21,17 +21,13 @@ from backend.base.quality import QualityError
 from backend.implementations.acquisition_preparation import (_BoundedHeaders,
                                                              _member,
                                                              _rar_copy)
-from backend.implementations.comicinfo import MAX_XML
 from backend.implementations.comicinfo_archive import (_bounded_directory,
                                                        _members, _stamp)
-from backend.implementations.file_quality import (MAX_EXPANDED_BYTES,
-                                                  MAX_MEMBER_BYTES, MAX_PAGES,
-                                                  analyze)
+from backend.implementations.file_quality import IMAGE_SUFFIXES, analyze
 from backend.implementations.organization_filesystem import artifact, safe_path
 
-MAX_ENTRIES = 10000
 MAX_PATH = 1024
-PAGE_TYPES = {'.jpg', '.jpeg', '.png', '.webp'}
+PAGE_TYPES = IMAGE_SUFFIXES
 CHILD_TYPES = {'.cbr', '.rar', '.cbz', '.zip'}
 CHUNK = 1024 * 1024
 
@@ -53,12 +49,7 @@ def members(path):
                 entries, _ = _members(archive)
                 yield 'cbz', [(m.filename, m.file_size, m.is_dir(), m) for m in entries], archive
         elif magic.startswith(b'Rar!\x1a\x07'):
-            count = 0
             def admission(info):
-                nonlocal count
-                count += 1
-                if count > MAX_ENTRIES:
-                    raise ArchiveFailure('member_limit')
                 # rarfile also reports main/end headers without a filename.
                 if info.filename is not None:
                     _member(info.filename)
@@ -79,22 +70,20 @@ def members(path):
 
 
 def _admit(entries):
-    if not 1 <= len(entries) <= MAX_ENTRIES:
-        raise ArchiveFailure('member_limit')
+    if not entries:
+        raise ArchiveFailure('archive_empty')
     seen, total, pages, metadata = set(), 0, 0, set()
     for name, size, directory, info in entries:
         normalized = _member(name)
         if ('\\' in name or len(name) > MAX_PATH or normalized.casefold() in seen
                 or any(ord(c) < 32 or ord(c) == 127 for c in name)
-                or size < 0 or size > MAX_MEMBER_BYTES):
+                or size < 0):
             raise ArchiveFailure('unsafe_member')
         seen.add(normalized.casefold())
         mode = getattr(info, 'mode', 0) or getattr(info, 'external_attr', 0) >> 16
         if stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR):
             raise ArchiveFailure('unsafe_member')
         total += size
-        if total > MAX_EXPANDED_BYTES:
-            raise ArchiveFailure('expanded_limit')
         if directory:
             continue
         suffix = Path(name).suffix.casefold()
@@ -102,15 +91,15 @@ def _admit(entries):
             raise ArchiveFailure('complete_issue_package_review')
         if suffix in PAGE_TYPES:
             pages += 1
-        elif suffix in {'.gif', '.bmp', '.tif', '.tiff', '.avif', '.pdf'}:
+        elif suffix == '.pdf':
             raise ArchiveFailure('unsupported_page')
         if Path(name).name.casefold() in ('comicinfo.xml', 'metroninfo.xml'):
             key = Path(name).name.casefold()
-            if key in metadata or size > MAX_XML:
+            if key in metadata:
                 raise ArchiveFailure('metadata_invalid')
             metadata.add(key)
-    if not 1 <= pages <= MAX_PAGES:
-        raise ArchiveFailure('page_limit')
+    if not pages:
+        raise ArchiveFailure('no_pages')
     return total, pages
 
 
@@ -124,7 +113,7 @@ class _PayloadWriter:
             raise ArchiveFailure('cancelled')
         self.count += len(data)
         if self.count > self.limit:
-            raise ArchiveFailure('expanded_limit')
+            raise ArchiveFailure('member_incomplete')
         self.hash.update(data)
         return self.output.write(data)
 
@@ -137,9 +126,11 @@ def normalize(source, target, *, cancelled=lambda: False):
     unknown members and metadata are preserved; no junk removal or XML rewriting.
     Caller owns temporary cleanup. Original is never renamed, written or removed.
     """
+    if cancelled():
+        raise ArchiveFailure('cancelled')
     safe_path(target)
     _stamp(source)
-    before = artifact(source)
+    before = artifact(source, cancelled=cancelled)
     manifest = []
     try:
         with members(source) as (container, entries, archive):
@@ -147,7 +138,7 @@ def normalize(source, target, *, cancelled=lambda: False):
             if shutil.disk_usage(Path(target).parent).free < expanded + 64 * CHUNK:
                 raise ArchiveFailure('insufficient_space')
             with open(target, 'xb') as output:
-                with ZipFile(output, 'w', ZIP_STORED, allowZip64=False) as result:
+                with ZipFile(output, 'w', ZIP_STORED, allowZip64=True) as result:
                     for name, size, directory, member in entries:
                         if cancelled():
                             raise ArchiveFailure('cancelled')
@@ -169,7 +160,7 @@ def normalize(source, target, *, cancelled=lambda: False):
                         manifest.append((name, size, writer.hash.hexdigest()))
                 output.flush()
                 os.fsync(output.fileno())
-        facts = analyze(target, cancelled=cancelled)
+        facts = analyze(target, cancelled=cancelled, structural_only=True)
         with ZipFile(target) as check:
             actual = []
             for member in check.infolist():
@@ -180,7 +171,7 @@ def normalize(source, target, *, cancelled=lambda: False):
                             raise ArchiveFailure('cancelled')
                         digest.update(data)
                 actual.append((member.filename, member.file_size, digest.hexdigest()))
-        if manifest != actual or facts['pages'] != pages or artifact(source) != before:
+        if manifest != actual or facts['pages'] != pages or artifact(source, cancelled=cancelled) != before:
             raise ArchiveFailure('verification_failed')
         from backend.internals.organization_jobs import canonical
         return dict(source_container=container, target_container='cbz', pages=pages,
@@ -188,7 +179,7 @@ def normalize(source, target, *, cancelled=lambda: False):
                     payload_digest=sha256(canonical(manifest).encode()).hexdigest(),
                     pages_preserved=True, metadata_action='preserved_bytes',
                     member_order='source_order_preserved', facts=facts, old=before,
-                    incoming=artifact(target))
+                    incoming=artifact(target, cancelled=cancelled))
     except ArchiveFailure:
         raise
     except (IntakeFailure, ComicInfoError, QualityError, rarfile.Error, BadZipFile, OSError, ValueError, RuntimeError, SyntaxError, subprocess.SubprocessError):
@@ -199,11 +190,11 @@ def inspect(path, *, cancelled=lambda: False):
     """Observational check; CBR uses a bounded disposable verification workspace."""
     safe_path(path)
     _stamp(path)
-    before = artifact(path)
+    before = artifact(path, cancelled=cancelled)
     with members(path) as (container, entries, archive):
         expanded, pages = _admit(entries)
     if container == 'cbz' and Path(path).suffix.casefold() in ('.cbz','.zip'):
-        facts = analyze(path, cancelled=cancelled)
+        facts = analyze(path, cancelled=cancelled, structural_only=True)
         return dict(container=container, pages=pages, members=len(entries), metadata=facts['metadata'],
                     expanded_bytes=expanded, old=before, status='healthy', facts=facts)
     with tempfile.TemporaryDirectory(prefix='pullarr-archive-check-') as directory:
@@ -223,18 +214,14 @@ def extract_legacy(source, destination):
     before = artifact(source)
     with members(source) as (container, entries, archive):
         seen, expanded = set(), 0
-        if len(entries) > MAX_ENTRIES:
-            raise ArchiveFailure('member_limit')
         for name, size, directory, info in entries:
             normalized = _member(name)
             mode = getattr(info, 'mode', 0) or getattr(info, 'external_attr', 0) >> 16
             if (normalized.casefold() in seen or '\\' in name or len(name)>MAX_PATH
-                    or size<0 or size>8*1024**3
+                    or size<0
                     or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)):
                 raise ArchiveFailure('unsafe_member')
             seen.add(normalized.casefold()); expanded += size
-        if expanded>16*1024**3:
-            raise ArchiveFailure('expanded_limit')
         if shutil.disk_usage(Path(destination).parent).free < expanded+64*CHUNK:
             raise ArchiveFailure('insufficient_space')
         Path(destination).mkdir(exist_ok=False)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone, tzinfo
 from decimal import Decimal
 from hashlib import sha256
 from json import dumps
-from re import IGNORECASE, compile
+from re import IGNORECASE, compile, sub
 from typing import Iterable, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -25,6 +25,7 @@ from backend.base.release_candidate import (RELEASE_POLICY,
                                             ReleaseDiagnosticCode as Code,
                                             ReleaseObservation, ReleaseSource,
                                             SourceKind)
+from backend.implementations.identification import title_key
 
 PARSER_POLICY = 'kapowarr-release-title/v1'
 DDL_ADAPTER = 'kapowarr-getcomics-release/v1'
@@ -46,6 +47,7 @@ _KNOWN_EXTENSIONS = tuple(sorted(
 _PACK = compile(
     r'\b(?:(complete)\s+(series|volume)|((?:series|volume))\s+pack|pack)\b',
     IGNORECASE)
+_ISSUE_TITLE = compile(r'\b(book|volume|part)[ ._-]+(\d+)(?=[ ._()\-]|$)', IGNORECASE)
 
 
 def parse_release_title(
@@ -64,8 +66,14 @@ def parse_release_title(
                 Code.UNKNOWN_EXTENSION,
                 'extension'))
     stem = title[:-len(known_extension)] if known_extension else title
+    # Scene-style dot separators retain decimal issue labels. Collected issue
+    # titles are observations, never unconditional Book N -> issue N guesses.
+    stem = sub(r'(?<!\d)\.|\.(?!\d)', ' ', stem)
+    issue_title = _ISSUE_TITLE.search(stem)
     years = tuple(year_regex.finditer(stem))
     volume = volume_regex.search(stem)
+    if issue_title and issue_title.group(1).casefold() != 'volume' and volume and issue_title.start() <= volume.start() < issue_title.end():
+        volume = None
     specials = tuple(special_version_regex.finditer(stem))
     special = specials[0] if specials else None
     matches = tuple(_EXPLICIT.finditer(stem))
@@ -74,6 +82,8 @@ def parse_release_title(
             m for m in _TRAILING.finditer(stem)
             if not volume or m.start(1) >= volume.end() or m.end(1)
             <= volume.start())
+    if issue_title:
+        matches = tuple(m for m in matches if not issue_title.start() <= m.start(1) < issue_title.end())
     coverage = ReleaseCoverage()
     pack = PackKind.UNKNOWN
     if len(matches) == 1:
@@ -150,7 +160,7 @@ def parse_release_title(
 
     positions = [m.start() for m in (*years, *matches)]
     positions += [m.start()
-                  for m in (volume, special, pack_match) if m is not None]
+                  for m in (volume, special, pack_match, issue_title) if m is not None]
     series = stem[:min(positions)].strip() if positions else None
     year_values = tuple(int(next(v for v in m.groups() if v)) for m in years)
     if len(set(year_values)) > 1:
@@ -167,7 +177,8 @@ def parse_release_title(
         volume=volume.group(1) if volume else None, coverage=coverage,
         pack=pack, physical_format=physical, publication_kind=kind,
         special_version=special_value, extension=extension,
-        policy=PARSER_POLICY), tuple(diagnostics)
+        policy=PARSER_POLICY,
+        issue_title=f'{issue_title.group(1)} {int(issue_title.group(2))}' if issue_title else None), tuple(diagnostics)
 
 
 def resolver_key(source: ReleaseSource, locator: str) -> str:
@@ -237,6 +248,8 @@ raw HTTP dictionaries/headers or credential-bearing GUID URLs through this seam.
     for observation in structured:
         for field in ('series', 'year', 'volume', 'extension'):
             left, right = getattr(observation, field), getattr(parsed, field)
+            if field == 'series' and left is not None and right is not None:
+                left, right = title_key(left), title_key(right)
             if left is not None and right is not None and left != right:
                 diagnostics.append(ReleaseDiagnostic(Code.CONFLICT, field))
     return ReleaseCandidate(

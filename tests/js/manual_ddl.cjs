@@ -42,6 +42,34 @@ function text(node) { return node.textContent + node.children.map(text).join('')
         explanation: {...dto, state: 'rejected', score: null}}]}, async () => ({}));
     assert.equal(table.querySelectorAll('button').find(b => b.textContent === 'Download').disabled, true);
     assert.ok(!text(table).includes('Score:'));
+    const rows = ['NZBGeek', 'GetComics', 'NZBGeek'].map((name, i) => ({
+        selection_id: String(i), mechanism: i === 1 ? 'direct_download' : 'nzb',
+        operationally_available: true, download_eligible: i === 1, force_eligible: true,
+        clients: i === 1 ? [] : [{id:'sab-a',name:'First SAB'}, {id:'sab-b',name:'Second SAB'}],
+        explanation: {...dto, state:i === 1 ? 'compatible':'undetermined',
+            candidate:{...dto.candidate,raw_title:`Release ${i}`,size_bytes:2147483648,source:{name}}}
+    }));
+    const sorted = doc.createElement('tbody');
+    const sourceBatch = {...batch, search_id:'sources',results:rows};
+    const originalReceipt = JSON.stringify(sourceBatch);
+    const selected = [];
+    const action = async (...args) => { selected.push(args); return {state:'tracking'}; };
+    context.renderManualDDL(sorted, sourceBatch, action, {source:'',sort:'source_asc'});
+    const releaseRows = () => sorted.children.filter(row=>row.children.length===5);
+    assert.deepEqual(releaseRows().map(row=>row.children[1].textContent), ['Release 1','Release 0','Release 2']);
+    assert.ok(text(sorted).includes('2.00 GB'));
+    context.renderManualDDL(sorted, sourceBatch, action, {source:'NZBGeek',sort:'source_desc'});
+    assert.equal(releaseRows().length,2);
+    const client = sorted.querySelectorAll('select').find(select=>select.children.some(option=>option.value==='sab-b'));
+    client.value='sab-b'; client.onchange();
+    await sorted.querySelectorAll('button').find(button=>button.textContent==='Download anyway').onclick();
+    assert.equal(selected.length,0);
+    await sorted.querySelectorAll('button').find(button=>button.textContent==='Confirm download anyway').onclick();
+    assert.equal(selected[0][2].client_id,'sab-b');
+    assert.equal(selected[0][2].force,true);
+    context.renderManualDDL(sorted, sourceBatch, action, {source:'NZBGeek',sort:'source_asc'});
+    assert.equal(sorted.querySelectorAll('button').find(button=>button.textContent==='Download anyway').disabled,true);
+    assert.equal(JSON.stringify(sourceBatch),originalReceipt);
     // Exercise the real production entry point with sendAPI's Response contract.
     const view = fs.readFileSync('frontend/static/js/view_volume.js', 'utf8');
     const start = view.indexOf('function showManualSearch(');

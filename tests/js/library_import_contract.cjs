@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const elements = new Map();
 const link = {};
-const row = {dataset: {rowid: '0'}, querySelector: () => link};
+const row = {dataset: {rowid: '0'}, querySelector: () => link, remove() { this.removed = true; }};
 function element(key) {
     if (!elements.has(key)) elements.set(key, {
         value: 'comicvine', querySelector: () => row,
@@ -16,9 +16,10 @@ let submitted;
 const context = vm.createContext({
     document: {querySelector: element, getElementById: element, querySelectorAll: () => []},
     hide: () => {},
-    window: {confirm: () => false},
+    window: {confirm: () => { throw Error('Native confirmation forbidden'); }, alert: () => { throw Error('Native alert forbidden'); }},
+    LocalOrganizationUI: {panel: () => ({}), result: () => []},
     sendAPI: (method, url, key, params, data) => {
-        submitted = {method, url, params, data};
+        if (url === '/libraryimport/preview') submitted = {method, url, params, data};
         return Promise.resolve({ok: true, json: async () => ({result: {id: 'retained-preview', plans: []}})});
     },
     console
@@ -39,5 +40,5 @@ assert.equal(submitted.data[0].filepath, '/disposable/Example.cbz');
 assert.equal(submitted.data[0].provider || 'comicvine', 'comicvine');
 assert.equal(String(submitted.data[0].provider_id || submitted.data[0].id), '2127');
 assert.equal(link.href, 'https://example.invalid/cv');
-console.log('Library Import provider selection → preview contract passed; cancelled preview does not apply');
+console.log('Library Import exact provider selection → inline preview/apply contract passed');
 module.exports = {context, submitted: () => submitted};

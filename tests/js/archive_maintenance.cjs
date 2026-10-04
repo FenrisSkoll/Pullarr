@@ -13,7 +13,7 @@ class Node {
     showModal() { this.open=true; }
     close() { this.open=false; if(this.handlers.close)this.handlers.close(); }
 }
-global.document={createElement:tag=>new Node(tag)};
+global.document={createElement:tag=>new Node(tag), addEventListener(){}};
 const {Controller,text}=require('../../frontend/static/js/archive_maintenance.js');
 const elements=new Map();
 const root={querySelector(id){if(!elements.has(id))elements.set(id,new Node());return elements.get(id);}};

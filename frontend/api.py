@@ -1784,8 +1784,9 @@ def api_select_release(search_id, selection_id):
     from backend.internals.wanted import WantedConflict
 
     data = request.get_json(silent=True)
-    if (not isinstance(data, dict) or set(data) - {'action', 'force', 'offering_id'}
+    if (not isinstance(data, dict) or set(data) - {'action', 'force', 'offering_id', 'client_id'}
             or data.get('action') not in ('download', 'block', 'unblock') or type(data.get('force', False)) is not bool
+            or ('client_id' in data and (not isinstance(data['client_id'], str) or not 1 <= len(data['client_id']) <= 64))
             or ('offering_id' in data and not isinstance(data['offering_id'], str))):
         return return_api({'reason': 'invalid_action'}, error='ReleaseSelectionFailure', code=400)
     service = WantedAutomation(DBConnection.default_file)
@@ -1814,7 +1815,7 @@ def api_select_release(search_id, selection_id):
                             (candidate.source.kind.value, candidate.source.key, candidate.candidate_id))
                 return return_api({'state': 'blocked' if data['action'] == 'block' else 'unblocked'})
             return return_api(service.grab(session, evaluation, automatic=False,
-                force=data.get('force', False), offering_id=data.get('offering_id')))
+                force=data.get('force', False), offering_id=data.get('offering_id'), client_id=data.get('client_id')))
     except (DDLError, DownloadFailure, SourceFailure, WantedConflict, OrganizationError):
         return return_api({'reason': 'selection_stopped_research_or_inspect_wanted'}, error='ReleaseSelectionFailure', code=409)
     finally:

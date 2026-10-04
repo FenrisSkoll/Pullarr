@@ -36,12 +36,18 @@ def download_gate(database):
 
 def create_grab_intent(candidate: ReleaseCandidate, evaluation: ReleaseEvaluation,
                        target: WantedTarget, policy: ScoringPolicy, client: SABConfig,
-                       *, request_id: Optional[str] = None) -> GrabIntent:
+                       *, request_id: Optional[str] = None, force: bool = False) -> GrabIntent:
     """Only explicit caller selection invokes this. No ranking or scorer call."""
+    import json
+
+    from backend.features.direct_downloads import force_available
+    allowed = (force_available(evaluation) if force else
+               evaluation.state == Compatibility.COMPATIBLE and evaluation.score is not None
+               and not evaluation.rejections and not any(c.gate is not None for c in evaluation.components))
     if (candidate != evaluation.candidate or target != evaluation.target
             or evaluation.policy_id != policy.policy_id or evaluation.policy_fingerprint != policy.fingerprint
-            or evaluation.state != Compatibility.COMPATIBLE or evaluation.score is None
-            or evaluation.rejections or any(c.gate is not None for c in evaluation.components)
+            or not allowed
+            or evaluation.quality_receipt and json.loads(evaluation.quality_receipt)['result'] in ('not_allowed', 'equal', 'downgrade')
             or candidate.acquisition.mechanism.value != getattr(client, 'protocol', 'nzb')
             or not candidate.candidate_id or not candidate.acquisition.key or not client.enabled):
         raise DownloadFailure(E.SELECTION)
@@ -58,7 +64,8 @@ def create_grab_intent(candidate: ReleaseCandidate, evaluation: ReleaseEvaluatio
         sha256(repr(target).encode()).hexdigest(), evaluation.policy_fingerprint,
         candidate.raw_title, candidate.source.name + (' via ' + candidate.source.via if candidate.source.via else ''),
         client.key, client.instance, client.category, client.priority,
-        client_kind=getattr(client, 'kind', 'sabnzbd'), protocol=getattr(client, 'protocol', 'nzb'))
+        client_kind=getattr(client, 'kind', 'sabnzbd'), protocol=getattr(client, 'protocol', 'nzb'),
+        authorization='forced_manual' if force else 'manual')
 
 
 def submit_selected(store: DownloadStore, intent: GrabIntent, candidate: ReleaseCandidate,
@@ -70,7 +77,7 @@ def submit_selected(store: DownloadStore, intent: GrabIntent, candidate: Release
     A new UUID is a new explicit repeat; reusing an intent UUID is replay-safe.
     """
     expected = create_grab_intent(candidate, evaluation, target, policy, client.config,
-                                 request_id=intent.request_id)
+                                 request_id=intent.request_id, force=intent.authorization == 'forced_manual')
     if intent != expected:
         raise DownloadFailure(E.SELECTION)
     with download_gate(store.path):

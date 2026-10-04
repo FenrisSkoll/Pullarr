@@ -225,6 +225,7 @@ Volume is raw text: a source's volume need not mean Kapowarr volume_number.
     identities: Tuple[ReleaseIdentity, ...] = ()
     year_kind: ReleaseYearKind = ReleaseYearKind.UNSPECIFIED
     volume_kind: ReleaseVolumeKind = ReleaseVolumeKind.UNSPECIFIED
+    issue_title: Optional[str] = None
 
     def __post_init__(self) -> None:
         _require_type(self.origin, ObservationOrigin)
@@ -245,6 +246,7 @@ Volume is raw text: a source's volume need not mean Kapowarr volume_number.
         _require_type(self.pack, PackKind)
         for name in (
             'series',
+            'issue_title',
             'volume',
             'physical_format',
             'publication_kind',
@@ -355,7 +357,7 @@ Strings are data, not HTML. Future UIs must render title/source via textContent.
             return value.isoformat()
         if is_dataclass(value):
             return {f.name: project(getattr(value, f.name))
-                    for f in fields(value)}
+                    for f in fields(value) if f.name != 'issue_title' or getattr(value, f.name) is not None}
         if isinstance(value, tuple):
             return [project(v) for v in value]
         return value

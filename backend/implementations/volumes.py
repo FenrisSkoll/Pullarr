@@ -10,7 +10,7 @@ from asyncio import run
 from datetime import datetime, timedelta
 from functools import lru_cache
 from io import BytesIO
-from os.path import dirname, exists, isdir, relpath
+from os.path import dirname, exists, isdir, normcase, realpath, relpath
 from time import time
 from typing import Any, Dict, List, Mapping, Set, Tuple, Union
 
@@ -358,10 +358,10 @@ class Volume:
             (self.id,)
         ).fetchonedict() or {}
 
-        volume_info['volume_folder'] = relpath(
-            volume_info['folder'],
-            volume_info['root_folder_path']
-        )
+        if not volume_info['folder']:
+            volume_info['folder_diagnostic'] = 'folder_not_established'
+        volume_info['volume_folder'] = (relpath(volume_info['folder'], volume_info['root_folder_path'])
+                                        if volume_info['folder'] else '')
         del volume_info['root_folder_path']
 
         if rich_issues:
@@ -1255,7 +1255,7 @@ class Library:
         fetched = run(fetch_volume_result(provider, identity.provider_id))
         from backend.implementations.metadata.persistence import fetch_input
         vd = fetch_input(fetched, identity.provider)
-        if identity.provider != 'comicvine' and vd['provider_id'] != identity.provider_id:
+        if vd['provider_id'] != identity.provider_id:
             raise ValueError('Fetched volume identity differs from request')
         validate_format_evidence(fetched.format_evidence, identity.provider, vd['provider_id'])
         validate_publication_evidence(fetched.publication_evidence, identity.provider, vd['provider_id'])
@@ -1396,10 +1396,22 @@ class Library:
                       if legacy_default_classification else ApplicationKind.EXPLICIT)
                 control(cursor, volume_id, True, 'legacy_default_add' if legacy_default_classification else 'explicit_add')
 
-            # Canonical import registers metadata first. FolderPolicy and the
-            # journaled executor subsequently establish the actual folder.
-            folder = '' if organizer_registration else generate_volume_folder_path(
-                root_folder.folder, volume.get_data(), volume_folder)
+            # Explicit Library Import establishes its adopted folder in the
+            # same transaction as publication registration.
+            if organizer_registration and volume_folder is not None:
+                from backend.implementations.acquisition_paths import contained
+                folder = contained(volume_folder, root_folder.folder)
+                if not isdir(folder):
+                    raise ValueError('Import folder is unavailable')
+                # Registration and folder establishment commit together. This
+                # path adopts an existing directory and has no filesystem effects.
+                owners = cursor.execute('SELECT folder FROM volumes WHERE id<>? AND folder<>?',
+                                        (volume_id, '')).fetchall()
+                if any(normcase(realpath(row[0])) == normcase(realpath(folder)) for row in owners):
+                    raise ValueError('Import folder already has a publication owner')
+            else:
+                folder = '' if organizer_registration else generate_volume_folder_path(
+                    root_folder.folder, volume.get_data(), volume_folder)
             volume.update({'folder': folder})
 
             if fetched.snapshot is None and not organizer_registration and Settings().sv.create_empty_volume_folders:

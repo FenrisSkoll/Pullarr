@@ -10,7 +10,8 @@ import stat
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
-from threading import Timer
+from threading import Event, Thread
+from time import monotonic
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import rarfile
@@ -25,11 +26,7 @@ from backend.implementations.acquisition_paths import (COMIC_EXTENSIONS,
                                                        contained)
 from backend.implementations.comicinfo_archive import _bounded_directory
 
-MAX_INPUT = 8 * 1024 ** 3
-MAX_OUTPUT = 16 * 1024 ** 3
-MAX_MEMBERS = 10000
 CHUNK = 1024 * 1024
-MAX_HEADER_BYTES = 16 * CHUNK
 TOOL_TIMEOUT = 300
 
 
@@ -45,13 +42,11 @@ class _BoundedHeaders:
     """RAR listing reads headers, never an unbounded advertised header allocation."""
     def __init__(self, stream):
         self.stream = stream
-        self.remaining = MAX_HEADER_BYTES
 
     def read(self, size=-1):
-        if not 0 <= size <= min(CHUNK, self.remaining):
+        if not 0 <= size <= CHUNK:
             raise IntakeFailure(E.PREPARATION)
         data = self.stream.read(size)
-        self.remaining -= len(data)
         return data
 
     def seek(self, *args):
@@ -79,17 +74,31 @@ def _rar_copy(source: str, member: str, output, size: int) -> None:
     executable = archive_executable()
     with subprocess.Popen([executable, 'p', '-inul', '-p-', '--', source, member],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL) as process:
-        timer = Timer(TOOL_TIMEOUT, process.kill)
-        timer.start()
+        stopped = Event()
+        last_progress = monotonic()
+        class ProgressOutput:
+            def write(self, block):
+                nonlocal last_progress
+                result = output.write(block)
+                last_progress = monotonic()
+                return result
+        def watchdog():
+            while not stopped.wait(.25):
+                if getattr(output, 'cancelled', lambda: False)() or monotonic() - last_progress > TOOL_TIMEOUT:
+                    if process.poll() is None:
+                        process.kill()
+                    return
+        watcher = Thread(target=watchdog, daemon=True)
+        watcher.start()
         try:
-            _copy(process.stdout, output, size)
+            _copy(process.stdout, ProgressOutput(), size)
             if process.wait(timeout=5) != 0:
                 raise IntakeFailure(E.PREPARATION)
         finally:
             if process.poll() is None:
                 process.kill()
-            timer.cancel()
-            timer.join()
+            stopped.set()
+            watcher.join()
 
 
 def prepare_artifacts(paths: tuple[str, ...], root: str, settings: dict, identifier: str,
@@ -118,7 +127,7 @@ def prepare_artifacts(paths: tuple[str, ...], root: str, settings: dict, identif
     for index, source in enumerate(paths):
         contained(source, root)
         before = os.stat(source, follow_symlinks=False)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_INPUT:
+        if not stat.S_ISREG(before.st_mode):
             raise IntakeFailure(E.PREPARATION)
         try:
             with open(source, 'rb') as stream:
@@ -144,8 +153,6 @@ def prepare_artifacts(paths: tuple[str, ...], root: str, settings: dict, identif
                 else:
                     def admission(info):
                         budget['entries'] += 1
-                        if budget['entries'] > MAX_MEMBERS:
-                            raise IntakeFailure(E.PREPARATION)
                     rar_stream = open(source, 'rb')
                     archive = rarfile.RarFile(_BoundedHeaders(rar_stream), info_callback=admission, errors='strict')
                     if archive.needs_password() or len(archive.volumelist()) > 1:
@@ -160,8 +167,6 @@ def prepare_artifacts(paths: tuple[str, ...], root: str, settings: dict, identif
                         raise IntakeFailure(E.UNSAFE_PATH)
                     names.add(normalized.casefold())
                     budget['expanded'] += size
-                if budget['entries'] > MAX_MEMBERS or budget['expanded'] > MAX_OUTPUT:
-                    raise IntakeFailure(E.PREPARATION)
                 files = [f for f in facts if not f[2]]
                 if not files:
                     raise IntakeFailure(E.PREPARATION)

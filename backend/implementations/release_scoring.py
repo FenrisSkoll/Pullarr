@@ -38,7 +38,7 @@ _POINTS = {
 _ORIGIN_ORDER = {ObservationOrigin.STRUCTURED: 0, ObservationOrigin.TITLE: 1,
                  ObservationOrigin.LEGACY: 2}
 _PHYSICAL = {'tpb': 'tpb', 'trade paperback': 'tpb', 'trade-paperback': 'tpb',
-             'hc': 'hard-cover', 'hardcover': 'hard-cover', 'hard-cover': 'hard-cover'}
+             'hc': 'hard-cover', 'hardcover': 'hard-cover', 'hard-cover': 'hard-cover', 'hard cover': 'hard-cover'}
 _PUBLICATION = {'omnibus': 'omnibus', 'one-shot': 'one-shot', 'oneshot': 'one-shot',
                 'one shot': 'one-shot'}
 _SPECIAL_PHYSICAL = {SpecialVersion.TPB: 'tpb', SpecialVersion.HARD_COVER: 'hard-cover'}
@@ -319,6 +319,22 @@ class _Evaluation:
         packs = set()
         for o in self.observations:
             coverage = o.coverage
+            if o.issue_title:
+                from re import fullmatch
+                def issue_key(value):
+                    match = fullmatch(r'(book|volume|part)\s+(\d+)', title_key(value or ''))
+                    return (match.group(1), int(match.group(2))) if match else None
+                key = issue_key(o.issue_title)
+                matches = [i for i in self.target.catalog if key is not None and issue_key(i.title) == key]
+                if len(matches) == 1:
+                    coverages.setdefault((CoverageKind.SINGLE, (matches[0].raw_number,)), []).append(
+                        self.evidence(o, 'issue_title'))
+                elif len(matches) > 1:
+                    self.add('coverage', Rule.NUMBER_AMBIGUOUS, Outcome.CONFLICT,
+                             (self.evidence(o, 'issue_title'),), State.REVIEW)
+                elif key is not None and all(issue_key(ctx.issues[i].title) is not None for i in ctx.wanted):
+                    self.add('coverage', Rule.ISSUE_WRONG, Outcome.MISMATCH,
+                             (self.evidence(o, 'issue_title'),), State.REJECTED)
             if o.pack not in (PackKind.UNKNOWN, PackKind.SINGLE):
                 packs.add(o.pack)
             if coverage.kind != CoverageKind.UNKNOWN:

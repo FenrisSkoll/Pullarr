@@ -36,12 +36,9 @@ from backend.implementations.comicinfo import MAX_XML, parse_comicinfo
 from backend.implementations.comicinfo_archive import (inspect_comicinfo,
                                                        write_comicinfo)
 from backend.implementations.metadata.registry import PROVIDERS
-from backend.implementations.organization_filesystem import (artifact,
-                                                             execution_gate,
-                                                             matches,
-                                                             rename_no_replace,
-                                                             safe_path,
-                                                             sync_directory)
+from backend.implementations.organization_filesystem import (
+    artifact, cancellation_scope, execution_gate, matches,
+    rename_no_replace, safe_path, sync_directory)
 from backend.implementations.organization_plan import preview_plan
 from backend.internals.organization_jobs import JobStore, canonical, digest
 from backend.internals.organization_plan import load_planning_records
@@ -769,10 +766,27 @@ class OrganizationExecutor:
             self.store.db.execute('DELETE FROM organization_reservations WHERE job_id=?', (job.id,))
             self.store.db.execute('UPDATE organization_jobs SET claim=NULL WHERE id=?', (job.id,))
 
-    def apply_job(self, job_id: str, *, approved_recovery: Optional[str] = None) -> OrganizationJob:
-        with execution_gate(self.store.path):
+    def apply_job(self, job_id: str, *, approved_recovery: Optional[str] = None,
+                  automatic_archive_recovery: bool = False, cancelled=lambda: False) -> OrganizationJob:
+        with execution_gate(self.store.path), cancellation_scope(cancelled):
             job = self.store.get(job_id)
+            if cancelled():
+                return job
             intent = self.store.intent(job_id)
+            if automatic_archive_recovery:
+                from backend.features.organization_archive import ArchiveEffect
+                if job.state == JobState.COMPLETED:
+                    return job
+                # Both proof and execution hold the same cross-process gate.
+                # The durable claim is reclaimed only after the OS proves the
+                # previous worker no longer owns it.
+                ArchiveEffect(self).recovery_admission(job, intent)
+                preview = self._preview_recovery(job_id)
+                if not preview['eligible']:
+                    raise OrganizationError(ExecutionCode.CONFLICT)
+                with self.store.transaction():
+                    self.store.event(job_id, 'archive_automatic_recovery',
+                                     dict(digest=preview['digest']))
             if approved_recovery is not None:
                 # Exact replay is journal correlation, not permission to retry a
                 # newly failed effect. A new attempt needs a fresh preview.
@@ -807,6 +821,8 @@ class OrganizationExecutor:
             try:
                 validation = self._validation(job_id) or self._initial_validation(job, intent)
                 for ordinal in range(len(job.steps)):
+                    if cancelled():
+                        raise OrganizationError(ExecutionCode.CANCELLED)
                     current_ordinal = ordinal
                     job = self.store.get(job_id)
                     self._check_database(job, intent)
@@ -821,7 +837,7 @@ class OrganizationExecutor:
                 self._finish(self.store.get(job_id), intent, validation)
             except (OrganizationError, OSError, sqlite3.Error, ComicInfoError) as error:
                 code = self._error_code(error)
-                state = JobState.RECOVERY if any(s.state != StepState.PENDING for s in self.store.get(job_id).steps) else JobState.FAILED
+                state = JobState.RECOVERY if 'archive_effect' in intent or any(s.state != StepState.PENDING for s in self.store.get(job_id).steps) else JobState.FAILED
                 with self.store.transaction():
                     self.store.state(job_id, state, code)
                     self.store.event(job_id, 'failure', dict(code=code.value, reason=error.detail if isinstance(error, OrganizationError) else ''), current_ordinal)
@@ -870,6 +886,10 @@ class OrganizationExecutor:
             if not reasons:
                 try:
                     self._validate_intent(intent)
+                    if 'archive_effect' in intent:
+                        from backend.features.organization_archive import \
+                            ArchiveEffect
+                        ArchiveEffect(self).recovery_admission(job, intent)
                     from backend.internals.organization_reservations import \
                         load_reservations
                     reservations = load_reservations(self.store.db.cursor())

@@ -110,6 +110,8 @@ class UnifiedReleaseSearch:
             if cancelled():
                 state = SearchState.PARTIAL
             receipt = {'nzb': [{'source': r.source.key, 'state': r.state.value,
+                'attempts': [dict(query=a.request.query[:256], categories=list(a.request.categories),
+                    candidates=list(a.candidate_ids)) for a in r.attempts],
                 'errors': [d.code.value for d in r.diagnostics],
                 'retry_after': max((d.retry_after or 0 for d in r.diagnostics), default=0)} for r in nzb.sources],
                 'ddl': {'state': ddl_result['state'], 'errors': ddl_result['errors']} if ddl_result else None,
@@ -202,10 +204,13 @@ class UnifiedReleaseSearch:
                 'results': [{'selection_id': key, 'explanation': preview_explanation(explain_release(e)),
                     'quality': json.loads(e.quality_receipt) if e.quality_receipt else None,
                     'mechanism': e.candidate.acquisition.mechanism.value,
+                    'discovery': [dict(query=a['query'], categories=a['categories'])
+                        for source in session.source_receipts['nzb']
+                        for a in source.get('attempts', []) if e.candidate.candidate_id in a['candidates']][:3],
                     'blocked': e.candidate.candidate_id in blocked,
                     'operationally_available': e.candidate.candidate_id not in unavailable,
                     'download_eligible': e.state.value == 'compatible' and e.candidate.candidate_id not in unavailable,
-                    'force_eligible': e.candidate.candidate_id in session.ddl_ids and force_available(e)
+                    'force_eligible': e.candidate.candidate_id not in unavailable and force_available(e)
                         and (not e.quality_receipt or json.loads(e.quality_receipt)['result'] not in ('not_allowed','equal','downgrade'))}
                     for key, e in session.selections.items()]}
 

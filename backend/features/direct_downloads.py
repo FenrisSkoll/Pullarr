@@ -52,7 +52,7 @@ def load_target(volume_id: int, issue_id: Optional[int] = None):
     if row is None or volume_id not in snapshot.volumes:
         raise DDLError('target_unavailable')
     rows = get_db().execute('''SELECT i.id,i.date,EXISTS(
-        SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id),d.year
+        SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id),d.year,i.title
         FROM issues i LEFT JOIN issue_number_facts n ON n.issue_id=i.id
         LEFT JOIN issue_date_facts d ON d.issue_id=i.id AND d.source_field=n.selected_date_field
         WHERE i.volume_id=? ORDER BY i.id''', (volume_id,)).fetchall()
@@ -67,6 +67,8 @@ def load_target(volume_id: int, issue_id: Optional[int] = None):
     years.update({r[0]: r[3] for r in rows if r[3] is not None})
     target = build_wanted_target(snapshot, volume_id, ids, kind=kind,
         issue_years=years, owned_issue_ids=tuple(r[0] for r in rows if r[2]))
+    titles = {r[0]: r[4] for r in rows}
+    target = replace(target, catalog=tuple(replace(i, title=titles[i.id]) for i in target.catalog))
     if row[0]:
         target = replace(target, publication=replace(target.publication, aliases=(row[0],)))
     return target

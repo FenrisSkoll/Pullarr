@@ -10,7 +10,8 @@ from dataclasses import replace
 from typing import Optional, Tuple
 
 from backend.base.acquisition_intake import IntakeErrorCode as E, IntakeFailure
-from backend.base.identification import MatchReason, MatchState
+from backend.base.identification import (MatchReason, MatchState,
+                                         PublicationAuthority)
 from backend.base.import_candidate import (CoverageHypothesis, CoverageKind,
                                            DiscoveryScope, EvidenceSource,
                                            MatchHypothesis, Provenance)
@@ -18,7 +19,8 @@ from backend.base.organization_plan import OrganizationBatch, PlanningPolicy
 from backend.features.organization_plan import observe_plan_paths
 from backend.implementations.acquisition_paths import MAX_ARTIFACTS, contained
 from backend.implementations.comicinfo_candidate import enrich_comicinfo
-from backend.implementations.identification import MatchingSnapshot, identify
+from backend.implementations.identification import (MatchingSnapshot, identify,
+                                                    identify_authorized)
 from backend.implementations.import_candidates import observe_import_candidate
 from backend.implementations.metadata.registry import PROVIDERS
 from backend.implementations.organization_plan import (PlanningContext,
@@ -32,11 +34,13 @@ def preview_local_artifacts(
     policy: PlanningPolicy, *, volume_id: Optional[int] = None,
     issue_ids: Tuple[int, ...] = (),
     path_contexts: Optional[dict[str, tuple[DiscoveryScope, int]]] = None,
+    authority: PublicationAuthority = PublicationAuthority.HYPOTHESIS,
 ) -> OrganizationBatch:
     """One shared snapshot and batch collision pass for the declared paths.
 
-    The target is only an alternative and a constraint on admission: actual
-    local evidence must independently produce an AUTOMATIC identification.
+    Ordinary target hints require independent AUTOMATIC identification.
+    Explicit import selections and managed-volume scans instead establish
+    publication authority; conflicts and issue coverage still require evidence.
     Provider-qualified conflicting evidence is retained by Phase 4D. New files
     are never given fabricated DB identity or folder ownership.
     """
@@ -63,11 +67,14 @@ def preview_local_artifacts(
             raise IntakeFailure(E.IDENTIFICATION)
         candidate = observe_import_candidate(path, local_scope, existing=known.get(path))
         if local_target is not None:
-            provenance = Provenance(EvidenceSource.MANUAL, local_scope.run_id, 'local-target-hypothesis/v1')
+            provenance = Provenance(EvidenceSource.MANUAL, local_scope.run_id, authority.value)
             candidate = replace(candidate, alternatives=(MatchHypothesis(
                 local_target.authority, provenance,
                 CoverageHypothesis(CoverageKind.UNKNOWN, provenance), local_target.id),))
-        result = identify(enrich_comicinfo(candidate), matching)
+        candidate = enrich_comicinfo(candidate)
+        result = (identify_authorized(candidate, matching, local_volume, authority)
+                  if authority != PublicationAuthority.HYPOTHESIS and local_volume is not None
+                  else identify(candidate, matching))
         if result.selected is not None and (
                 (local_volume is not None and result.selected.local_volume_id != local_volume)
                 or (issue_ids and not set(result.selected.local_issue_ids).issubset(issue_ids))):

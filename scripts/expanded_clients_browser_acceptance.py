@@ -96,6 +96,13 @@ def main(false_hd=False):
                 with page.expect_response(lambda r:r.request.method=='POST' and '/api/wanted?' in r.url):
                     page.get_by_role('button',name='Search and grab now',exact=True).click()
                 WantedRuntime(DBConnection.default_file,server.app).tick()
+                assert remote['submitted']==0
+                page.goto(origin + '/volumes/1')
+                page.locator('#issues-list tr[data-id="1"] .action-column button').nth(1).click()
+                page.get_by_label('Sort results').select_option('source_desc')
+                page.get_by_label('Sort results').select_option('source_asc')
+                page.locator('#manual-search-window').get_by_role('button',name='Download',exact=True).click()
+                page.get_by_text('Dispatched to the download queue.',exact=True).wait_for()
                 assert remote['submitted']==1
                 remote['completed']=True
                 downloads=DownloadStore(DBConnection.default_file)
@@ -147,7 +154,7 @@ def main(false_hd=False):
                 browser.close()
             assert not errors,errors
             assert not external,external
-            print(f'Expanded clients Chromium PASS (false-HD={false_hd}): desktop/narrow keyboard Settings/Test, masked secrets, hostile text, Wanted torrent acquisition, seeding/import separation and reviewed cleanup; zero unexpected browser errors/external requests')
+            print(f'Expanded clients Chromium PASS (false-HD={false_hd}): desktop/narrow keyboard Settings/Test, masked secrets, hostile text, automatic torrent abstention, manual source sorting/download, seeding/import separation and reviewed cleanup; zero unexpected browser errors/external requests')
         finally:
             http.shutdown()
 

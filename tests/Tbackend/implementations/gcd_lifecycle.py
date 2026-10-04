@@ -220,7 +220,9 @@ class GcdLifecycleTests(GcdLifecycleHarness, TestCase):
         self.addCleanup(_sessions.clear)
         self.fake.issues['1']['number'] = '1A'
         local = self.add_gcd()
-        source = self.root / 'Example 1A (2021).cbz'
+        folder = Path(self.db.execute('SELECT folder FROM volumes WHERE id=?',(local,)).fetchone()[0])
+        folder.mkdir(parents=True,exist_ok=True)
+        source = folder / 'Example 1A (2021).cbz'
         with ZipFile(source, 'w') as archive:
             archive.writestr('page.jpg', b'disposable comic')
             archive.writestr('ComicInfo.xml', '<ComicInfo><Series>Example</Series><Number>1A</Number><Year>2021</Year></ComicInfo>')

@@ -21,12 +21,15 @@ def now():
 
 
 def intent_receipt(intent: GrabIntent) -> dict:
-    return dict(request_id=intent.request_id, evaluation_id=intent.evaluation_id,
+    result = dict(request_id=intent.request_id, evaluation_id=intent.evaluation_id,
         candidate_id=intent.candidate_id, source_key=intent.source_key, resolver_key=intent.resolver_key,
         volume_id=intent.volume_id, issue_ids=intent.issue_ids, target_digest=intent.target_digest,
         scoring_fingerprint=intent.scoring_fingerprint, title=intent.title, source_name=intent.source_name,
         client_id=intent.client_id, client_instance=intent.client_instance, category=intent.category,
         priority=intent.priority, policy=intent.policy, client_kind=intent.client_kind, protocol=intent.protocol)
+    if intent.authorization != 'manual':
+        result['authorization'] = intent.authorization
+    return result
 
 
 class DownloadStore:

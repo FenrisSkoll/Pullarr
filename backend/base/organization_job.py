@@ -22,6 +22,7 @@ class StepState(Enum):
 
 
 class ExecutionCode(Enum):
+    CANCELLED = 'cancelled'
     NOT_AUTHORIZED = 'plan_not_ready'
     STALE = 'stale_plan_replan_required'
     SOURCE = 'source_missing_or_changed'

@@ -120,6 +120,7 @@ class GrabIntent:
     policy: str = DOWNLOAD_POLICY
     client_kind: str = 'sabnzbd'
     protocol: str = 'nzb'
+    authorization: str = 'manual'
 
 
 @dataclass(frozen=True)

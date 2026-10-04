@@ -10,11 +10,24 @@ import os
 import stat
 import sys
 from contextlib import contextmanager
+from contextvars import ContextVar
 from hashlib import sha256
 from pathlib import Path
 from typing import Iterator
 
 from backend.base.organization_job import ExecutionCode, OrganizationError
+
+_cancelled = ContextVar('organization_cancelled', default=lambda: False)
+
+
+@contextmanager
+def cancellation_scope(callback):
+    """Worker-local cancellation, including nested evidence hashing."""
+    token = _cancelled.set(callback)
+    try:
+        yield
+    finally:
+        _cancelled.reset(token)
 
 
 def comparison_ctime(value: os.stat_result) -> int:
@@ -42,7 +55,7 @@ def safe_path(path: str) -> None:
             raise OrganizationError(ExecutionCode.UNSAFE_PATH)
 
 
-def artifact(path: str) -> dict:
+def artifact(path: str, *, cancelled=lambda: False) -> dict:
     safe_path(path)
     before = os.stat(path, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode) or before.st_ino == 0:
@@ -53,6 +66,8 @@ def artifact(path: str) -> dict:
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
             raise OrganizationError(ExecutionCode.SOURCE)
         while True:
+            if cancelled() or _cancelled.get()():
+                raise OrganizationError(ExecutionCode.CANCELLED)
             block = stream.read(1024 * 1024)
             if not block:
                 break
