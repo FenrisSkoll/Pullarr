@@ -1,7 +1,14 @@
 # Release notes
 
-## Unreleased — Library Import review hardening (local only)
+## 1.5.3 — Library Import review and verified completion
 
+- Discover local CBR/CBZ files without requiring a metadata match. Choose the
+  exact ComicVine, Metron or GCD publication, inspect its real issue catalogue,
+  and review each file's suggested or manually chosen issue on one page.
+- Preview each canonical destination before applying. Import transfers and
+  verifies the archive with its original filename; Import and Rename also uses
+  the configured naming policy. Mixed publications and partial batches retain
+  per-file results and journal recovery.
 - Retire publication-only mutating import routes with an actionable `410`;
   preserve read-only discovery and explicit Add Comics.
 - Save versioned Library Import review rows and receipts in schema 73. Reopen
@@ -13,7 +20,14 @@
 - Offer explicit post-import archive maintenance review for completed CBR files;
   ordinary Library Import preserves the original container.
 - Apply folder policy to newly created managed directories and add Linux-only
-  setgid/POSIX ACL acceptance tests. SMB access still needs a manual client check.
+  setgid/POSIX ACL acceptance tests. These Linux ACL tests were not run on the
+  Windows release workstation; effective Unraid ACLs and Windows SMB write access
+  still need a manual check with copied media before use on the live library.
+- Schema 73 adds persistent import drafts. Back up the complete Pullarr appdata
+  database directory, including SQLite WAL/SHM files, before upgrading. A
+  rollback to 1.5.2 requires its matching pre-upgrade database backup; changing
+  the image alone does not downgrade the database. The schema migration does
+  not scan, import, rename or convert existing comics.
 
 ## 1.5.2 — local matching and Library Import reliability
 

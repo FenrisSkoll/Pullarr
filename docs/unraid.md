@@ -183,13 +183,24 @@ torrent and does not modify a seeded source inode in place.
 
 Back up Pullarr appdata before upgrades.
 
-For filesystem-level copies, stop Pullarr first, or use the supported application
-backup flow where appropriate.
+For the 1.5.3 upgrade, record the actual host path mapped to `/app/db` in the
+container settings (the supplied template defaults to
+`/mnt/user/appdata/pullarr/db`). Stop Pullarr in the Unraid Docker UI, then copy
+that **entire** database directory to a dated location outside appdata, including
+`Kapowarr.db` and any `Kapowarr.db-wal`/`Kapowarr.db-shm` files. Verify the
+backup is readable and keep the existing 1.5.2 image available. Schema 73 is
+additive, but a downgrade requires stopping 1.5.3, restoring the matching
+pre-upgrade database directory, and starting 1.5.2; switching image tags alone
+cannot reverse the migration. Protect the backup because it contains settings
+and credentials. Back up the media separately.
 
-Protect library media separately from appdata.
-
-Existing databases migrate during normal startup. Do not run two Pullarr
-instances against the same database.
+After making the backup, use the Unraid Docker UI to update Pullarr from the
+stable `latest` image, then start it with the same paths and PUID/PGID. Inspect
+startup logs, settings, Library Import drafts and a few existing library records
+before using Import. The migration does not scan or alter comics. Already
+authorised unfinished organisation or maintenance jobs can resume during normal
+startup, so inspect their recovery state before the upgrade if no continuation
+is desired. Do not run old and new instances against the same database.
 
 Community Applications image updates will use deliberately maintained stable
 `latest` releases, with immutable version and commit tags available for

@@ -58,5 +58,6 @@ one database concurrently. If rollback is necessary, stop the new application,
 restore a matching verified pre-upgrade database backup and use the old image.
 Do not simply downgrade the image while retaining a newer schema.
 
-The compatibility database filename is `Kapowarr.db`; keep it unchanged. No
-publication hardening migration is required (schema72).
+The compatibility database filename is `Kapowarr.db`; keep it unchanged.
+Schema 73 adds import review tables and does not change existing comic file
+ownership during migration.

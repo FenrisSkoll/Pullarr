@@ -50,7 +50,7 @@ docker compose -f docker-compose.pullarr.yml up -d
 
 Open **http://127.0.0.1:5658**. The example exposes only the host's loopback
 interface and uses persistent named volumes. Add `/comics` as a library root.
-There is no published Pullarr image or project host URL assumed by these files.
+The stable image reference is `ghcr.io/fenrisskoll/pullarr:latest`.
 
 Set authentication in **Settings → General → Security** before permitting any
 other machine to connect. A fresh installation has no login password: anyone who
