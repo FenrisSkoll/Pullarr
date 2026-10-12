@@ -132,7 +132,7 @@ def run(version):
         with closing(sqlite3.connect(database)) as db:
             assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
             assert not db.execute('PRAGMA foreign_key_check').fetchall()
-        print(json.dumps(dict(start=version,schema=72,reopen=True,acquisition='missing/upgrade/false-HD',integrity='ok',errors=0)),flush=True)
+        print(json.dumps(dict(start=version,schema=73,reopen=True,acquisition='missing/upgrade/false-HD',integrity='ok',errors=0)),flush=True)
 
 
 if __name__=='__main__':

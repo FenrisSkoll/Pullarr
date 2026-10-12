@@ -111,7 +111,7 @@ def main(image, browser=False):
         logs = docker('logs',identifier)
         assert key not in logs and 'Traceback' not in logs and ' ERROR' not in logs
         layers = audit_layers(image)
-        print(json.dumps(dict(image=image, schema=72, restart=True, recreation=True, browser_errors=len(errors),
+        print(json.dumps(dict(image=image, schema=73, restart=True, recreation=True, browser_errors=len(errors),
                               archive_smoke=archive, app_layer_files_checked=layers, clean_layers=True)))
     finally:
         subprocess.run(['docker','rm','-f',identifier],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

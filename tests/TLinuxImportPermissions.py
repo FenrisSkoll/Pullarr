@@ -43,6 +43,8 @@ class LinuxImportPermissionTests(ImportHarness, TestCase):
         self.settings.chown_group = group_name
         permissions = self.start_patch('backend.features.managed_permissions.Settings').return_value
         permissions.sv = self.settings
+        self.db.executemany('INSERT OR REPLACE INTO config(key,value) VALUES(?,?)',
+                            [('chmod_folder', '775'), ('chown_group', group_name)])
         self.db.execute("UPDATE config SET value=? WHERE key='volume_folder_naming'",
                         (self.settings.volume_folder_naming,))
         self.db.commit()

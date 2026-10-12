@@ -20,9 +20,10 @@
 - Offer explicit post-import archive maintenance review for completed CBR files;
   ordinary Library Import preserves the original container.
 - Apply folder policy to newly created managed directories and add Linux-only
-  setgid/POSIX ACL acceptance tests. These Linux ACL tests were not run on the
-  Windows release workstation; effective Unraid ACLs and Windows SMB write access
-  still need a manual check with copied media before use on the live library.
+  setgid/POSIX ACL acceptance tests. These real ACL tests were skipped on
+  Windows and in the hosted Linux test image, which lacks `setfacl`/`getfacl`.
+  Effective Unraid ACLs and Windows SMB write access still need a manual check
+  with copied media before use on the live library.
 - Read permission settings from the executing journal's database for Linux
   background jobs, including recovery outside a web request.
 - Preserve high unsigned Windows file IDs when storing folder-monitor evidence

@@ -119,7 +119,7 @@ def main(image, template=None, browser=False):
         assert image_info['Architecture']=='amd64' and image_info['Os']=='linux'
         print(json.dumps(dict(image=image_info['Id'],architecture='linux/amd64',bytes=image_info['Size'],
             template_derived=True,uid=99,gid=100,bridge=True,privileged=False,fixtures=fixture,
-            restart=True,recreation=True,migration='71-to-72',health='healthy',browser_errors=errors,
+            restart=True,recreation=True,migration='71-to-73',health='healthy',browser_errors=errors,
             image_layer_files=audit_layers(image))))
     finally:
         subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
