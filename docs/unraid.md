@@ -195,16 +195,17 @@ torrent and does not modify a seeded source inode in place.
 
 Back up Pullarr appdata before upgrades.
 
-For the 1.5.4 upgrade, record the actual host path mapped to `/app/db` in the
+For the 1.5.5 upgrade, record the actual host path mapped to `/app/db` in the
 container settings (the supplied template defaults to
 `/mnt/user/appdata/pullarr/db`). Stop Pullarr in the Unraid Docker UI, then copy
 that **entire** database directory to a dated location outside appdata, including
 `Kapowarr.db` and any `Kapowarr.db-wal`/`Kapowarr.db-shm` files. Verify the
-backup is readable and keep the existing 1.5.2 image available. Schema 73 is
-additive, but a downgrade requires stopping 1.5.4, restoring the matching
-pre-upgrade database directory, and starting 1.5.2; switching image tags alone
-cannot reverse the migration. Protect the backup because it contains settings
-and credentials. Back up the media separately.
+backup is readable and keep the previously running image available. Version
+1.5.5 keeps schema 73, which was introduced in 1.5.4. A rollback from an
+older pre-schema-73 version requires stopping Pullarr, restoring its matching
+pre-upgrade database directory, and starting that older image; switching image
+tags alone cannot reverse the migration. Protect the backup because it contains
+settings and credentials. Back up the media separately.
 
 After making the backup, use the Unraid Docker UI to update Pullarr from the
 stable `latest` image, then start it with the same paths and PUID/PGID. Inspect

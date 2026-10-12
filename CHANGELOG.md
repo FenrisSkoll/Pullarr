@@ -1,5 +1,24 @@
 # Release notes
 
+## 1.5.5 — Unraid Library Import relocation recovery
+
+- When an Unraid user share rejects the exclusive rename used by a reviewed
+  Library Import, use the existing journalled verified-copy transfer. The
+  destination is created without overwriting, its bytes and identity are
+  verified, and the source is retired only after guarded identity and database
+  authority checks.
+- Previously interrupted `unsupported_operation` imports can be inspected in
+  **Maintenance → History → Review Recovery** and continued only after their
+  recorded file, destination, publication and issue still validate. Do not
+  start a second import or manually overwrite an occupied destination.
+- Database schema remains 73; no migration, automatic library scan, rename or
+  conversion is added. Back up Pullarr's complete database directory and the
+  original archive before updating. Confirm the recorded job in Review Recovery
+  before continuing it.
+- The exact Unraid `shfs`/FUSE syscall error and live SMB/ACL behavior have not
+  been verified on the user's server. Validate with copied media before using
+  recovery on original files.
+
 ## 1.5.4 — Library Import review and verified completion
 
 The v1.5.3 source tag was created, but v1.5.3 was never successfully published
