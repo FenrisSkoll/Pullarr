@@ -20,13 +20,21 @@ from backend.implementations.organization_filesystem import (execution_gate,
                                                              safe_path)
 
 
+def _sqlite_identity(value: int) -> int:
+    """Store unsigned 64-bit Windows file IDs bijectively in SQLite INTEGER."""
+    if not 0 <= value < 1 << 64:
+        raise ValueError('Filesystem identity outside 64-bit range')
+    return value if value < 1 << 63 else value - (1 << 64)
+
+
 def stamp(path: str) -> PathStamp:
     safe_path(path)
     value = os.lstat(path)
     if not (S_ISREG(value.st_mode) or S_ISDIR(value.st_mode)):
         raise ValueError('Unsupported filesystem entry')
-    return PathStamp(path, value.st_size, value.st_mtime_ns, value.st_dev,
-                     value.st_ino, S_ISDIR(value.st_mode))
+    return PathStamp(path, value.st_size, value.st_mtime_ns,
+                     _sqlite_identity(value.st_dev), _sqlite_identity(value.st_ino),
+                     S_ISDIR(value.st_mode))
 
 
 def relevant(name: str) -> bool:

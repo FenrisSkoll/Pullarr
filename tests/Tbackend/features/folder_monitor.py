@@ -2,9 +2,11 @@
 
 import os
 import sqlite3
+import stat
 from dataclasses import fields, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -14,8 +16,8 @@ from Tbackend.features.organization_plan import NAMING
 from backend.base.folder_monitor import (ChangeKind, MonitorLimits,
                                          MonitorObservation, ObservationSource,
                                          ReevaluationResult)
-from backend.features.folder_monitor import (FolderMonitor,
-                                             monitoring_status, relevant)
+from backend.features.folder_monitor import (FolderMonitor, monitoring_status,
+                                             relevant, stamp)
 from backend.features.library_reconciliation import LibraryReconciler
 from backend.features.monitor_runtime import MonitorRuntime
 from backend.internals.db import DB_SCHEMA
@@ -24,6 +26,18 @@ from backend.internals.monitor_schema import SCHEMA
 
 
 class MonitoringTests(TestCase):
+    def test_unsigned_windows_file_id_remains_distinct_and_sqlite_safe(self):
+        high = (1 << 63) + 17
+        info = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_size=3,
+                               st_mtime_ns=7, st_dev=1, st_ino=high)
+        with patch('backend.features.folder_monitor.safe_path'), \
+                patch('backend.features.folder_monitor.os.lstat', return_value=info):
+            observed = stamp('synthetic.cbz')
+        self.assertEqual(observed.inode, high - (1 << 64))
+        self.assertNotEqual(observed.inode, 17)
+        self.assertEqual(self.db.execute('SELECT ?', (observed.inode,)).fetchone()[0],
+                         observed.inode)
+
     def setUp(self):
         parent = Path(__file__).resolve().parents[3] / '.devdata'
         parent.mkdir(exist_ok=True)
@@ -486,14 +500,25 @@ class MonitoringTests(TestCase):
         self.assertEqual(self.processed, [])
 
     def test_db_only_admission_cannot_call_filesystem_mutators(self):
+        import shutil
         from contextlib import ExitStack
         self.managed_library()
         self.comic()
         self.monitor.tick(0)
+        def scoped_guard(name, operation):
+            def call(*args, **kwargs):
+                for value in args[:2]:
+                    if isinstance(value, (str, os.PathLike)) and Path(value).absolute().is_relative_to(self.root):
+                        raise AssertionError('Unauthorized library mutation: ' + name)
+                return operation(*args, **kwargs)
+            return call
         with ExitStack() as guards:
-            for name in ('os.rename', 'os.unlink', 'os.mkdir', 'shutil.move', 'shutil.copy2',
-                         'backend.features.organization_execution.write_comicinfo'):
-                guards.enter_context(patch(name, side_effect=AssertionError('Unauthorized mutation: ' + name)))
+            for module, name in ((os, 'rename'), (os, 'unlink'), (os, 'mkdir'),
+                                 (shutil, 'move'), (shutil, 'copy2')):
+                guards.enter_context(patch.object(module, name,
+                    side_effect=scoped_guard(name, getattr(module, name))))
+            guards.enter_context(patch('backend.features.organization_execution.write_comicinfo',
+                side_effect=AssertionError('Unauthorized ComicInfo write')))
             self.monitor.tick(3)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 1)
 

@@ -92,7 +92,7 @@ def main(image, template=None, browser=False):
             if json.loads(docker('inspect',name))[0]['State']['Health']['Status']=='healthy': break
             time.sleep(.5)
         else: raise AssertionError('Healthcheck did not become healthy')
-        probe = "import sqlite3;from pathlib import Path;d=sqlite3.connect('/app/db/Kapowarr.db');assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==72;assert d.execute('SELECT folder FROM root_folders').fetchone()[0].startswith('/data/');assert all((p.stat().st_uid,p.stat().st_gid)==(99,100) for root in ('/app/db','/app/logs','/app/temp_downloads') for p in Path(root).rglob('*') if p.is_file());print('schema72 ownership integrity PASS')"
+        probe = "import sqlite3;from pathlib import Path;d=sqlite3.connect('/app/db/Kapowarr.db');assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==73;assert d.execute('SELECT folder FROM root_folders').fetchone()[0].startswith('/data/');assert all((p.stat().st_uid,p.stat().st_gid)==(99,100) for root in ('/app/db','/app/logs','/app/temp_downloads') for p in Path(root).rglob('*') if p.is_file());print('schema73 ownership integrity PASS')"
         docker('exec','--user','99:100',name,'python','-c',probe)
         docker('stop','--time','45',name)
         assert json.loads(docker('inspect',name))[0]['State']['ExitCode']==0

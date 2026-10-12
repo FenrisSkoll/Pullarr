@@ -25,6 +25,8 @@
   still need a manual check with copied media before use on the live library.
 - Read permission settings from the executing journal's database for Linux
   background jobs, including recovery outside a web request.
+- Preserve high unsigned Windows file IDs when storing folder-monitor evidence
+  in SQLite, avoiding an overflow on some NTFS directories.
 - Schema 73 adds persistent import drafts. Back up the complete Pullarr appdata
   database directory, including SQLite WAL/SHM files, before upgrading. A
   rollback to 1.5.2 requires its matching pre-upgrade database backup; changing
