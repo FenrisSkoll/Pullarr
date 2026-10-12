@@ -1,6 +1,10 @@
 # Release notes
 
-## 1.5.3 — Library Import review and verified completion
+## 1.5.4 — Library Import review and verified completion
+
+The v1.5.3 source tag was created, but v1.5.3 was never successfully published
+as a GitHub release or container image. v1.5.4 supersedes that unpublished
+candidate; the existing v1.5.3 tag remains unchanged.
 
 - Discover local CBR/CBZ files without requiring a metadata match. Choose the
   exact ComicVine, Metron or GCD publication, inspect its real issue catalogue,
