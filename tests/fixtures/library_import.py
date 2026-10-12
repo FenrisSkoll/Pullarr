@@ -1,6 +1,7 @@
 """Disposable import filesystem, real SQLite, parser, scan and rename."""
 
 from os import sep
+from os.path import getsize
 
 from fixtures.comicvine_fetch import LibraryAddHarness, issue_response
 
@@ -16,7 +17,6 @@ class ImportHarness(LibraryAddHarness):
         roots = self.start_patch('backend.features.library_import.RootFolders').return_value
         roots.get_folder_list.return_value = [folder]
         roots.get_all.return_value = [RootFolder(1, folder, None)]
-        self.start_patch('backend.features.library_import.commit', side_effect=self.db.commit)
         self.start_patch('backend.features.quality.get_db', side_effect=self.db.cursor)
         self.start_patch('backend.implementations.file_matching.get_db', side_effect=self.db.cursor)
         settings = self.start_patch('backend.implementations.file_matching.Settings').return_value
@@ -34,3 +34,23 @@ class ImportHarness(LibraryAddHarness):
         return self.db.execute('''SELECT f.filepath,i.id,i.comicvine_id FROM files f
             JOIN issues_files b ON b.file_id=f.id JOIN issues i ON i.id=b.issue_id
             ORDER BY i.id,f.filepath''').fetchall()
+
+    def fixture_owned_file(self, path, issue_ids=('301',), provider='comicvine'):
+        """Explicit SQLite setup for reader tests; never invokes retired import."""
+        external_volume = '2127' if provider == 'comicvine' else '700'
+        existing = self.db.execute('''SELECT volume_id FROM volume_external_ids
+            WHERE provider=? AND provider_id=?''', (provider, external_volume)).fetchone()
+        volume_id = existing[0] if existing else (
+            self.add_volume() if provider == 'comicvine' else self.add_metron())
+        file_id = self.db.execute('INSERT INTO files(filepath,size) VALUES(?,?)',
+                                  (path, getsize(path))).lastrowid
+        for external in issue_ids:
+            row = self.db.execute('''SELECT e.issue_id FROM issue_external_ids e
+                JOIN issues i ON i.id=e.issue_id WHERE i.volume_id=? AND e.provider=?
+                AND e.provider_id=?''', (volume_id,provider,str(external))).fetchone()
+            if row is None:
+                raise AssertionError(f'Missing fixture issue {provider}:{external}')
+            self.db.execute('INSERT INTO issues_files(file_id,issue_id) VALUES(?,?)',
+                            (file_id,row[0]))
+        self.db.commit()
+        return volume_id, file_id

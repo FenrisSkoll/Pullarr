@@ -782,7 +782,9 @@ class Volume:
             )
 
         if Settings().sv.create_empty_volume_folders:
-            create_folder(new_folder)
+            from backend.features.managed_permissions import \
+                create_managed_folder
+            create_managed_folder(new_folder)
 
         mass_process_files(self.id)
 
@@ -840,7 +842,9 @@ class Volume:
         })
 
         if Settings().sv.create_empty_volume_folders:
-            create_folder(new_volume_folder)
+            from backend.features.managed_permissions import \
+                create_managed_folder
+            create_managed_folder(new_volume_folder)
 
         # Delete old folder if possible
         if isdir(new_volume_folder) and folder_is_inside_folder(
@@ -1401,24 +1405,14 @@ class Library:
             # transaction. Other organizer callers retain explicit adoption.
             if import_destination:
                 from backend.features.managed_permissions import \
-                    apply_managed_permissions
+                    create_managed_folder
                 from backend.implementations.acquisition_paths import contained
                 folder = contained(generate_volume_folder_path(root_folder.folder, volume.get_data()), root_folder.folder)
                 owners = cursor.execute("SELECT folder FROM volumes WHERE id<>? AND folder<>''", (volume_id,)).fetchall()
                 if any(normcase(realpath(row[0])) == normcase(realpath(folder)) for row in owners):
                     raise ValueError('Import destination already has a publication owner')
                 # Required for incoming files, independent of empty-folder precreation.
-                missing = []
-                current = folder
-                while not isdir(current):
-                    missing.append(current)
-                    parent = dirname(current)
-                    if parent == current:
-                        raise ValueError('Import destination parent is unavailable')
-                    current = parent
-                create_folder(folder)
-                for created in reversed(missing):
-                    apply_managed_permissions(created, directory=True)
+                create_managed_folder(folder)
             elif organizer_registration and volume_folder is not None:
                 from backend.implementations.acquisition_paths import contained
                 folder = contained(volume_folder, root_folder.folder)
@@ -1436,7 +1430,9 @@ class Library:
             volume.update({'folder': folder})
 
             if fetched.snapshot is None and not organizer_registration and Settings().sv.create_empty_volume_folders:
-                create_folder(folder)
+                from backend.features.managed_permissions import \
+                    create_managed_folder
+                create_managed_folder(folder)
                 scan_files(volume_id)
 
             volume.apply_monitor_scheme(monitor_scheme)

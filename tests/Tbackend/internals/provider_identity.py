@@ -8,8 +8,8 @@ from fixtures.comicvine_search import volume_response
 from fixtures.metadata_refresh import RefreshHarness
 
 from backend.base.definitions import RootFolder
-from backend.features.library_import import import_library
-from backend.implementations.volumes import Issue, Volume
+from backend.implementations.metadata.persistence import ProviderVolumeIdentity
+from backend.implementations.volumes import Issue, Library, Volume
 from backend.internals.provider_identity import (ExternalIdentity,
                                                  ProviderIdentityDB)
 
@@ -198,12 +198,7 @@ class IdentityShadows(RefreshHarness, TestCase):
         roots = self.start_patch(
             'backend.features.library_import.RootFolders').return_value
         roots.get_all.return_value = [RootFolder(1, str(self.root), None)]
-        self.start_patch(
-            'backend.features.library_import.commit',
-            side_effect=self.db.commit)
-        self.start_patch('backend.features.library_import.scan_files')
-        import_library(
-            [{'id': 9001, 'filepath': str(self.root / 'import' / 'issue.cbz')}])
+        Library.add_metadata(ProviderVolumeIdentity('comicvine', '9001'), 1, True)
         self.assertEqual(self.db.execute(
             'SELECT COUNT(*) FROM volume_external_ids').fetchone()[0], 2)
         self.assertEqual(ProviderIdentityDB.audit(), [])

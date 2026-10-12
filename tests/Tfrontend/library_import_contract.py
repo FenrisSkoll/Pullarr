@@ -1,4 +1,4 @@
-"""Legacy import transport and manual ComicVine search, before Phase 2B."""
+"""Retired mutating import transport and read-only manual ComicVine search."""
 
 from unittest import TestCase
 
@@ -26,19 +26,20 @@ class ImportAPIHarness(ImportHarness):
 
 
 class ImportAPIContract(ImportAPIHarness, TestCase):
-    def test_legacy_payload_remote_integer_id_and_success_shape(self):
+    def test_legacy_payload_remote_integer_id_is_rejected_before_writes(self):
         path = self.comic_file()
         response = self.post_import([{'filepath': path, 'id': 2127}])
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.get_json(), {'error': None, 'result': {}})
-        self.assertEqual(self.bindings(), [(path, 1, 301)])
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.get_json()['result']['code'], 'legacy_import_requires_review')
+        self.assertEqual(self.bindings(), [])
+        self.assertEqual(self.rows('volumes'), [])
 
     def test_invalid_proposal_rejected_before_writes(self):
         for data in ({}, ['invalid'], [{'id': 2127}], [{'filepath': 'missing'}]):
-            self.assertEqual(self.post_import(data).status_code, 400)
+            self.assertEqual(self.post_import(data).status_code, 410)
         self.assertEqual(self.rows('volumes'), [])
 
-    def test_manual_comicvine_search_result_can_be_imported(self):
+    def test_manual_comicvine_search_result_requires_reviewed_import(self):
         path = self.comic_file()
         self.response.json.side_effect = None
         self.response.json.return_value = envelope([volume_response()])
@@ -51,5 +52,5 @@ class ImportAPIContract(ImportAPIHarness, TestCase):
         from fixtures.comicvine_fetch import issue_response
         self.prepare_fetch(issues=[issue_response(), issue_response(id=302, issue_number='2')])
         response = self.post_import([{'filepath': path, 'id': result['comicvine_id']}])
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(len(self.bindings()), 1)
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(len(self.bindings()), 0)

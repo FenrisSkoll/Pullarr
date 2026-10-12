@@ -34,6 +34,7 @@ class ManagedPermissionTests(TestCase):
             getxattr=lambda path, key, **kw: state.access if key.endswith('access') else state.default,
             setxattr=lambda path, key, value, **kw: setattr(state, 'access', bytes(value)))
         with patch.object(policy, 'os', fake), patch.object(policy, 'sys', SimpleNamespace(platform='linux')), \
+                patch.object(policy, '_open_nofollow', side_effect=lambda path, directory: fake.open(path,64|128|256)), \
                 patch.object(policy, 'Settings', return_value=SimpleNamespace(
                     sv=SimpleNamespace(chmod_folder='775', chown_group='100'))):
             policy.apply_managed_permissions('/root/folder', directory=True)
@@ -55,6 +56,7 @@ class ManagedPermissionTests(TestCase):
             getxattr=lambda *a, **kw: acl(),
             setxattr=lambda *a, **kw: (_ for _ in ()).throw(PermissionError('denied')))
         with patch.object(policy, 'os', fake), patch.object(policy, 'sys', SimpleNamespace(platform='linux')), \
+                patch.object(policy, '_open_nofollow', return_value=9), \
                 patch.object(policy, 'Settings', return_value=SimpleNamespace(
                     sv=SimpleNamespace(chmod_folder='775', chown_group='100'))):
             with self.assertRaises(OrganizationError) as raised:

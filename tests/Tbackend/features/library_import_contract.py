@@ -57,70 +57,17 @@ class ImportContract(ImportHarness, TestCase):
             with self.assertRaises(InvalidKeyValue):
                 propose_library_import()
 
-    def test_plain_import_keeps_file_and_maps_local_issue(self):
+    def test_retired_mutating_import_requires_review_for_every_legacy_shape(self):
         path = self.comic_file()
-        import_library([{'id': 2127, 'filepath': path}])
+        for payload in ([{'id': 2127, 'filepath': path}],
+                        [{'id': '2127', 'filepath': path}],
+                        [{'id': 2127, 'filepath': path}] * 2):
+            with self.subTest(payload=payload), self.assertRaisesRegex(
+                    ValueError, 'legacy_import_requires_review'):
+                import_library(payload)
+        with self.assertRaisesRegex(ValueError, 'legacy_import_requires_review'):
+            import_library([{'id': 2127, 'filepath': path}], rename_files=True)
         self.assertTrue(Path(path).is_file())
-        self.assertEqual(self.bindings(), [(path, 1, 301)])
-        self.assertEqual(Path(Volume(1).get_data().folder), Path(path).parent)
-
-    def test_rename_moves_and_maps_file_without_changing_contents(self):
-        path = self.comic_file()
-        content = Path(path).read_bytes()
-        import_library([{'id': 2127, 'filepath': path}], rename_files=True)
-        binding = self.bindings()[0]
-        self.assertEqual(binding[1:], (1, 301))
-        self.assertNotEqual(binding[0], path)
-        self.assertEqual(Path(binding[0]).read_bytes(), content)
-        self.assertFalse(Path(path).exists())
-
-    def test_same_remote_id_groups_two_files_into_one_volume(self):
-        paths = [self.comic_file(), self.comic_file(name='Example Hero v2 #2 (2021).cbz')]
-        self.prepare_fetch(issues=[issue_response(), issue_response(id=302, issue_number='2')])
-        import_library([{'id': 2127, 'filepath': p} for p in paths])
-        self.assertEqual(len(self.rows('volumes')), 1)
-        self.assertEqual(len(self.bindings()), 2)
-
-    def test_duplicate_identical_path_retains_existing_common_folder_failure(self):
-        path = self.comic_file()
-        # common_folder sees identical paths as the common path, not its parent.
-        with self.assertRaises(FileExistsError):
-            import_library([{'id': 2127, 'filepath': path}] * 2)
-        self.assertEqual(len(self.rows('volumes')), 0)
-        self.assertTrue(Path(path).is_file())
-
-    def test_existing_volume_moves_new_file_without_metadata_fetch(self):
-        local = self.add_volume()
-        path = self.comic_file()
-        self.session.get.reset_mock()
-        import_library([{'id': 2127, 'filepath': path}])
-        self.assertFalse(Path(path).exists())
-        self.assertEqual(len(self.rows('volumes')), 1)
-        self.assertEqual(Path(self.bindings()[0][0]).parent, Path(Volume(local).get_data().folder))
+        self.assertEqual(self.rows('volumes'), [])
+        self.assertEqual(self.bindings(), [])
         self.session.get.assert_not_called()
-
-    def test_legacy_decimal_string_is_comicvine_identity(self):
-        path = self.comic_file()
-        import_library([{'id': '2127', 'filepath': path}])
-        self.assertEqual(Volume(1).get_data().comicvine_id, 2127)
-
-    def test_cv_not_found_skips_and_rate_limit_stops_without_moving(self):
-        path = self.comic_file()
-        for error in (VolumeNotMatched(), MetadataSourceRateLimitReached()):
-            with patch('backend.implementations.metadata.comicvine.ComicVine.fetch_volume',
-                       new=AsyncMock(side_effect=error)):
-                import_library([{'id': 2127, 'filepath': path}], rename_files=True)
-            self.assertTrue(Path(path).is_file())
-            self.assertEqual(self.rows('volumes'), [])
-
-    def test_outside_root_is_skipped(self):
-        path = str(self.root.parent / 'outside' / 'test.cbz')
-        import_library([{'id': 2127, 'filepath': path}])
-        self.session.get.assert_not_called()
-
-    def test_automatic_proposal_can_be_imported_unchanged(self):
-        self.comic_file()
-        with self.proposals():
-            rows = propose_library_import()
-        import_library([{'id': r['cv']['id'], 'filepath': r['filepath']} for r in rows])
-        self.assertEqual(len(self.bindings()), 1)

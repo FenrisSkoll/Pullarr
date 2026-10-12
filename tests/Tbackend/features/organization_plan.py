@@ -524,7 +524,7 @@ class PlanningAcquisitionTests(ImportHarness, TestCase):
 
     def test_real_preview_readonly_bounded_queries(self):
         path = self.comic_file()
-        import_library([{'id': 2127, 'filepath': path}])
+        self.fixture_owned_file(path)
         # Matching can be supplied separately; no automatic matching/provider in preview.
         r = identified()
         r = replace(r, candidate=replace(r.candidate, file=replace(r.candidate.file, path=path,
@@ -550,7 +550,7 @@ class PlanningAcquisitionTests(ImportHarness, TestCase):
 
     def test_bulk_query_count_not_per_candidate(self):
         path = self.comic_file()
-        import_library([{'id': 2127, 'filepath': path}])
+        self.fixture_owned_file(path)
         r = identified()
         r = replace(r, candidate=replace(r.candidate, file=replace(r.candidate.file, path=path)),
                     selected=replace(r.selected, provider_identity=reference('2127')))

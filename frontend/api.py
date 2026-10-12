@@ -26,8 +26,7 @@ from backend.base.logging import LOGGER, get_log_file_contents
 from backend.features.download_queue import (DownloadHandler,
                                              delete_download_history,
                                              get_download_history)
-from backend.features.library_import import (import_library,
-                                             propose_library_import)
+from backend.features.library_import import propose_library_import
 from backend.features.mass_edit import MassEditorActionManager
 from backend.features.search_full import manual_search
 from backend.features.tasks import (TaskHandler, delete_task_history,
@@ -1112,17 +1111,125 @@ def api_library_import_stage():
     if rename not in ('true', 'false'):
         return return_api({'code':'invalid_rename_policy'}, 'LibraryImportStage', 400)
     try:
+        identifier = request.args.get('draft_id') or None
+        revision = request.args.get('revision')
+        if revision is not None and not revision.isdecimal():
+            return return_api({'code':'invalid_import_revision'}, 'LibraryImportStage', 400)
         return return_api(stage_import(DBConnection.default_file, request.get_json(silent=True),
-                                       rename == 'true'))
+                                       rename == 'true', identifier=identifier,
+                                       revision=int(revision) if revision is not None else None))
     except (ValueError, OSError) as error:
         code = str(error) if isinstance(error, ValueError) else 'stage_unavailable'
         if code not in {'invalid_import_batch','unsafe_import_source','unsupported_import_source',
-                        'invalid_overlap_override','catalog_invalid','stage_unavailable'}:
+                        'invalid_overlap_override','catalog_invalid','stage_unavailable',
+                        'stale_import_revision','stale_import_review','invalid_import_revision'}:
             code = 'stage_invalid'
         return return_api({'code':code},
                           'LibraryImportStage', 409)
     except IntakeFailure as error:
         return return_api({'code':error.code.value}, 'LibraryImportStage', 409)
+
+
+@api.route('/libraryimport/drafts', methods=['GET', 'POST'])
+@api.route('/libraryimport/drafts/<identifier>', methods=['GET', 'PATCH', 'DELETE'])
+@error_handler
+@auth
+def api_library_import_drafts(identifier=None):
+    from backend.features.import_draft import (discard_draft, get_draft,
+                                               list_drafts, save_review_draft)
+    from backend.internals.db import DBConnection
+
+    try:
+        if request.method == 'GET':
+            offset = int(request.args.get('offset', '0'))
+            limit = int(request.args.get('limit', '100'))
+            result = (get_draft(DBConnection.default_file, identifier, offset=offset, limit=limit)
+                      if identifier else list_drafts(DBConnection.default_file,
+                                                    offset=offset, limit=limit))
+            if result is None:
+                return return_api({'code':'import_draft_not_found'}, 'LibraryImportDraft', 404)
+            return return_api(result)
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return return_api({'code':'invalid_import_review_batch'}, 'LibraryImportDraft', 400)
+        if request.method == 'DELETE':
+            if identifier is None or set(data) != {'revision'}:
+                return return_api({'code':'invalid_import_review_batch'}, 'LibraryImportDraft', 400)
+            return return_api(discard_draft(DBConnection.default_file, identifier, data['revision']))
+        allowed = {'rows','scope'} if identifier is None else {'rows','revision','scope'}
+        required = {'rows'} if identifier is None else {'rows','revision'}
+        if set(data) - allowed or not required.issubset(data):
+            return return_api({'code':'invalid_import_review_batch'}, 'LibraryImportDraft', 400)
+        return return_api(save_review_draft(DBConnection.default_file, data['rows'],
+                                            identifier=identifier, revision=data.get('revision'),
+                                            scope=data.get('scope')))
+    except (ValueError, OSError) as error:
+        code = str(error) if isinstance(error, ValueError) else 'draft_unavailable'
+        if code not in {'invalid_draft_page','invalid_import_review_batch',
+                        'invalid_import_review_row','unsafe_import_source',
+                        'unsupported_import_source','stale_import_source',
+                        'stale_import_revision','import_draft_has_journal',
+                        'invalid_import_review_scope'}:
+            code = 'draft_unavailable'
+        return return_api({'code':code}, 'LibraryImportDraft', 409)
+
+
+@api.route('/libraryimport/drafts/<identifier>/maintenance-review', methods=['POST'])
+@error_handler
+@auth
+def api_library_import_maintenance_review(identifier):
+    from backend.features.import_draft import get_draft
+    from backend.internals.db import DBConnection
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {'row_id'} or not isinstance(data['row_id'], str):
+        return return_api({'code':'invalid_import_maintenance_row'}, 'LibraryImportMaintenance', 400)
+    draft = get_draft(DBConnection.default_file, identifier, limit=100)
+    if draft is None:
+        return return_api({'code':'import_draft_not_found'}, 'LibraryImportMaintenance', 404)
+    offset = 0
+    selected = None
+    while True:
+        for row in draft['rows']:
+            if row['row_id'] == data['row_id']:
+                selected = row['receipt']
+                break
+        if selected or draft['next_offset'] is None:
+            break
+        offset = draft['next_offset']
+        draft = get_draft(DBConnection.default_file, identifier, offset=offset, limit=100)
+    if (selected is None or selected.get('state') != 'completed' or
+            not str(selected.get('target', '')).lower().endswith('.cbr') or
+            type(selected.get('file_id')) is not int):
+        return return_api({'code':'import_not_ready_for_maintenance'}, 'LibraryImportMaintenance', 409)
+    maintenance = current_app.extensions.get('maintenance')
+    if maintenance is None:
+        return return_api({'code':'maintenance_unavailable'}, 'LibraryImportMaintenance', 503)
+    # The canonical maintenance service creates a review task only. It does
+    # not convert until that task is separately confirmed in Maintenance.
+    return return_api(maintenance.archives.submit('preview',
+                                                   dict(selected=[selected['file_id']])))
+
+
+@api.route('/libraryimport/drafts/<identifier>/resume', methods=['POST'])
+@error_handler
+@auth
+def api_library_import_resume(identifier):
+    from backend.features.import_draft import resume_draft
+    from backend.internals.db import DBConnection
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {'revision'} or type(data['revision']) is not int:
+        return return_api({'code':'invalid_import_revision'}, 'LibraryImportResume', 400)
+    try:
+        return return_api(resume_draft(DBConnection.default_file, identifier, data['revision']))
+    except ValueError as error:
+        code = str(error)
+        if code not in {'import_draft_not_found','stale_import_revision',
+                        'import_draft_not_applying','stale_import_source',
+                        'stale_import_catalogue','occupied_import_target'}:
+            code = 'import_resume_unavailable'
+        return return_api({'code':code}, 'LibraryImportResume', 409)
 
 
 @api.route('/libraryimport/repair-folder', methods=['POST'])
@@ -1163,23 +1270,25 @@ def api_local_organization(volume_id=None, identifier=None):
     from backend.base.acquisition_intake import IntakeFailure
     from backend.base.organization_job import OrganizationError
     from backend.features.local_issue_review import LocalReviewError
-    from backend.features.local_organization import (apply_preview,
-                                                     import_preview,
-                                                     scan_preview)
+    from backend.features.local_organization import apply_preview, scan_preview
     from backend.internals.db import DBConnection
     try:
         if identifier is not None:
-            from backend.features.import_draft import apply_draft
-            result = apply_draft(DBConnection.default_file, identifier)
+            from backend.features.import_draft import apply_draft, get_draft
+            draft = get_draft(DBConnection.default_file, identifier)
+            data = request.get_json(silent=True)
+            if draft is not None and (not isinstance(data, dict) or set(data) != {'revision'}
+                                      or type(data['revision']) is not int):
+                return return_api({'code':'invalid_import_revision'}, 'OrganizationReviewRequired', 400)
+            result = apply_draft(DBConnection.default_file, identifier,
+                                 data['revision'] if draft is not None else None)
             if result is None:
                 result = apply_preview(DBConnection.default_file, identifier)
         elif volume_id is not None:
             result = scan_preview(DBConnection.default_file, volume_id)
         else:
-            rename = request.args.get('rename_files', 'false')
-            if rename not in ('true', 'false'):
-                return return_api({}, 'InvalidRenamePolicy', 400)
-            result = import_preview(DBConnection.default_file, request.get_json(silent=True), rename == 'true')
+            return return_api({'code':'legacy_import_requires_review',
+                'stage':'POST /libraryimport/stage'}, 'LibraryImportDeprecated', 410)
         return return_api(result)
     except LocalReviewError as error:
         return return_api({'code':error.code}, 'OrganizationReviewRequired', 409)
@@ -1191,7 +1300,9 @@ def api_local_organization(volume_id=None, identifier=None):
     except (OSError, ValueError) as error:
         LOGGER.error('Local organization request failed for volume %s: %s', volume_id, type(error).__name__)
         code = str(error) if isinstance(error, ValueError) else 'local_inspection_failed'
-        if code not in {'stale_import_draft','import_apply_in_progress',
+        if code not in {'stale_import_draft','stale_import_revision',
+                        'invalid_import_revision','unsupported_import_draft',
+                        'legacy_import_requires_review','import_apply_in_progress',
                         'stale_import_source','stale_import_catalogue',
                         'occupied_import_target'}:
             code = 'local_inspection_failed'
@@ -1264,12 +1375,8 @@ def api_library_import():
         return return_api(result)
 
     elif request.method == 'POST':
-        data = request.get_json()
-        rename_files = extract_key(request, 'rename_files', False)
-
-        # The importer validates both legacy CV and explicit provider forms.
-        import_library(data, rename_files)
-        return return_api({}, code=201)
+        return return_api({'code':'legacy_import_requires_review',
+            'stage':'POST /libraryimport/stage'}, 'LibraryImportDeprecated', 410)
 
 
 # region Library + Volumes

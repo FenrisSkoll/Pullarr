@@ -26,12 +26,38 @@ Select the exact provider issue or issues in the inline editor, then use
 **Preview Import** or **Preview Import and Rename**. This read-only stage binds
 the source stamp, issue identities, catalogue revision, destination and naming
 policy. The matching **Import** button confirms ready rows. Excluded and
-unresolved rows stay visible. Drafts expire after ten minutes or process
-restart. Once apply starts, OrganizationJobs and Maintenance history provide
-durable recovery receipts. A changed source, occupied destination or changed
-target policy stops the row for a fresh preview. A completed result requires
-both the final archive and expected local issue links. Batch rows can have
-different outcomes.
+unresolved rows stay visible. Review choices save in versioned SQLite draft
+rows after each change and can be reopened after navigation or restart. The
+page lists the 50 most recently updated drafts and shows Saved or Unsaved;
+leaving during an unfinished save asks for review. The draft API pages older
+reviews without deleting them. Each draft records its scan filter and limit,
+per-file root and source evidence, reviewed choices and journal receipts.
+There is no ten-minute draft expiry. Draft revisions reject concurrent edits
+and stale confirmation. Discard is allowed only before journal effects exist.
+Once apply starts, OrganizationJobs and Maintenance history provide durable
+recovery receipts. A changed source, occupied destination or changed catalogue
+stops only the affected row for review; other ready rows can proceed. Resume
+inspects the saved journal and may run pending jobs. Interrupted effects require
+the existing reviewed Maintenance recovery path. No publication or folder is
+created while scanning, saving, selecting issues or previewing. Apply checks
+CBZ/ZIP member CRCs and CBR/RAR signatures before publication registration;
+the validated source digest is bound to the journal receipt.
+
+**Imported** means the journal completed, the final supported archive matches
+its recorded verified bytes, the active database file points to that canonical
+path, and its issue links exactly match the reviewed provider issue identities.
+The destination folder and required group/file permissions are checked again.
+History reads revalidate the receipt; an empty folder, unlinked file or changed
+archive cannot continue to display Completed. Batch rows can have different
+outcomes. Old publication-only `POST /libraryimport` and
+`POST /libraryimport/preview` return `410 legacy_import_requires_review`;
+read-only discovery remains available.
+
+Library Import preserves `.cbr` and `.cbz` containers. A completed CBR row
+offers **Review archive maintenance**. That action queues the existing archive
+review only; a separate confirmation in Maintenance is required before CBR to
+CBZ replacement. Declining or failing conversion leaves the imported CBR and
+issue links intact. Download processing retains its own established policy.
 
 Destinations use the normal Library & Organization folder policy, including its
 configured suffixes. Folders needed for incoming files are created even when
@@ -137,4 +163,5 @@ them intact; unrelated archives remain usable. **Review Recovery** focuses the
 review; **Continue Recovery** displays progress and refreshes the durable result.
 
 Healthy CBZs are not automatically repacked. No PDF conversion or page recompression
-is included. Back up application data before updating; schema72 is unchanged.
+is included. Back up application data before updating; schema73 adds versioned
+Library Import draft rows without changing existing file or issue ownership tables.

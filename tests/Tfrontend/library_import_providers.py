@@ -20,8 +20,9 @@ class ProviderImportAPI(ImportAPIHarness, MetronHarness, TestCase):
         match = response.get_json()['result'][0]['metadata_source']
         response = self.post_import([{'filepath': path, 'provider': match['provider'],
                                       'provider_id': match['id']}])
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(self.bindings(), [(path, 1, 901)])
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.get_json()['result']['code'], 'legacy_import_requires_review')
+        self.assertEqual(self.bindings(), [])
         self.session.get.assert_not_called()
 
     def test_manual_only_scan_no_cv_and_strict_option_validation(self):
@@ -40,9 +41,8 @@ class ProviderImportAPI(ImportAPIHarness, MetronHarness, TestCase):
         self.settings.metron_api_token = ''
         response = self.post_import([{'filepath': self.comic_file(), 'provider': 'metron',
                                      'provider_id': '700'}])
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error'], 'MetadataProviderError')
-        self.assertEqual(response.get_json()['result']['provider'], 'metron')
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.get_json()['result']['code'], 'legacy_import_requires_review')
         self.session.get.assert_not_called()
 
     def test_cross_provider_reference_conflict_returns_409(self):
@@ -50,8 +50,8 @@ class ProviderImportAPI(ImportAPIHarness, MetronHarness, TestCase):
         self.series['cv_id'] = 2127
         response = self.post_import([{'filepath': self.comic_file(), 'provider': 'metron',
                                      'provider_id': '700'}])
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.get_json()['error'], 'IdentityEnrichmentConflict')
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.get_json()['result']['code'], 'legacy_import_requires_review')
         self.assertEqual(len(self.rows('volumes')), 1)
 
     def test_search_capability_missing_fails_explicitly(self):

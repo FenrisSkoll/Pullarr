@@ -7,7 +7,6 @@ from fixtures.library_import import ImportHarness
 from Tbackend.implementations.metron_lifecycle import MetronHarness
 
 from backend.base.definitions import SpecialVersion
-from backend.features.library_import import import_library
 from backend.implementations.naming import (_fill_format, check_format,
                                             generate_issue_name,
                                             generate_volume_folder_name,
@@ -73,7 +72,7 @@ class NamingIdentityContract(ImportHarness, TestCase):
 
     def test_preview_and_real_rename_agree(self):
         source = self.comic_file()
-        import_library([{'filepath': source, 'id': 2127}])
+        self.fixture_owned_file(source)
         current = self.bindings()[0][0]
         self.settings.file_naming = 'Issue {issue_number} [{issue_comicvine_id:05d}]'
         before = Path(current).read_bytes()

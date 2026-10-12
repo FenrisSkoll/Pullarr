@@ -274,7 +274,7 @@ class CandidateIdentityDatabase(ImportHarness, TestCase):
 
     def test_real_multi_issue_forced_associations_read_without_writes(self):
         path = self.comic_file(name='Example Hero v2 #1-2 (2021).cbz')
-        import_library([{'id': 2127, 'filepath': path}])
+        self.fixture_owned_file(path, ('301','302'))
         self.db.execute('UPDATE issues_files SET forced=1 WHERE issue_id=1')
         before = self.db.total_changes
         statements = []
@@ -305,7 +305,7 @@ class CandidateIdentityDatabase(ImportHarness, TestCase):
 
     def test_general_file_binding_keeps_volume_and_forced_flag_without_issue(self):
         path = self.comic_file()
-        import_library([{'id': 2127, 'filepath': path}])
+        self.fixture_owned_file(path)
         file_id = self.db.execute('SELECT id FROM files WHERE filepath=?', (path,)).fetchone()[0]
         self.db.execute('DELETE FROM issues_files WHERE file_id=?', (file_id,))
         self.db.execute('INSERT INTO volume_files(file_id,volume_id,file_type,forced) VALUES(?,1,?,1)',
@@ -358,7 +358,7 @@ class CandidateMetronIdentity(ProviderImportHarness, TestCase):
     def test_selected_metron_preserved_without_search(self):
         self.series['cv_id'] = 2127
         path = self.metron_file()
-        import_library([self.mapping(path)])
+        self.fixture_owned_file(path, ('701',), provider='metron')
         self.session.get.reset_mock()
         known = load_existing_import_identities([path], PROVIDERS.keys())[path]
         candidate = observe_import_candidate(str(path), DiscoveryScope('run', str(self.root)), existing=known)
@@ -368,7 +368,7 @@ class CandidateMetronIdentity(ProviderImportHarness, TestCase):
 
     def test_missing_selected_identity_fails_without_repair(self):
         path = self.metron_file()
-        import_library([self.mapping(path)])
+        self.fixture_owned_file(path, ('701',), provider='metron')
         self.db.execute("DELETE FROM volume_external_ids WHERE provider='metron'")
         before = self.db.total_changes
         with self.assertRaises(MetadataIdentityError):

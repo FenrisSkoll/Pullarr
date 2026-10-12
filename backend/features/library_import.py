@@ -8,53 +8,30 @@ from fnmatch import fnmatchcase
 from glob import glob
 from hashlib import sha256
 from itertools import chain
-from os.path import abspath, basename, dirname, isfile, join, splitext
+from os.path import abspath, basename, dirname, isfile, splitext
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 from uuid import uuid4
 
-from typing_extensions import TypedDict
-
 from backend.base.acquisition_intake import IntakeFailure
-from backend.base.custom_exceptions import (InvalidKeyValue,
-                                            MetadataSourceRateLimitReached,
-                                            VolumeAlreadyAdded,
-                                            VolumeNotMatched)
-from backend.base.definitions import (CVFileMapping, FileConstants,
-                                      FilenameData, MonitorScheme,
+from backend.base.custom_exceptions import InvalidKeyValue
+from backend.base.definitions import (FileConstants, FilenameData,
                                       SpecialVersion)
 from backend.base.file_extraction import extract_filename_data
-from backend.base.files import (change_basefolder, common_folder,
-                                delete_empty_parent_folders,
-                                folder_is_inside_folder,
-                                list_files, rename_file)
-from backend.base.helpers import force_suffix
+from backend.base.files import folder_is_inside_folder, list_files
 from backend.base.import_candidate import (DiscoveryKind, DiscoveryScope,
                                            ImportCandidate, ResourceKind)
 from backend.base.logging import LOGGER
 from backend.implementations.comicinfo_candidate import enrich_comicinfo
 from backend.implementations.comicvine import ComicVine
-from backend.implementations.file_matching import scan_files
 from backend.implementations.import_candidates import (
     legacy_filename_inputs, observe_import_candidate)
 from backend.implementations.matching import match_special_version
 from backend.implementations.metadata.errors import MetadataProviderError
-from backend.implementations.metadata.identity_enrichment import \
-    IdentityEnrichmentConflict
 from backend.implementations.metadata.persistence import ProviderVolumeIdentity
 from backend.implementations.metadata.registry import get_volume_provider
-from backend.implementations.naming import mass_rename
 from backend.implementations.root_folders import RootFolders
-from backend.implementations.volumes import Library
-from backend.internals.db import commit
 from backend.internals.db_models import FilesDB
-from backend.internals.provider_identity import ProviderIdentityDB
-
-
-class ProviderFileMapping(TypedDict):
-    filepath: str
-    provider: str
-    provider_id: str
 
 
 def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
@@ -473,123 +450,6 @@ def propose_library_import(
     return result
 
 
-def import_library(
-    matches: List[Union[CVFileMapping, ProviderFileMapping]],
-    rename_files: bool = False
-) -> None:
-    """Add volume to library and import linked files.
-
-    Args:
-        matches: Legacy CV or explicitly provider-qualified file mappings.
-
-        rename_files (bool, optional): Trigger a rename after importing files.
-            Defaults to False.
-    """
-    LOGGER.info('Starting library import')
-    from backend.features.quality import import_baseline, record_manual_imports
-
-    identity_to_filepath: Dict[ProviderVolumeIdentity, List[str]] = {}
-    for identity, filepath in normalize_import_matches(matches):
-        identity_to_filepath.setdefault(identity, []).append(filepath)
-    quality_existing = import_baseline([path for paths in identity_to_filepath.values() for path in paths])
-    LOGGER.debug('identity_to_filepath: %s', identity_to_filepath)
-
-    root_folders = RootFolders().get_all()
-    for identity, files in identity_to_filepath.items():
-        # Find root folder that media is in
-        for root_folder in root_folders:
-            if folder_is_inside_folder(root_folder.folder, files[0]):
-                break
-        else:
-            continue
-
-        lcf = common_folder(files)
-        if not rename_files and force_suffix(lcf) == root_folder.folder:
-            # Back out. Volume folder will be equal to root folder.
-            continue
-
-        volume_already_added = False
-
-        try:
-            try:
-                existing = ProviderIdentityDB.find_selected_volume(identity.provider, identity.provider_id)
-            except ValueError:
-                raise IdentityEnrichmentConflict() from None
-            if existing is not None:
-                volume_id = existing
-                volume_already_added = True
-            else:
-                volume_id = Library.add_metadata(
-                    identity=identity,
-                    root_folder_id=root_folder.id,
-                    monitored=True,
-                    monitor_scheme=MonitorScheme.ALL,
-                    monitor_new_issues=True,
-                    volume_folder=lcf if not rename_files else None
-                )
-                commit()
-
-        except VolumeAlreadyAdded as e:
-            if ProviderIdentityDB.selected_provider(e.volume_id) != identity.provider:
-                # A concurrent reference assertion must not bypass the guard.
-                raise IdentityEnrichmentConflict() from None
-            # The volume that the files are for is already in the library, while
-            # the files aren't matched to it. This has two reasons:
-            # 1. The files are for an existing volume but in a common folder.
-            #    Like some users that download files externally and put them all
-            #    in a to-be-imported folder. Their idea is that they use LI to
-            #    move and rename the files to the proper volume folder because
-            #    they don't want to move it themselves, even though the volume
-            #    is already in their library.
-            # 2. The files matched to the wrong volume, and the wrong volume
-            #    happens to already be in the library.
-            # The propability of bullet 2 happening is quite low, so moving the
-            # files into the volume folder is worth more to users of bullet 1
-            # than it is a bad thing for the users that experience bullet 2. So
-            # solution is to move the file to the volume folder of the match,
-            # and rename if that was chosen.
-            volume_already_added = True
-            volume_id = e.volume_id
-
-        except VolumeNotMatched:
-            # CV ID not found; skip this import
-            continue
-
-        except MetadataSourceRateLimitReached:
-            # Hit rate limit so can't add any volumes anymore
-            break
-
-        if rename_files or volume_already_added:
-            # Move files not already in the volume folder into the volume folder
-            vf = Library.get_volume(volume_id).vd.folder
-
-            if volume_already_added or folder_is_inside_folder(vf, lcf):
-                file_changes = {
-                    f: (
-                        join(vf, basename(f))
-                        if not folder_is_inside_folder(vf, f) else
-                        f
-                    )
-                    for f in files
-                }
-
-            else:
-                file_changes = change_basefolder(files, lcf, vf)
-
-            for old, new in file_changes.items():
-                if old != new:
-                    rename_file(old, new)
-                    delete_empty_parent_folders(
-                        dirname(old), root_folder.folder
-                    )
-
-            files = list(file_changes.values())
-
-        scan_files(volume_id, filepath_filter=files)
-        record_manual_imports(volume_id, files, quality_existing)
-
-        if rename_files:
-            # Rename the filenames themselves
-            mass_rename(volume_id, filepath_filter=files)
-
-    return
+def import_library(matches: object, rename_files: bool = False) -> None:
+    """Retired mutating entry point; callers must review exact issues in a draft."""
+    raise ValueError('legacy_import_requires_review')

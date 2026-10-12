@@ -28,6 +28,7 @@ from backend.internals.content_schema import SCHEMA as CONTENT_SCHEMA
 from backend.internals.discovery_schema import SCHEMA as DISCOVERY_SCHEMA
 from backend.internals.download_schema import SCHEMA as DOWNLOAD_SCHEMA
 from backend.internals.identity_schema import METADATA_PROVIDER_COLUMN
+from backend.internals.import_draft_schema import SCHEMA as IMPORT_DRAFT_SCHEMA
 from backend.internals.intake_schema import SCHEMA as INTAKE_SCHEMA
 from backend.internals.issue_facts_schema import (SCHEMA as ISSUE_FACTS_SCHEMA,
                                                   nullable_projection)
@@ -629,4 +630,4 @@ SCHEMA_70 = SCHEMA_69 + QUALITY_SCHEMA
 SCHEMA_71 = SCHEMA_70 + DISCOVERY_SCHEMA
 from backend.internals.torrent_schema import SCHEMA as TORRENT_SCHEMA
 
-DB_SCHEMA = SCHEMA_71 + TORRENT_SCHEMA
+DB_SCHEMA = SCHEMA_71 + TORRENT_SCHEMA + IMPORT_DRAFT_SCHEMA

@@ -36,6 +36,82 @@ let shiftSelectStart = null
 const selectedRows = new Set()
 const issueRequests = new Map();
 let scanGeneration = 0;
+let reviewDraft = null;
+let reviewScanScope = null;
+let reviewSaveQueue = new Set();
+let reviewSaveTimer = null;
+let reviewSavePromise = Promise.resolve();
+let reviewSaveBusy = false;
+const reviewStorageKey = 'pullarr.libraryImportDraft.v3';
+
+function reviewRow(rowid) {
+	const entry = rowidToFilepath[rowid];
+	if (!entry) return null;
+	const row = liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"]`);
+	const choice = {
+		filepath: entry.filepath, stamp: entry.stamp, selected: !!row?.querySelector('.import-file-select')?.checked,
+		issue_ids: entry.issueIds || [], issue_override: !!entry.manualIssues,
+		manual_issues: !!entry.manualIssues, overlap_override: !!entry.allowOverlap,
+		catalog_revision: entry.catalog?.revision || entry.catalogRevision || null,
+		catalog_completeness: entry.catalog?.completeness || entry.catalogSummary?.completeness || null,
+		reported_issue_count: entry.catalog?.reported_issue_count ?? entry.catalogSummary?.reported ?? null,
+		loaded_issue_count: entry.catalog?.loaded_issue_count ?? entry.catalogSummary?.loaded ?? null,
+		selected_issues: (entry.catalog?.issues || entry.selectedIssues || [])
+			.filter(issue => entry.issueIds?.includes(issue.id))
+			.map(issue => ({id:issue.id,number:issue.number,title:issue.title,date:issue.date})),
+		issue_labels: entry.issueLabels || [], issue_reason: entry.issueReason || ''
+	};
+	if (entry.identity) { choice.provider = entry.identity.provider; choice.provider_id = entry.identity.id; }
+	if (entry.display) {
+		choice.display = entry.display;
+		if (JSON.stringify(choice.display).length > 7000)
+			choice.display = {file_title:entry.display.file_title, folder:entry.display.folder,
+				size:entry.display.size, extension:entry.display.extension};
+	}
+	return choice;
+}
+
+function markReviewDirty(rowid) {
+	if (!rowidToFilepath[rowid]) return;
+	reviewSaveQueue.add(String(rowid));
+	document.getElementById('import-save-status').textContent = 'Unsaved review changes…';
+	if (reviewSaveTimer) clearTimeout(reviewSaveTimer);
+	reviewSaveTimer = setTimeout(() => usingApiKey().then(flushReviewSave), 500);
+}
+
+async function flushReviewSave(apiKey) {
+	if (reviewSaveTimer) { clearTimeout(reviewSaveTimer); reviewSaveTimer = null; }
+	const ids = [...reviewSaveQueue].slice(0, 100);
+	if (!ids.length) { await reviewSavePromise; return; }
+	ids.forEach(id => reviewSaveQueue.delete(id));
+	const rows = ids.map(reviewRow).filter(Boolean);
+	reviewSavePromise = reviewSavePromise.catch(() => {}).then(async () => {
+		if (!rows.length) return;
+		reviewSaveBusy = true;
+		const path = reviewDraft ? `/libraryimport/drafts/${reviewDraft.id}` : '/libraryimport/drafts';
+		const body = reviewDraft ? {rows, revision:reviewDraft.revision} :
+			{rows, scope:reviewScanScope || {}};
+		const response = await sendAPI(reviewDraft ? 'PATCH' : 'POST', path, apiKey, {}, body);
+		if (!response.ok) throw response;
+		reviewDraft = (await response.json()).result;
+		try { localStorage.setItem(reviewStorageKey, reviewDraft.id); } catch (_) { /* private mode */ }
+		document.getElementById('import-save-status').textContent = 'Saved import review';
+	}).catch(async error => {
+		ids.forEach(id => reviewSaveQueue.add(id));
+		const body = await error?.json?.().catch(() => null);
+		document.getElementById('import-save-status').textContent =
+			`Unsaved: ${body?.result?.code || 'save unavailable'}. Retry before leaving this page.`;
+		throw error;
+	}).finally(() => { reviewSaveBusy = false; });
+	await reviewSavePromise;
+	if (reviewSaveQueue.size) await flushReviewSave(apiKey);
+}
+window.addEventListener('beforeunload', event => {
+	if (reviewSaveQueue.size || reviewSaveBusy) {
+		event.preventDefault();
+		event.returnValue = '';
+	}
+});
 
 function issueCell(rowid) {
 	return liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"] .issue-column`);
@@ -51,6 +127,7 @@ function issueSummary(rowid) {
 	}
 	const labels = (entry.catalog?.issues || []).filter(issue => entry.issueIds?.includes(issue.id))
 		.map(issue => `${issue.number}${issue.title ? ' · ' + issue.title : ''}`);
+	if (!labels.length && entry.issueLabels?.length) labels.push(...entry.issueLabels);
 	status.textContent = labels.length ? labels.join(', ') :
 		(entry.catalog ? 'Choose issue · needs review' : 'Issue catalogue not loaded');
 	if (labels.length && entry.issueConfidence)
@@ -79,13 +156,17 @@ async function loadIssueCatalogue(rowid, apiKey, showEditor=false) {
 		if (generation !== issueRequests.get(rowid) || rowidToFilepath[rowid] !== entry
 			|| entry.identity.provider !== identity.provider || entry.identity.id !== identity.id) return;
 		entry.catalog = catalog;
-		if (!entry.manualIssues) {
+		if (!entry.manualIssues && !entry.issueIds?.length) {
 			const proposal = catalog.proposals[entry.filepath];
 			entry.issueIds = ['exact', 'strong'].includes(proposal?.confidence) ? proposal.issue_ids : [];
 			entry.issueReason = proposal?.reason || '';
 			entry.issueConfidence = proposal?.confidence || 'none';
 		}
+		entry.catalogRevision = catalog.revision;
+		entry.issueLabels = catalog.issues.filter(issue => entry.issueIds?.includes(issue.id))
+			.map(issue => `${issue.number}${issue.title ? ' · ' + issue.title : ''}`);
 		issueSummary(rowid);
+		markReviewDirty(rowid);
 		if (showEditor) openIssueEditor(rowid);
 	} catch (_) {
 		if (generation === issueRequests.get(rowid) && rowidToFilepath[rowid] === entry && cell) {
@@ -151,7 +232,10 @@ function openIssueEditor(rowid) {
 		entry.allowOverlap = overlap.checked;
 		entry.issueReason = 'Reviewed issue selection; validated against publication identity during preview.';
 		entry.issueConfidence = 'reviewed';
+		entry.issueLabels = entry.catalog.issues.filter(issue => entry.issueIds.includes(issue.id))
+			.map(issue => `${issue.number}${issue.title ? ' · ' + issue.title : ''}`);
 		issueSummary(rowid);
+		markReviewDirty(rowid);
 	};
 	panel.appendChild(save); cell.appendChild(panel); search.focus();
 }
@@ -199,6 +283,7 @@ function loadPublicationProposals(apiKey, scanParams, generation) {
 			link.href = result.cv.link || '';
 			link.textContent = buildMatchTitle(result.cv.title, null, result.cv.issue_count) + ' · ComicVine proposal';
 			issueSummary(rowid);
+			markReviewDirty(rowid);
 		}
 		if (matched) document.getElementById('scan-summary').textContent += ` · ${matched} ComicVine publication suggestions loaded`;
 	}).catch(() => {
@@ -227,6 +312,9 @@ function loadProposal(apiKey, offset=0) {
 
 	if (!offset) {
 		scanGeneration++;
+		reviewDraft = null;
+		reviewScanScope = {folder_limit:params.folder_limit,
+			page_size:params.page_size, folder_filter:params.folder_filter || ''};
 		liEls.proposalList.innerHTML = '';
 		lastRenderedFolder = null; stagedImport = null;
 		selectedRows.clear(); issueRequests.clear();
@@ -263,7 +351,12 @@ function loadProposal(apiKey, offset=0) {
 					provider: 'comicvine', id: String(result.cv.id)
 				}),
 				filepath: result.filepath, stamp: result.stamp,
-				issueIds: [], manualIssues: false, allowOverlap: false
+				issueIds: [], manualIssues: false, allowOverlap: false,
+				display: {file_title:result.file_title, size:result.size,
+					extension:result.extension, folder:result.folder,
+					cv:result.cv, metadata_source:result.metadata_source,
+					parsed:result.parsed, embedded:result.embedded,
+					warnings:result.warnings}
 			};
 			entry.addEventListener("click", e => e.stopPropagation())
 
@@ -344,6 +437,7 @@ function loadProposal(apiKey, offset=0) {
 
 			liEls.proposalList.appendChild(entry);
 			issueSummary(rowid);
+			markReviewDirty(rowid);
 		});
 
 		if (page.items.length > 0 || offset > 0) {
@@ -370,7 +464,7 @@ function loadProposal(apiKey, offset=0) {
 function toggleSelectAll() {
 	const checked = liEls.selectAll.checked;
 	liEls.proposalList.querySelectorAll('.import-file-select').forEach(
-		e => e.checked = checked
+		e => { e.checked = checked; markReviewDirty(e.closest('tr').dataset.rowid); }
 	);
 };
 
@@ -382,11 +476,12 @@ function toggleSelected(rowid) {
 		`tr[data-rowid="${rowid}"] .import-file-select`
 	).checked
 
-	selectedRows.forEach(rowid =>
+	selectedRows.forEach(selected => {
 		liEls.proposalList.querySelector(
-			`tr[data-rowid="${rowid}"] .import-file-select`
-		).checked = checked
-	)
+			`tr[data-rowid="${selected}"] .import-file-select`
+		).checked = checked;
+		markReviewDirty(selected);
+	});
 }
 
 let editMatchId = null
@@ -426,6 +521,8 @@ function editMetadataMatch(identity, site_url, title, year, issue_count, bulk=fa
 		const tr = liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"]`)
 		rowidToFilepath[rowid].identity = {provider: identity.provider, id: identity.id};
 		rowidToFilepath[rowid].catalog = null;
+		rowidToFilepath[rowid].catalogRevision = null;
+		rowidToFilepath[rowid].selectedIssues = [];
 		rowidToFilepath[rowid].issueIds = [];
 		rowidToFilepath[rowid].manualIssues = false;
 		rowidToFilepath[rowid].issueReason = '';
@@ -435,6 +532,7 @@ function editMetadataMatch(identity, site_url, title, year, issue_count, bulk=fa
 		link.href = site_url;
 		link.innerText = buildMatchTitle(title, year, issue_count) + ` · ${identity.provider}`
 		issueSummary(rowid);
+		markReviewDirty(rowid);
 		usingApiKey().then(key => loadIssueCatalogue(rowid, key, true));
 	});
 	return true;
@@ -536,10 +634,130 @@ function selectedImportData() {
 				'provider_id': rowidToFilepath[rowid].identity.id,
 				'issue_ids': rowidToFilepath[rowid].issueIds || [],
 				'issue_override': !!rowidToFilepath[rowid].manualIssues,
-				'catalog_revision': rowidToFilepath[rowid].catalog?.revision || null,
+				'catalog_revision': rowidToFilepath[rowid].catalog?.revision ||
+					rowidToFilepath[rowid].catalogRevision || null,
 				'overlap_override': !!rowidToFilepath[rowid].allowOverlap
 			};
 		});
+}
+
+async function restoreReviewDraft(apiKey, identifier) {
+	if (!/^[0-9a-f]{32}$/.test(identifier || '')) return;
+	const pages = [];
+	let offset = 0;
+	do {
+		const response = await fetchAPI(`/libraryimport/drafts/${identifier}`, apiKey,
+			{offset, limit:100});
+		const page = response.result;
+		pages.push(page);
+		offset = page.next_offset;
+	} while (offset !== null && pages.length < 100);
+	if (!pages.length) return;
+	scanGeneration++;
+	liEls.proposalList.replaceChildren();
+	Object.keys(rowidToFilepath).forEach(key => delete rowidToFilepath[key]);
+	const first = pages[0];
+	reviewDraft = {id:identifier, revision:first.revision, state:first.state};
+	reviewScanScope = first.scope;
+	stagedImport = null;
+	let count = 0, folder = null;
+	for (const page of pages) for (const saved of page.rows) {
+		const choice = saved.selection, display = choice.display || {};
+		const sourceFolder = display.folder || choice.filepath.replace(/[\\/][^\\/]+$/, '');
+		if (sourceFolder !== folder) {
+			const group = document.createElement('tr'); group.className = 'import-source-group';
+			const title = document.createElement('th'); title.colSpan = 5; title.scope = 'rowgroup';
+			title.textContent = sourceFolder; group.appendChild(title); liEls.proposalList.appendChild(group);
+			folder = sourceFolder;
+		}
+		const rowid = String(count++), row = liEls.preBuild.liResult.cloneNode(true);
+		row.dataset.rowid = rowid;
+		rowidToFilepath[rowid] = {
+			filepath:choice.filepath, stamp:choice.stamp, display,
+			identity:choice.provider ? {provider:choice.provider,id:choice.provider_id} : null,
+			issueIds:choice.issue_ids || [], issueLabels:choice.issue_labels || [],
+			issueReason:choice.issue_reason || '', manualIssues:!!choice.manual_issues,
+			allowOverlap:!!choice.overlap_override, catalogRevision:choice.catalog_revision,
+			catalogSummary:{completeness:choice.catalog_completeness,
+				reported:choice.reported_issue_count,loaded:choice.loaded_issue_count},
+			selectedIssues:choice.selected_issues || []
+		};
+		row.querySelector('.file-column').textContent = display.file_title || choice.filepath.split(/[\\/]/).pop();
+		row.querySelector('.file-column').title = choice.filepath;
+		const link = row.querySelector('a'); link.textContent = choice.provider ?
+			`${choice.provider}:${choice.provider_id} · saved publication` : 'Choose publication';
+		link.removeAttribute('href');
+		row.querySelector('.import-file-select').checked = choice.selected !== false;
+		row.querySelector('.import-file-select').onchange = () => toggleSelected(rowid);
+		row.querySelector('button').onclick = () => openEditCVMatch(rowid);
+		row.addEventListener('click', event => event.stopPropagation());
+		liEls.proposalList.appendChild(row);
+		issueSummary(rowid);
+		if (saved.stale_reason) {
+			const stale = document.createElement('p');
+			stale.textContent = `Revalidation needed: ${saved.stale_reason.replaceAll('_', ' ')}.`;
+			row.querySelector('.issue-column').appendChild(stale);
+		}
+		if (saved.receipt) {
+			const receipt = document.createElement('p');
+			receipt.textContent = `${saved.receipt.state}: ${saved.receipt.target || choice.filepath}` +
+				(saved.receipt.error ? ` · ${saved.receipt.error}` : '');
+			row.querySelector('.issue-column').appendChild(receipt);
+			if (saved.receipt.state === 'completed' && /\.cbr$/i.test(saved.receipt.target || '')) {
+				const maintenance = document.createElement('button');
+				maintenance.type = 'button';
+				maintenance.textContent = 'Review archive maintenance';
+				maintenance.onclick = () => queueImportMaintenance(apiKey, identifier,
+					saved.row_id, maintenance);
+				row.querySelector('.issue-column').appendChild(maintenance);
+			}
+		}
+	}
+	lastRenderedFolder = folder;
+	document.getElementById('scan-summary').textContent =
+		`Recovered ${count} saved local rows · ${first.state} · revision ${first.revision}`;
+	document.getElementById('import-save-status').textContent =
+		pages.some(page => page.rows.some(row => row.stale_reason)) ?
+		'Recovered review · revalidation needed for affected rows' :
+		'Recovered saved import review';
+	if (['applying','recovery_required','partially_completed'].includes(first.state)) {
+		const resume = document.createElement('button'); resume.type = 'button';
+		resume.textContent = 'Inspect or resume journalled import';
+		resume.onclick = async () => {
+			resume.disabled = true;
+			try {
+				const response = await sendAPI('POST',
+					`/libraryimport/drafts/${encodeURIComponent(identifier)}/resume`, apiKey,
+					{}, {revision:reviewDraft.revision});
+				if (!response.ok) throw response;
+				const result = (await response.json()).result;
+				LocalOrganizationUI.result(LocalOrganizationUI.panel(
+					document.getElementById('import-error'), 'library-import-results'), result);
+				await restoreReviewDraft(apiKey, identifier);
+			} catch (_) {
+				document.getElementById('import-save-status').textContent =
+					'Journal recovery needs review in Maintenance history.';
+				resume.disabled = false;
+			}
+		};
+		document.getElementById('import-save-status').appendChild(resume);
+	}
+	hide([liEls.views.start, liEls.views.loading], [liEls.views.list]);
+}
+
+async function queueImportMaintenance(apiKey, draftId, rowId, button) {
+	button.disabled = true;
+	try {
+		const response = await sendAPI('POST',
+			`/libraryimport/drafts/${encodeURIComponent(draftId)}/maintenance-review`,
+			apiKey, {}, {row_id:rowId});
+		if (!response.ok) throw response;
+		const task = (await response.json()).result;
+		button.textContent = `Maintenance review ${task.id} queued; open Maintenance to inspect and confirm.`;
+	} catch (_) {
+		button.textContent = 'Maintenance review unavailable; retry in Maintenance.';
+		button.disabled = false;
+	}
 }
 
 function showImportPreflight(panel, stage, apiKey, rename, unmatched=0) {
@@ -591,6 +809,8 @@ function showImportPreflight(panel, stage, apiKey, rename, unmatched=0) {
 
 async function prepareImport(api_key, rename=false) {
 	if (importPending) return;
+	try { await flushReviewSave(api_key); }
+	catch (_) { document.getElementById('import-error').textContent = 'Save review changes before previewing.'; return; }
 	const data = selectedImportData();
     const unmatched = [...liEls.proposalList.querySelectorAll('tr[data-rowid]')]
         .filter(row => row.querySelector('.import-file-select')?.checked &&
@@ -601,10 +821,15 @@ async function prepareImport(api_key, rename=false) {
     status.textContent = 'Checking files, issue identities and destinations…';
     const panel = LocalOrganizationUI.panel(status, 'library-import-results');
     try {
-        const response = await sendAPI('POST', '/libraryimport/stage', api_key, {rename_files: rename}, data);
+        const params = {rename_files: rename};
+		if (reviewDraft) { params.draft_id = reviewDraft.id; params.revision = reviewDraft.revision; }
+		const response = await sendAPI('POST', '/libraryimport/stage', api_key, params, data);
         if (!response.ok) throw response;
         const stage = (await response.json()).result;
-        stagedImport = {id:stage.id, rename, selection:JSON.stringify(data)};
+        reviewDraft = {id:stage.id, revision:stage.revision, state:stage.state};
+		try { localStorage.setItem(reviewStorageKey, stage.id); } catch (_) { /* private mode */ }
+		stagedImport = {id:stage.id, revision:stage.revision, rename,
+			selection:JSON.stringify(data)};
         showImportPreflight(panel, stage, api_key, rename, unmatched);
         status.textContent = stage.counts.ready ?
             `Review the paths and issues below, then press ${rename ? 'Import and Rename' : 'Import'} to confirm ready rows.` :
@@ -630,13 +855,20 @@ async function importLibrary(api_key, rename=false) {
     status.innerText = 'Importing selected files…';
     const panel = LocalOrganizationUI.panel(status, 'library-import-results');
     try {
-        const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(stagedImport.id)}/apply`, api_key);
+        const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(stagedImport.id)}/apply`,
+			api_key, {}, {revision:stagedImport.revision});
         if (!applied.ok) throw applied;
         const result = (await applied.json()).result;
-        const completed = new Set(LocalOrganizationUI.result(panel, result).map(job => job.source));
-        for (const row of liEls.proposalList.querySelectorAll('tr[data-rowid]')) {
-            if (completed.has(rowidToFilepath[row.dataset.rowid]?.filepath)) row.remove();
-        }
+		const appliedDraftId = stagedImport.id;
+        LocalOrganizationUI.result(panel, result);
+		for (const job of result.jobs || []) if (job.state === 'completed' &&
+				/\.cbr$/i.test(job.target || '') && job.row_id) {
+			const review = document.createElement('button'); review.type = 'button';
+			review.textContent = `Review archive maintenance: ${job.target.split(/[\\/]/).pop()}`;
+			review.onclick = () => queueImportMaintenance(api_key, appliedDraftId,
+				job.row_id, review);
+			panel.appendChild(review);
+		}
         status.innerText = result.jobs?.length ? 'Import attempt finished. Check each file result below.' :
             'No file imported. Review the row reasons below.';
         stagedImport = null;
@@ -653,11 +885,43 @@ async function importLibrary(api_key, rename=false) {
 
 usingApiKey()
 .then(api_key => {
+	const draftList = document.getElementById('saved-import-drafts');
+	const openDraft = document.getElementById('open-import-draft');
+	openDraft.onclick = () => {
+		if (draftList.value) restoreReviewDraft(api_key, draftList.value).catch(() => {
+			document.getElementById('import-save-status').textContent =
+				'Saved review could not be opened; check the selected draft and database.';
+		});
+	};
+	fetchAPI('/libraryimport/drafts', api_key, {limit:50}).then(response => {
+		draftList.replaceChildren();
+		for (const item of response.result.items || []) {
+			const option = document.createElement('option'); option.value = item.id;
+			option.textContent = `${item.updated_at} · ${item.rows} files · ${item.state} · ${item.id.slice(0, 8)}`;
+			draftList.appendChild(option);
+		}
+		openDraft.disabled = !draftList.options.length;
+	}).catch(() => {
+		openDraft.disabled = true;
+		document.getElementById('import-save-status').textContent =
+			'Saved review list unavailable; retry after checking the database.';
+	});
 	liEls.buttons.run.onclick = e => loadProposal(api_key);
 	liEls.buttons.preview.onclick = e => prepareImport(api_key, false);
 	liEls.buttons.previewRename.onclick = e => prepareImport(api_key, true);
 	liEls.buttons.import.onclick = e => importLibrary(api_key, false);
 	liEls.buttons.importRename.onclick = e => importLibrary(api_key, true);
+	const resume = document.getElementById('resume-import-draft');
+	let savedId = null;
+	try { savedId = localStorage.getItem(reviewStorageKey); } catch (_) { /* private mode */ }
+	if (savedId) {
+		resume.classList.remove('hidden');
+		resume.onclick = () => restoreReviewDraft(api_key, savedId).catch(() => {
+			document.getElementById('import-save-status').textContent =
+				'Saved review could not be loaded. Scan again or check the database.';
+		});
+		resume.click();
+	}
 	fetchAPI('/settings', api_key).then(json => {
 		const option = liEls.search.provider.querySelector('option[value="metron"]');
 		option.disabled = !json.result.metron_api_token;

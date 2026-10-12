@@ -21,6 +21,39 @@ def _configured_group(name: str) -> int:
     return grp.getgrnam(name).gr_gid
 
 
+def _open_nofollow(path: str, *, directory: bool) -> int:
+    """Open each POSIX path component without following an ancestor link."""
+    if os.name == 'nt':
+        raise OrganizationError(ExecutionCode.UNSUPPORTED)
+    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | os.O_NOFOLLOW
+    directory_flags = flags | getattr(os, 'O_DIRECTORY', 0)
+    absolute = os.path.abspath(path)
+    components = [component for component in absolute.split(os.sep) if component]
+    descriptor = os.open(os.sep, directory_flags)
+    try:
+        for index, component in enumerate(components):
+            next_fd = os.open(component, directory_flags if index < len(components) - 1
+                              or directory else flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_fd
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def mkdir_nofollow(path: str) -> None:
+    """Create one child through a verified parent descriptor on POSIX."""
+    if os.name == 'nt':
+        os.mkdir(path)
+        return
+    parent_fd = _open_nofollow(os.path.dirname(path), directory=True)
+    try:
+        os.mkdir(os.path.basename(path), dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
 def _effective_group_bits(path: str | int, mode: int) -> int:
     """Read the owning-group ACL entry and mask when Linux exposes an ACL."""
     fallback = (stat.S_IMODE(mode) >> 3) & 7
@@ -92,6 +125,30 @@ def managed_directory_problem(path: str) -> str | None:
     return None
 
 
+def managed_file_problem(path: str) -> str | None:
+    """Read-only effective group policy check for an imported regular file."""
+    if os.name == 'nt' or not sys.platform.startswith('linux'):
+        return None
+    settings = Settings().sv
+    if not settings.chmod_folder and not settings.chown_group:
+        return None
+    try:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
+            return 'destination_not_regular_file'
+        if settings.chown_group and info.st_gid != _configured_group(settings.chown_group):
+            return 'destination_group_mismatch'
+        if settings.chmod_folder:
+            required = (int(settings.chmod_folder, 8) >> 3) & 6
+            if (_effective_group_bits(path, info.st_mode) & required) != required:
+                return 'destination_group_access_denied'
+            if info.st_mode & stat.S_IXUSR or info.st_mode & stat.S_IXGRP or info.st_mode & stat.S_IXOTH:
+                return 'destination_file_executable'
+    except (OSError, ValueError, KeyError):
+        return 'destination_permission_unavailable'
+    return None
+
+
 def worker_permission_context() -> dict:
     """Identity of this application worker, not a separate docker exec shell."""
     if os.name == 'nt':
@@ -108,6 +165,41 @@ def worker_permission_context() -> dict:
         except OSError:
             pass
     return value
+
+
+def create_managed_folder(path: str) -> None:
+    """Create only missing components and apply policy to those exact inodes."""
+    missing = []
+    current = os.path.abspath(path)
+    while not os.path.lexists(current):
+        missing.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            raise OrganizationError(ExecutionCode.UNSAFE_PATH)
+        current = parent
+    if not stat.S_ISDIR(os.lstat(current).st_mode):
+        raise OrganizationError(ExecutionCode.UNSAFE_PATH)
+    created = []
+    try:
+        for part in reversed(missing):
+            try:
+                mkdir_nofollow(part)
+            except FileExistsError:
+                if not stat.S_ISDIR(os.lstat(part).st_mode):
+                    raise OrganizationError(ExecutionCode.UNSAFE_PATH) from None
+                continue
+            info = os.lstat(part)
+            created.append((part, info.st_dev, info.st_ino))
+            apply_managed_permissions(part, directory=True)
+    except BaseException:
+        for part, device, inode in reversed(created):
+            try:
+                current_info = os.lstat(part)
+                if (current_info.st_dev, current_info.st_ino) == (device, inode):
+                    os.rmdir(part)
+            except OSError:
+                pass  # A real entry appeared; leave it for guarded recovery.
+        raise
 
 
 def apply_managed_permissions(path: str, *, directory: bool, repair: bool = False) -> None:
@@ -128,10 +220,7 @@ def apply_managed_permissions(path: str, *, directory: bool, repair: bool = Fals
     try:
         if not hasattr(os, 'O_NOFOLLOW'):
             raise OrganizationError(ExecutionCode.UNSUPPORTED, 'No symlink-safe permission operation')
-        flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | os.O_NOFOLLOW
-        if directory:
-            flags |= getattr(os, 'O_DIRECTORY', 0)
-        descriptor = os.open(path, flags)
+        descriptor = _open_nofollow(path, directory=directory)
         try:
             before = os.fstat(descriptor)
             if not (stat.S_ISDIR(before.st_mode) if directory else stat.S_ISREG(before.st_mode)):

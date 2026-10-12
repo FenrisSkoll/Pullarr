@@ -64,6 +64,28 @@ a failed import has wrong access, use the single-folder reviewed repair shown
 in Library Import, then preview again. Do not run recursive chmod/chown over
 the collection.
 
+For a disposable acceptance run, copy one small CBR/CBZ into an isolated test
+root mounted into a separate Pullarr test instance with a copied database.
+Configure **Chmod Folder = 775** and **Chown Group = users** in that instance.
+Before importing, identify the actual worker process with
+`ps -eo pid,user,uid,gid,args` inside the container, then read that process's
+`/proc/<pid>/status` (`Uid`, `Gid`, `Groups` and `Umask`), plus
+`id -a <worker-user>` where an account name exists. A separate
+`docker exec ... id` shell is not worker evidence. On the host, capture:
+
+```sh
+stat -c '%A %a %u:%g %n' /path/to/test-parent /path/to/test-destination
+getfacl -cp /path/to/test-parent /path/to/test-destination
+```
+
+Use the saved Library Import draft to select the exact publication and issue,
+preview, then import the copied archive. Repeat `stat` and `getfacl -cp` for
+the final directory and archive. Confirm the final file bytes and issue link in
+Pullarr. From the intended Windows SMB account, create and delete a small file
+in the new destination. POSIX group write is necessary for the configured
+policy, but share permissions, ACL mapping and the SMB identity can still deny
+access. Keep this test separate from the live Mimir collection.
+
 `TZ` is supported through the process timezone and defaults to `Etc/UTC` in the
 Unraid template. `UMASK` is not an implemented Pullarr image variable and is not
 exposed by the template.

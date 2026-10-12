@@ -27,7 +27,8 @@ database and comics before upgrades or filesystem operations.
   replacements are journaled and never mutate shared seed bytes in place.
 - Library Import discovers local archives independently of metadata availability,
   lets you choose a provider publication and its exact issues on one page, and
-  previews canonical destinations before a journalled import. See
+  saves review choices across sessions before a journalled, verified import.
+  Original CBR/CBZ formats are preserved until a separate maintenance review. See
   [workflow details](docs/reliability-workflows.md).
 
 Use sources only for content you are entitled to obtain. Provider and indexer

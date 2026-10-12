@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fixtures.library_import import ImportHarness
 from Tbackend.features import organization_execution as fixture_module
 
+from backend.features.import_draft import apply_draft, stage_import
 from backend.features.local_organization import (apply_preview,
                                                  import_preview, scan_preview)
 from backend.implementations.metadata.persistence import ProviderVolumeIdentity
@@ -28,18 +29,19 @@ class LocalOrganizationTests(TestCase):
         fixture.folder.mkdir(exist_ok=True)
         source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
-        with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', return_value=1), \
-                patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('No provider registration')):
-            result = import_preview(fixture.dbpath,
-                [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101'}], rename)
+        result = stage_import(fixture.dbpath,
+            [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101',
+              'issue_ids': ['201'], 'issue_override': True}], rename)
         self.assertEqual(result['plans'][0]['status'], 'ready', result)
         self.assertTrue(source.exists())
         self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM files').fetchone()[0], 0)
-        applied = apply_preview(fixture.dbpath, result['id'])
+        with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', return_value=1):
+            applied = apply_draft(fixture.dbpath, result['id'], result['revision'])
+        self.assertTrue(applied['jobs'], applied)
         self.assertEqual(applied['jobs'][0]['state'], 'completed', applied)
         self.assertTrue(Path(result['plans'][0]['target']).exists())
         self.assertEqual(fixture.db.execute('SELECT issue_id FROM issues_files').fetchall(), [(1,)])
-        self.assertTrue(apply_preview(fixture.dbpath, result['id'])['replay'])
+        self.assertEqual(apply_draft(fixture.dbpath, result['id'], result['revision'])['jobs'][0]['state'], 'completed')
         self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM organization_jobs').fetchone()[0], 1)
         return source, result
 
@@ -86,10 +88,9 @@ class LocalOrganizationTests(TestCase):
         second.mkdir()
         copy = second / first.name
         copy.write_bytes(first.read_bytes())
-        with patch('backend.implementations.volumes.Library.add_metadata', side_effect=ValueError('registration refused')), \
-                patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume',return_value=None):
-            result = import_preview(self.fixture.dbpath, [dict(filepath=str(p), provider='comicvine', provider_id='101') for p in (first,copy)], False)
-        self.assertTrue(all(p['identification_reasons']==['publication_registration_conflict'] for p in result['plans']), result)
+        with self.assertRaisesRegex(ValueError, 'legacy_import_requires_review'):
+            import_preview(self.fixture.dbpath, [dict(filepath=str(p), provider='comicvine', provider_id='101') for p in (first,copy)], False)
+        self.assertTrue(first.exists() and copy.exists())
         self.assertEqual(self.fixture.db.execute('SELECT folder FROM volumes').fetchone()[0], str(self.fixture.folder))
 
     def test_existing_publication_import_and_rename(self):
@@ -114,11 +115,10 @@ class LocalOrganizationTests(TestCase):
         fixture = self.fixture
         source = fixture.library / 'Other 006 (2020).cbz'
         fixture.source.rename(source)
-        with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', return_value=1):
-            result = import_preview(fixture.dbpath,
-                [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101'}], False)
+        result = stage_import(fixture.dbpath,
+            [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101'}], False)
         self.assertNotEqual(result['plans'][0]['status'], 'ready')
-        self.assertEqual(apply_preview(fixture.dbpath, result['id'])['jobs'], [])
+        self.assertEqual(apply_draft(fixture.dbpath, result['id'], result['revision'])['jobs'], [])
         self.assertTrue(source.exists())
 
     def test_explicit_new_registration_precedes_preview_without_file_effects(self):
@@ -126,19 +126,12 @@ class LocalOrganizationTests(TestCase):
         fixture.folder.mkdir(exist_ok=True)
         source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
-        def registration(identity, root_id, monitored, **options):
-            self.assertTrue(source.exists())
-            self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM organization_jobs').fetchone()[0], 0)
-            self.assertTrue(options['organizer_registration'])
-            self.assertEqual(identity.provider, 'comicvine')
-            return 1
-        with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', return_value=None), \
-                patch('backend.implementations.volumes.Library.add_metadata', side_effect=registration), \
-                patch('backend.internals.db.commit'):
-            result = import_preview(fixture.dbpath,
-                [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101'}], True)
+        result = stage_import(fixture.dbpath,
+            [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101',
+              'issue_ids': ['201'], 'issue_override': True}], True)
         self.assertTrue(source.exists())
-        self.assertEqual(apply_preview(fixture.dbpath, result['id'])['jobs'][0]['state'], 'completed')
+        self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM organization_jobs').fetchone()[0], 0)
+        self.assertEqual(result['plans'][0]['status'], 'ready')
 
     def test_production_import_api_preview_then_explicit_apply(self):
         from flask import Flask
@@ -158,12 +151,16 @@ class LocalOrganizationTests(TestCase):
             suffix = '?api_key=test-local-import-key'
             response = client.post('/api/libraryimport/preview' + suffix, json=[
                 {'filepath': str(source), 'provider': 'comicvine', 'provider_id': '101'}])
-            self.assertEqual(response.status_code, 200, response.json)
+            self.assertEqual(response.status_code, 410, response.json)
             self.assertTrue(source.exists())
+            response = client.post('/api/libraryimport/stage' + suffix, json=[
+                {'filepath': str(source), 'provider': 'comicvine',
+                 'provider_id': '101', 'issue_ids':['201'], 'issue_override':True}])
+            self.assertEqual(response.status_code, 200, response.json)
             preview = response.json['result']
             route = '/api/local-organization/' + preview['id'] + '/apply' + suffix
             self.assertEqual(client.get(route).status_code, 405)
-            applied = client.post(route)
+            applied = client.post(route, json={'revision': preview['revision']})
             self.assertEqual(applied.status_code, 200, applied.json)
             self.assertEqual(applied.json['result']['jobs'][0]['state'], 'completed')
             self.assertEqual(fixture.db.execute('SELECT issue_id FROM issues_files').fetchall(), [(1,)])
@@ -174,11 +171,9 @@ class LocalOrganizationTests(TestCase):
         fixture.folder.mkdir(exist_ok=True)
         source = fixture.folder / fixture.source.name
         fixture.source.rename(source)
-        with patch('backend.internals.provider_identity.ProviderIdentityDB.find_selected_volume', side_effect=ValueError), \
-                patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('authority switch')):
-            result = import_preview(fixture.dbpath, [{'filepath': str(source), 'provider': 'metron', 'provider_id': '101'}], False)
-            self.assertEqual(result['plans'][0]['identification_reasons'], ['publication_registration_conflict'])
-            self.assertEqual(apply_preview(fixture.dbpath, result['id'])['jobs'], [])
+        with patch('backend.implementations.volumes.Library.add_metadata', side_effect=AssertionError('authority switch')):
+            with self.assertRaisesRegex(ValueError, 'legacy_import_requires_review'):
+                import_preview(fixture.dbpath, [{'filepath': str(source), 'provider': 'metron', 'provider_id': '101'}], False)
         self.assertTrue(source.exists())
         self.assertEqual(fixture.db.execute('SELECT COUNT(*) FROM organization_jobs').fetchone()[0], 0)
 
@@ -253,6 +248,8 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
         self.addCleanup(self.db.close)
         self.db.execute("INSERT INTO config VALUES('database_version',57)")
         self.db.executemany('INSERT INTO config VALUES(?,?)', ((f.name, getattr(NAMING, f.name)) for f in fields(NAMING)))
+        for field in fields(NAMING):
+            setattr(self.settings, field.name, getattr(NAMING, field.name))
         self.db.commit()
         self.db_lookup.side_effect = self.db.cursor
         for target in ('backend.implementations.volumes.get_db', 'backend.internals.provider_identity.get_db',
@@ -273,6 +270,7 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
         self.prepare_fetch(volume_response(id='103802', name='Batman: Rebirth Deluxe Edition',
             start_year='2017', count_of_issues='3', aliases='', deck=''),
             [issue_response(id=str(301+n), volume={'id':'103802'}, issue_number=str(n), name=f'Book {n}', cover_date='2017-01-01') for n in (1,2,3)])
+        self.response.json.side_effect = list(self.response.json.side_effect) * 2
         folder = self.root / 'Batman - Rebirth Deluxe Edition (2017)'
         folder.mkdir()
         sources = []
@@ -281,21 +279,24 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
             with ZipFile(source, 'w') as archive:
                 archive.writestr('page.jpg', b'unchanged synthetic page')
             sources.append(source)
-        matches = [dict(filepath=str(p), provider='comicvine', provider_id='103802') for p in sources]
-        preview = import_preview(path, matches, False)
-        row = self.db.execute('SELECT id,folder,custom_folder FROM volumes').fetchone()
-        destination=Path(row[1])
+        matches = [dict(filepath=str(p), provider='comicvine', provider_id='103802',
+                        issue_ids=[str(301+n)], issue_override=True)
+                   for n,p in enumerate(sources, 1)]
+        preview = stage_import(path, matches, False)
+        destination=Path(preview['plans'][0]['target']).parent
         self.assertNotEqual(destination,folder)
-        self.assertTrue(destination.is_dir())
-        self.assertFalse(row[2])
-        self.assertEqual([p['issue_ids'] for p in preview['plans']], [[1],[2],[3]], preview)
+        self.assertFalse(destination.exists())
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 0)
+        self.assertEqual([p['issue_ids'] for p in preview['plans']], [['302'],['303'],['304']], preview)
         self.assertTrue(all(p['status']=='ready' for p in preview['plans']), preview)
-        result = apply_preview(path, preview['id'])
+        result = apply_draft(path, preview['id'], preview['revision'])
         self.assertEqual([j['state'] for j in result['jobs']], ['completed']*3, result)
+        row = self.db.execute('SELECT id,folder,custom_folder FROM volumes').fetchone()
+        self.assertFalse(row[2])
         self.assertTrue(all(not p.exists() and (destination/p.name).exists() for p in sources))
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 3)
         self.assertEqual(Volume(row[0]).get_public_data()['folder'], str(destination))
-        apply_preview(path, preview['id'])
+        apply_draft(path, preview['id'], preview['revision'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 1)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 3)
         self.scan.assert_not_called()
@@ -304,14 +305,17 @@ class RegistrationBoundaryTests(ImportHarness, TestCase):
     def test_real_registration_then_shared_organizer_in_disposable_database(self):
         from zipfile import ZipFile
         path = self.file_database()
+        self.response.json.side_effect = list(self.response.json.side_effect) * 2
         source = Path(self.comic_file())
         with ZipFile(source, 'w') as archive:
             archive.writestr('page.jpg', b'disposable image')
-        preview = import_preview(path, [{'filepath': str(source), 'provider': 'comicvine', 'provider_id': '2127'}], True)
+        preview = stage_import(path, [{'filepath': str(source), 'provider': 'comicvine',
+            'provider_id': '2127', 'issue_ids':['301'], 'issue_override':True}], True)
         self.assertTrue(source.exists())
         self.scan.assert_not_called()
         self.process.assert_not_called()
         self.assertEqual(preview['plans'][0]['status'], 'ready', preview)
-        applied = apply_preview(path, preview['id'])
+        applied = apply_draft(path, preview['id'], preview['revision'])
+        self.assertTrue(applied['jobs'], applied)
         self.assertEqual(applied['jobs'][0]['state'], 'completed', applied)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 1)

@@ -3,9 +3,10 @@ import sqlite3
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.internals.db import DB_SCHEMA, SCHEMA_71
+from backend.internals.db import SCHEMA_71
 from backend.internals.db_migration import _migrate_expanded_clients
-from backend.internals.torrent_schema import STATEMENTS
+from backend.internals.torrent_schema import (SCHEMA as TORRENT_SCHEMA,
+                                              STATEMENTS)
 
 
 class ExpandedMigrationTests(TestCase):
@@ -24,7 +25,7 @@ class ExpandedMigrationTests(TestCase):
 
     def test_parity_and_lineage(self):
         old = self.database()
-        fresh = self.database(DB_SCHEMA)
+        fresh = self.database(SCHEMA_71 + TORRENT_SCHEMA)
         with patch('backend.internals.db_migration.get_db', side_effect=old.cursor):
             _migrate_expanded_clients()
         sql = "SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"

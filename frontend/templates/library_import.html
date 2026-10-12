@@ -72,6 +72,14 @@
 <main>
 	<div class="page-header"><h1>Library Import</h1></div>
 	<div id="start-window">
+		<p id="import-save-status" aria-live="polite">Review choices are saved as you work.</p>
+		<p>Choose an exact publication and its issues. Saved reviews survive restart.
+			Import keeps the archive format and filename; Import and Rename changes the filename.
+			CBR conversion is available later through a separate Archive Maintenance review.</p>
+		<button id="resume-import-draft" type="button" class="hidden">Resume saved import review</button>
+		<label for="saved-import-drafts">Saved import reviews</label>
+		<select id="saved-import-drafts" aria-label="Saved import reviews"></select>
+		<button id="open-import-draft" type="button">Open selected review</button>
 		<h2>Scan existing files, review matches, then import</h2>
 		<p>Choose the folders and matching options below. Scanning does not confirm an import.</p>
 		<ul>

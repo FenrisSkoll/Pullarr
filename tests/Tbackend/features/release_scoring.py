@@ -527,7 +527,7 @@ class ReleaseScoringTests(TestCase):
 class ScoringDatabaseTests(ImportHarness, TestCase):
     def test_one_snapshot_four_reads_for_all_batch_sizes(self):
         path = self.comic_file()
-        import_library([{'id': 2127, 'filepath': path}])
+        self.fixture_owned_file(path)
         with patch('backend.internals.identification.get_db', side_effect=self.db.cursor):
             statements = []
             self.db.set_trace_callback(statements.append)

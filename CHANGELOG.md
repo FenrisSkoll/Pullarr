@@ -1,5 +1,20 @@
 # Release notes
 
+## Unreleased — Library Import review hardening (local only)
+
+- Retire publication-only mutating import routes with an actionable `410`;
+  preserve read-only discovery and explicit Add Comics.
+- Save versioned Library Import review rows and receipts in schema 73. Reopen
+  choices after navigation or restart, reject stale revisions, and keep
+  organizer jobs as the durable execution authority.
+- Recheck final archive bytes, canonical publication ownership, exact reviewed
+  issue links and destination permissions before showing Completed, including
+  on history reads. Keep partial batch results per file.
+- Offer explicit post-import archive maintenance review for completed CBR files;
+  ordinary Library Import preserves the original container.
+- Apply folder policy to newly created managed directories and add Linux-only
+  setgid/POSIX ACL acceptance tests. SMB access still needs a manual client check.
+
 ## 1.5.2 — local matching and Library Import reliability
 
 - Display provider descriptions as bounded, readable plain text in volume and

@@ -90,21 +90,12 @@ class OrganizerImportContract(ImportHarness, TestCase):
         self.assertIsNone(result[0]['metadata_source'])
         provider.assert_not_called()
 
-    def test_one_range_file_associates_with_two_local_issues(self):
+    def test_publication_only_range_and_rename_are_rejected_without_writes(self):
         path = self.comic_file(name='Example Hero v2 #1-2 (2021).cbz')
-        import_library([{'id': 2127, 'filepath': path}])
-        self.assertEqual(self.bindings(), [(path, 1, 301), (path, 2, 302)])
-        self.assertEqual(len(self.rows('files')), 1)
-
-    def test_move_failure_can_follow_committed_metadata(self):
-        # Known recovery gap, NOT a promise that the future organizer should
-        # preserve this ordering. No retry is attempted after the failure.
-        path = self.comic_file()
-        with patch('backend.features.library_import.rename_file',
-                   side_effect=PermissionError('synthetic move failure')):
-            with self.assertRaises(PermissionError):
-                import_library([{'id': 2127, 'filepath': path}], rename_files=True)
-        self.assertEqual(len(self.rows('volumes')), 1)
-        self.assertEqual(len(self.rows('issues')), 2)
+        for rename in (False, True):
+            with self.subTest(rename=rename), self.assertRaisesRegex(
+                    ValueError, 'legacy_import_requires_review'):
+                import_library([{'id': 2127, 'filepath': path}], rename_files=rename)
+        self.assertEqual(self.rows('volumes'), [])
         self.assertEqual(self.bindings(), [])
         self.assertTrue(Path(path).is_file())

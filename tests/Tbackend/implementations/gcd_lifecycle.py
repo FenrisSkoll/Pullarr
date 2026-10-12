@@ -234,9 +234,11 @@ class GcdLifecycleTests(GcdLifecycleHarness, TestCase):
             copied.executemany('INSERT INTO config VALUES(?,?)', ((f.name, getattr(NAMING, f.name)) for f in fields(NAMING)))
             copied.commit()
             before = len(self.fake.requests)
-            result = import_preview(path, [{'filepath': str(source), 'provider': 'gcd', 'provider_id': '1'}], True)
+            from backend.features.import_draft import apply_draft, stage_import
+            result = stage_import(path, [{'filepath': str(source), 'provider': 'gcd',
+                'provider_id': '1', 'issue_ids': ['1'], 'issue_override': True}], True)
             self.assertEqual(result['plans'][0]['status'], 'ready', result)
-            applied = apply_preview(path, result['id'])
+            applied = apply_draft(path, result['id'], result['revision'])
             self.assertEqual(applied['jobs'][0]['state'], 'completed', applied)
             self.assertTrue(Path(result['plans'][0]['target']).exists())
             self.assertEqual(copied.execute('SELECT issue_id FROM issues_files').fetchall(), [(1,)])

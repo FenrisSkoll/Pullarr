@@ -72,6 +72,18 @@ def run(rename):
                         result=page.locator('.search-results tr').filter(has_text=titles[index])
                         result.locator('button').first.click()
                         expect(rows.nth(index).locator('.issue-column')).to_contain_text(str(index+1))
+                    expect(page.locator('#import-save-status')).to_contain_text('Saved import review',timeout=30000)
+                    page.goto(origin+'/')
+                    page.evaluate("localStorage.removeItem('pullarr.libraryImportDraft.v3')")
+                    page.goto(origin+'/library-import')
+                    expect(page.locator('#saved-import-drafts option')).to_have_count(1)
+                    page.locator('#open-import-draft').click()
+                    rows=page.locator('.proposal-list tr[data-rowid]')
+                    expect(rows).to_have_count(3)
+                    for index in (0,1,2):
+                        expect(rows.nth(index).locator('.issue-column')).to_contain_text(str(index+1))
+                    rows.nth(0).locator('.issue-column button').first.click()
+                    expect(rows.nth(0).locator('.issue-column')).to_contain_text('Shadows')
                     with page.expect_request(lambda r:'/libraryimport/stage?' in r.url) as request:
                         page.locator('#preview-import-rename-button' if rename else '#preview-import-button').click()
                     payload=request.value.post_data_json
@@ -82,7 +94,7 @@ def run(rename):
                     page.locator('#import-rename-button' if rename else '#import-button').click()
                     expect(panel).to_contain_text('Imported 3 files into 3 publications.',timeout=60000)
                     for title in titles:expect(panel).to_contain_text(title)
-                    expect(rows).to_have_count(0)
+                    expect(rows).to_have_count(3)
                     with server.app.app_context():
                         db=get_db();volumes=db.execute('SELECT id,folder FROM volumes ORDER BY id').fetchall()
                         assert len(volumes)==3 and len({r[1] for r in volumes})==3

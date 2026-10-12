@@ -410,7 +410,7 @@ class IdentificationTests(TestCase):
 class MatchingDatabaseTests(ImportHarness, TestCase):
     def test_snapshot_query_count_independent_of_candidates(self):
         path = self.comic_file()
-        import_library([{'id': 2127, 'filepath': path}])
+        self.fixture_owned_file(path)
         with patch('backend.internals.identification.get_db', side_effect=self.db.cursor):
             statements = []
             self.db.set_trace_callback(statements.append)

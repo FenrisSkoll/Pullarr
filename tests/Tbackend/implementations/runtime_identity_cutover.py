@@ -12,13 +12,14 @@ from fixtures.metadata_refresh import RefreshHarness
 
 from backend.base.definitions import RootFolder
 from backend.base.switch_review import SwitchReviewError
-from backend.features.library_import import import_library
 from backend.implementations import volumes
 from backend.implementations.metadata.legacy import (legacy_issue_metadata,
                                                      legacy_volume_identities,
                                                      legacy_volume_metadata)
+from backend.implementations.metadata.persistence import ProviderVolumeIdentity
 from backend.implementations.metadata.registry import (
     PROVIDERS, get_bulk_volume_provider)
+from backend.implementations.volumes import Library
 from backend.internals.provider_authority import AuthorityToken
 from backend.internals.provider_identity import (ExternalIdentity,
                                                  MetadataIdentityError,
@@ -179,13 +180,9 @@ class RuntimeIdentityCutover(RefreshHarness, TestCase):
         roots = self.start_patch(
             'backend.features.library_import.RootFolders').return_value
         roots.get_all.return_value = [RootFolder(1, str(self.root) + '/', None)]
-        self.start_patch('backend.features.library_import.commit',
-                         side_effect=self.db.commit)
-        self.start_patch('backend.features.library_import.scan_files')
         self.prepare_fetch(volume_response(id=9001), [
                            issue_response(id=901, volume={'id': 9001})])
-        import_library(
-            [{'id': 9001, 'filepath': str(folder / 'synthetic.cbz')}])
+        Library.add_metadata(ProviderVolumeIdentity('comicvine', '9001'), 1, True)
         identity = ProviderIdentityDB.resolve_volume_metadata_identity(
             2, PROVIDERS.keys())
         self.assertEqual(

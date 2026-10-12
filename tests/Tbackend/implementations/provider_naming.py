@@ -9,7 +9,6 @@ from fixtures.library_import import ImportHarness
 from Tbackend.features.library_import_providers import ProviderImportHarness
 
 from backend.base.definitions import SpecialVersion
-from backend.features.library_import import import_library
 from backend.implementations.metadata.registry import PROVIDERS
 from backend.implementations.naming import (check_format, check_mock_filename,
                                             generate_issue_name,
@@ -72,8 +71,7 @@ class ProviderNaming(ProviderImportHarness, TestCase):
 
     def test_multi_issue_file_preview_execution_and_special_version(self):
         path = self.metron_file()
-        import_library([self.mapping(path)])
-        file_id = self.db.execute('SELECT id FROM files').fetchone()[0]
+        _, file_id = self.fixture_owned_file(path, ('701',), 'metron')
         self.db.execute('INSERT INTO issues_files(file_id,issue_id) VALUES (?,?)',
                         (file_id, self.volume.get_issues()[1].id))
         planned, _ = preview_mass_rename(self.local)
@@ -95,7 +93,7 @@ class ProviderNaming(ProviderImportHarness, TestCase):
                                                       confirm_claim,
                                                       coverage_preview)
         path = self.metron_file()
-        import_library([self.mapping(path)])
+        self.fixture_owned_file(path, ('701',), 'metron')
         file_id, filepath = self.db.execute('SELECT id,filepath FROM files').fetchone()
         before_hash = sha256(Path(filepath).read_bytes()).hexdigest()
         before = preview_mass_rename(self.local)
@@ -158,10 +156,11 @@ class ProviderNaming(ProviderImportHarness, TestCase):
 
     def test_preview_execution_collision_and_file_bindings(self):
         path = self.metron_file()
-        import_library([self.mapping(path)])
+        self.fixture_owned_file(path, ('701',), 'metron')
         current = self.bindings()[0][0]
         self.settings.file_naming += ' changed'
-        target = Path(current).with_name('Example Collection Issue 001 [metron-700-701] changed.cbz')
+        target = Path(preview_mass_rename(self.local)[0][current])
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b'occupied')
         planned, _ = preview_mass_rename(self.local)
         self.assertTrue(Path(current).exists())
@@ -173,7 +172,8 @@ class ProviderNaming(ProviderImportHarness, TestCase):
 
     def test_import_and_rename_uses_selected_tokens(self):
         path = self.metron_file(number=2)
-        import_library([self.mapping(path)], rename_files=True)
+        self.fixture_owned_file(path, ('702',), 'metron')
+        mass_rename(self.local, process_individual_files=False)
         self.assertEqual(Path(self.bindings()[0][0]).name,
                          'Example Collection Issue 002 [metron-700-702].cbz')
         self.session.get.assert_not_called()
@@ -243,7 +243,10 @@ class NewImportProviderNaming(ProviderImportHarness, TestCase):
         self.settings.file_naming = self.settings.file_naming_empty = FILE
         cv = self.comic_file()
         metron = self.metron_file(number=2)
-        import_library([self.mapping(cv, 'comicvine', '2127'), self.mapping(metron)], rename_files=True)
+        self.fixture_owned_file(cv, ('301',), 'comicvine')
+        metron_local, _ = self.fixture_owned_file(metron, ('702',), 'metron')
+        mass_rename(1, process_individual_files=False)
+        mass_rename(metron_local, process_individual_files=False)
         names = [Path(row[0]).name for row in self.bindings()]
         self.assertEqual(names, ['Example Hero Issue 001 [comicvine-2127-301].cbz',
                                  'Example Collection Issue 002 [metron-700-702].cbz'])

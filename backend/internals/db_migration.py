@@ -1863,3 +1863,21 @@ def _migrate_canonical_issue_facts() -> None:
         raise
     finally:
         cursor.execute(f'PRAGMA foreign_keys={fk_enabled}')
+
+
+@DatabaseMigrationHandler.register_handler(72)
+def _migrate_import_drafts() -> None:
+    """Create empty review tables; no media, ownership or job is changed."""
+    from backend.internals.import_draft_schema import STATEMENTS
+    cursor = get_db()
+    cursor.execute('SAVEPOINT import_drafts_73')
+    try:
+        for statement in STATEMENTS:
+            cursor.execute(statement)
+        if cursor.execute('PRAGMA foreign_key_check').fetchone() is not None:
+            raise RuntimeError('Import draft foreign key violation')
+        cursor.execute('RELEASE import_drafts_73')
+    except BaseException:
+        cursor.execute('ROLLBACK TO import_drafts_73')
+        cursor.execute('RELEASE import_drafts_73')
+        raise

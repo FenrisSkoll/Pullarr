@@ -662,12 +662,12 @@ class OrganizationExecutor:
                 execute(self, job, intent, ordinal, value)
                 return
         if kind == EffectKind.DIRECTORY.value:
-            from backend.features.managed_permissions import \
-                apply_managed_permissions
+            from backend.features.managed_permissions import (
+                apply_managed_permissions, mkdir_nofollow)
             for path in value['missing']:
                 self._scope(path)
                 if not os.path.lexists(path):
-                    os.mkdir(path)
+                    mkdir_nofollow(path)
                     info = os.stat(path)
                     value['created'].append([path, info.st_dev, info.st_ino])
                     sync_directory(os.path.dirname(path))
@@ -1196,10 +1196,27 @@ class OrganizationExecutor:
             observations['database'] = self._database(intent, expected['file']['id'] if expected['file'] else None)
         except OrganizationError as error:
             observations['database'] = {'unavailable': error.code.value}
-        return dict(id=job.id, state=job.state.value, source=job.source, target=job.target,
+        value = dict(id=job.id, state=job.state.value, source=job.source, target=job.target,
                     plan_digest=job.plan_digest, executor_policy=job.executor_policy,
                     policies=intent['policies'], fingerprints=intent['fingerprints'],
                     preconditions=intent['preconditions'], preview=intent['preview'],
                     steps=[dict(ordinal=s.ordinal, kind=s.kind, state=s.state.value,
                                 evidence=json.loads(s.evidence)) for s in job.steps], events=events,
                     observations=observations, error=job.error, inverse_of=job.inverse_of)
+        if intent.get('library_import'):
+            from backend.features.import_completion import verify_import_job
+            try:
+                row = self.store.db.execute('''SELECT r.plan FROM library_import_draft_rows r
+                    JOIN library_import_drafts d ON d.id=r.draft_id
+                    WHERE r.source=? AND d.id=?''',
+                    (job.source, (job.batch_id or '').removeprefix('local-preview:'))).fetchone()
+            except sqlite3.OperationalError:
+                row = None
+            if row is None:
+                value.update(state='recovery_required',
+                             import_receipt=dict(error='reviewed_import_draft_missing'))
+            else:
+                receipt = verify_import_job(self.store.path, job_id, json.loads(row[0]))
+                value['import_receipt'] = receipt
+                value['state'] = receipt['state']
+        return value

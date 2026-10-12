@@ -103,7 +103,9 @@ def _scan_files(
 
     if not isdir(volume_data.folder):
         if settings.create_empty_volume_folders:
-            create_folder(volume_data.folder)
+            from backend.features.managed_permissions import \
+                create_managed_folder
+            create_managed_folder(volume_data.folder)
         else:
             return
 

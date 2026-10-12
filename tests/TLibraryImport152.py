@@ -29,6 +29,8 @@ class Import152Tests(ImportHarness,TestCase):
 
     def split(self,rename=False,cleanup=False,extra=False,root_source=False,collision=False,fetch_failure=False,unrelated=False):
         self.settings.create_empty_volume_folders=False
+        self.db.execute("UPDATE config SET value=? WHERE key='volume_folder_naming'",
+                        (self.settings.volume_folder_naming,))
         self.db.execute("INSERT OR REPLACE INTO config VALUES('delete_empty_folders',?)",(str(int(cleanup)),))
         self.db.commit()
         if unrelated:
@@ -41,34 +43,38 @@ class Import152Tests(ImportHarness,TestCase):
         names=['Shadows','My Ainsel','The Moment of the Storm']
         responses=[];matches=[];sources=[]
         for n,name in enumerate(names,1):
+            if fetch_failure and n == 3:
+                break
             pid=str(110000+n)
             responses.extend([envelope(volume_response(id=pid,name='American Gods: '+name,start_year='2018',count_of_issues='1',aliases='',deck='')),
                 envelope([issue_response(id=str(210000+n),volume={'id':pid},issue_number=str(n),name=name,cover_date='2018-01-01')],number_of_total_results=1)])
             source=folder/f'American Gods (2018) - {n:03} - {name}.cbz'
             with ZipFile(source,'w') as archive:archive.writestr('page.jpg',b'synthetic unchanged pages')
             sources.append(source)
-            matches.append(dict(filepath=str(source),provider='comicvine',provider_id=pid))
+            matches.append(dict(filepath=str(source),provider='comicvine',provider_id=pid,
+                                issue_ids=[str(210000+n)],issue_override=True))
         if fetch_failure:responses[2:4]=[RuntimeError('synthetic metadata unavailable')]
-        self.response.json.side_effect=responses
-        value=import_preview(self.database,matches,rename)
+        self.response.json.side_effect=responses+(responses[:2]+responses[4:6]
+            if collision else responses[:2] if fetch_failure else responses)
+        value=stage_import(self.database,matches,rename)
         if fetch_failure:
-            self.assertEqual(sum(p['status']=='ready' for p in value['plans']),2,value)
-            applied=apply_preview(self.database,value['id'])
-            self.assertEqual(sum(j['state']=='completed' for j in applied['jobs']),2,applied)
+            self.response.json.side_effect = responses[:2]
+            self.assertEqual(sum(p['status']=='ready' for p in value['plans']),1,value)
+            applied=apply_draft(self.database,value['id'],value['revision'])
+            self.assertEqual(sum(j['state']=='completed' for j in applied['jobs']),1,applied)
             self.assertEqual(len(applied['review']),1)
             self.assertTrue(sources[1].is_file())
-            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0],2)
+            self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0],1)
             self.assertEqual(self.db.execute("SELECT COUNT(*) FROM volumes WHERE folder='' OR folder IS NULL").fetchone()[0],0)
             self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(),[])
             return
         self.assertEqual([p['status'] for p in value['plans']],['ready']*3,value)
-        volumes=self.db.execute('SELECT id,folder,custom_folder FROM volumes WHERE id<>99 ORDER BY id').fetchall()
-        self.assertEqual(len(volumes),3)
-        self.assertEqual(len({v[1] for v in volumes}),3)
-        self.assertTrue(all(v[1] and Path(v[1]).is_dir() and not v[2] for v in volumes))
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes WHERE id<>99').fetchone()[0],0)
         before=[p.read_bytes() for p in sources]
-        if collision:Path(value['plans'][1]['target']).write_bytes(b'unrelated destination')
-        applied=apply_preview(self.database,value['id'])
+        if collision:
+            Path(value['plans'][1]['target']).parent.mkdir(parents=True, exist_ok=True)
+            Path(value['plans'][1]['target']).write_bytes(b'unrelated destination')
+        applied=apply_draft(self.database,value['id'],value['revision'])
         if collision:
             self.assertEqual(sum(j['state']=='completed' for j in applied['jobs']),2,applied)
             self.assertEqual(sources[1].read_bytes(),before[1])
@@ -82,9 +88,9 @@ class Import152Tests(ImportHarness,TestCase):
             self.assertEqual(target.read_bytes(),payload[1])
             self.assertFalse(original.exists())
             if not rename:self.assertEqual(target.name,original.name)
-            self.assertEqual(Volume(plan['volume_id']).get_public_data()['folder'],str(target.parent))
+            self.assertEqual(Volume(applied['jobs'][value['plans'].index(plan)]['volume_id']).get_public_data()['folder'],str(target.parent))
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0],3)
-        apply_preview(self.database,value['id'])
+        apply_draft(self.database,value['id'],value['revision'])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0],3+int(unrelated))
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0],3)
         self.assertEqual(folder.exists(),not cleanup or extra or root_source)
@@ -100,10 +106,12 @@ class Import152Tests(ImportHarness,TestCase):
     def test_other_managed_folder_does_not_stale_import_fingerprint(self):self.split(unrelated=True)
 
     def test_reviewed_volume_number_moves_file_and_links_exact_issue(self):
+        self.settings.volume_folder_naming = '{series_name} ({year})'
+        self.db.execute("UPDATE config SET value=? WHERE key='volume_folder_naming'",
+                        (self.settings.volume_folder_naming,)); self.db.commit()
         folder = self.root/'Synthetics'; folder.mkdir()
-        source = folder/'Synthetics v01.cbz'
-        with ZipFile(source, 'w') as archive:
-            archive.writestr('page.jpg', b'synthetic page bytes')
+        source = folder/'Synthetics v01.cbr'
+        copyfile(Path(__file__).parent/'fixtures'/'archives'/'synthetic-25.cbr', source)
         original = source.read_bytes()
         responses = [envelope(volume_response(id='2222', name='Synthetics',
             start_year='2026', count_of_issues='1', aliases='', deck='')),
@@ -116,14 +124,16 @@ class Import152Tests(ImportHarness,TestCase):
         self.assertEqual(catalogue['loaded_issue_count'], 1)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 0)
         self.assertFalse((self.root/'Synthetics (2026)').exists())
-        preview = import_preview(self.database, [dict(filepath=str(source),
+        preview = stage_import(self.database, [dict(filepath=str(source),
             provider='comicvine', provider_id='2222', issue_ids=['3333'],
             issue_override=True)], False)
         self.assertEqual(preview['plans'][0]['status'], 'ready', preview)
-        outcome = apply_preview(self.database, preview['id'])
+        outcome = apply_draft(self.database, preview['id'],preview['revision'])
         self.assertEqual(outcome['jobs'][0]['state'], 'completed', outcome)
         target = Path(outcome['jobs'][0]['target'])
         self.assertEqual(target.name, source.name)
+        self.assertEqual(target.suffix, '.cbr')
+        self.assertEqual(target.parent.name, 'Synthetics (2026)')
         self.assertEqual(target.read_bytes(), original)
         self.assertFalse(source.exists())
         self.assertEqual(self.db.execute('''SELECT f.filepath,i.comicvine_id FROM files f
@@ -236,7 +246,8 @@ class Import152Tests(ImportHarness,TestCase):
             self.assertEqual(staged.json['result']['counts']['ready'], 4, staged.json)
             self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 0)
             applied = client.post('/api/local-organization/' + staged.json['result']['id'] + '/apply',
-                                  query_string=params)
+                                  query_string=params,
+                                  json={'revision':staged.json['result']['revision']})
             self.assertEqual(applied.status_code, 200, applied.json)
             self.assertEqual([j['state'] for j in applied.json['result']['jobs']], ['completed'] * 4,
                              (staged.json, applied.json))
@@ -279,8 +290,9 @@ class Import152Tests(ImportHarness,TestCase):
         stage = stage_import(self.database, [match], False)
         self.assertEqual(stage['plans'][0]['status'], 'ready', stage)
         source.write_bytes(source.read_bytes() + b'changed after preview')
-        with self.assertRaisesRegex(ValueError, 'stale_import_source'):
-            apply_draft(self.database, stage['id'])
+        result = apply_draft(self.database, stage['id'])
+        self.assertEqual(result['jobs'], [])
+        self.assertIn('stale_import_source', result['review'][0]['identification_reasons'])
         self.assertTrue(source.exists())
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 0)
 
@@ -305,8 +317,9 @@ class Import152Tests(ImportHarness,TestCase):
             self.skipTest('Fixture naming retains source; collision needs a move')
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b'unrelated')
-        with self.assertRaisesRegex(ValueError, 'occupied_import_target'):
-            apply_draft(self.database, stage['id'])
+        result = apply_draft(self.database, stage['id'])
+        self.assertEqual(result['jobs'], [])
+        self.assertIn('occupied_import_target', result['review'][0]['identification_reasons'])
         self.assertTrue(source.exists())
         self.assertEqual(target.read_bytes(), b'unrelated')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM volumes').fetchone()[0], 0)
@@ -402,6 +415,8 @@ class Import152Tests(ImportHarness,TestCase):
         self.db.execute("UPDATE config SET value=? WHERE key='volume_folder_naming'",
                         ('{series_name} ({year})',)); self.db.commit()
         source = Path(self.comic_file(name='Example Hero v2 #1 (2021).cbz'))
+        with ZipFile(source, 'w') as archive:
+            archive.writestr('page.jpg', b'synthetic page')
         stage = stage_import(self.database, [dict(filepath=str(source),
             provider='comicvine', provider_id='2127', issue_ids=['301'])], False)
         self.assertEqual(stage['counts']['ready'], 1, stage)

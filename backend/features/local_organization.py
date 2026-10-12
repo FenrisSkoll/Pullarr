@@ -49,7 +49,7 @@ _sessions: dict[str, LocalSession] = {}
 _lock = RLock()
 
 
-def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBatch, reviews=None, *, volume_id=None) -> dict:
+def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBatch, reviews=None, *, volume_id=None, identifier=None) -> dict:
     plans = [compact_plan(p) for p in batch.plans]
     with closing(sqlite3.connect(database)) as db:
         ids = sorted({i for p in plans for i in p['issue_ids']})
@@ -73,7 +73,7 @@ def retain_preview(database: str, roots: tuple[str, ...], batch: OrganizationBat
             del _sessions[next(iter(_sessions))]
         if len(_sessions) >= 16 or sum(len(s.batch.plans) for s in _sessions.values()) + len(batch.plans) > 4000:
             raise IntakeFailure(E.CONFIGURATION)
-        key = uuid4().hex
+        key = identifier or uuid4().hex
         stamps = {}
         if volume_id is not None:
             for index, plan in enumerate(batch.plans):
@@ -164,7 +164,11 @@ def scan_preview(database: str, volume_id: int) -> dict:
         db.close()
 
 
-def import_preview(database: str, matches: object, rename: bool) -> dict:
+def import_preview(database: str, matches: object, rename: bool, *, draft_id: str | None = None) -> dict:
+    # Registration is an apply effect. A publication-only or standalone caller
+    # cannot use this private adapter as an alternative mutating importer.
+    from backend.features.import_draft import require_applying_draft
+    require_applying_draft(database, draft_id, matches, rename)
     from backend.features.library_import import normalize_import_matches
     from backend.implementations.volumes import Library
     from backend.internals.db import commit
@@ -256,7 +260,8 @@ def import_preview(database: str, matches: object, rename: bool) -> dict:
                 PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', rename=rename, move=True),
                 path_contexts=contexts, path_issue_ids=chosen, issue_overrides=overrides,
                 authority=PublicationAuthority.IMPORT_SELECTION)
-        value = retain_preview(database, tuple(r[1] for r in roots), batch, reviews)
+        value = retain_preview(database, tuple(r[1] for r in roots), batch, reviews,
+                               identifier=draft_id)
         with _lock:
             session = _sessions[value['id']]
             for _, source, _, _ in authorized:
