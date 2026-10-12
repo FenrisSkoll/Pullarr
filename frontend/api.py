@@ -1054,6 +1054,104 @@ def api_intake_job(identifier, artifact):
         return return_api({}, 'OrganizationReviewRequired', 409)
 
 
+@api.route('/libraryimport/files', methods=['GET'])
+@error_handler
+@auth
+def api_library_import_files():
+    from backend.features.library_import import scan_library_import
+    from backend.internals.db import DBConnection
+
+    try:
+        return return_api(scan_library_import(DBConnection.default_file,
+            offset=int(request.args.get('offset', '0')),
+            page_size=int(request.args.get('page_size', '100')),
+            folder_limit=int(request.args.get('folder_limit', '500')),
+            folder_filter=request.args.get('folder_filter') or None))
+    except (ValueError, OSError) as error:
+        code = str(error) if isinstance(error, ValueError) else 'scan_unavailable'
+        if code not in {'invalid_scan_parameters', 'unsafe_folder_filter', 'scan_unavailable'}:
+            code = 'invalid_scan_parameters'
+        return return_api({'code':code},
+                          'LibraryImportScan', 400)
+
+
+@api.route('/libraryimport/catalog', methods=['POST'])
+@error_handler
+@auth
+def api_library_import_catalog():
+    from backend.features.import_issue_catalog import issue_catalog
+    from backend.internals.db import DBConnection
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {'provider', 'provider_id', 'files'}:
+        return return_api({'code':'invalid_catalog_request'}, 'LibraryImportCatalog', 400)
+    try:
+        return return_api(issue_catalog(DBConnection.default_file,
+                                        data['provider'], data['provider_id'], data['files']))
+    except ValueError as error:
+        code = str(error)
+        if code not in {'invalid_catalog_request','unsafe_catalog_path','unsupported_catalog_file',
+                        'ambiguous_publication_identity','publication_identity_mismatch',
+                        'duplicate_provider_issue'}:
+            code = 'catalog_invalid'
+        return return_api({'code':code}, 'LibraryImportCatalog', 409)
+    except Exception as error:
+        LOGGER.warning('Library Import catalogue unavailable: %s', type(error).__name__)
+        return return_api({'code':'catalog_unavailable'}, 'LibraryImportCatalog', 503)
+
+
+@api.route('/libraryimport/stage', methods=['POST'])
+@error_handler
+@auth
+def api_library_import_stage():
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.features.import_draft import stage_import
+    from backend.internals.db import DBConnection
+
+    rename = request.args.get('rename_files', 'false')
+    if rename not in ('true', 'false'):
+        return return_api({'code':'invalid_rename_policy'}, 'LibraryImportStage', 400)
+    try:
+        return return_api(stage_import(DBConnection.default_file, request.get_json(silent=True),
+                                       rename == 'true'))
+    except (ValueError, OSError) as error:
+        code = str(error) if isinstance(error, ValueError) else 'stage_unavailable'
+        if code not in {'invalid_import_batch','unsafe_import_source','unsupported_import_source',
+                        'invalid_overlap_override','catalog_invalid','stage_unavailable'}:
+            code = 'stage_invalid'
+        return return_api({'code':code},
+                          'LibraryImportStage', 409)
+    except IntakeFailure as error:
+        return return_api({'code':error.code.value}, 'LibraryImportStage', 409)
+
+
+@api.route('/libraryimport/repair-folder', methods=['POST'])
+@error_handler
+@auth
+def api_library_import_repair_folder():
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.base.organization_job import OrganizationError
+    from backend.features.import_draft import repair_empty_import_destination
+    from backend.internals.db import DBConnection
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {'volume_id', 'folder', 'source'}:
+        return return_api({'code':'invalid_repair_request'}, 'LibraryImportRepair', 400)
+    try:
+        return return_api(repair_empty_import_destination(DBConnection.default_file,
+            data['volume_id'], data['folder'], data['source']))
+    except (ValueError, OrganizationError, IntakeFailure) as error:
+        code = error.code.value if isinstance(error, (OrganizationError, IntakeFailure)) else str(error)
+        if isinstance(error, ValueError) and code not in {'invalid_repair_request',
+                'repair_unsupported_platform',
+                'repair_folder_not_owned','repair_source_unavailable','repair_folder_not_empty',
+                'repair_folder_has_file_record','repair_folder_conflict','repair_folder_not_canonical',
+                'destination_group_mismatch','destination_group_access_denied',
+                'destination_permission_unavailable'}:
+            code = 'repair_invalid'
+        return return_api({'code':code}, 'LibraryImportRepair', 409)
+
+
 @api.route('/libraryimport/preview', methods=['POST'])
 @api.route('/volumes/<int:volume_id>/organization-scan', methods=['POST'])
 @api.route('/local-organization/<identifier>/apply', methods=['POST'])
@@ -1071,7 +1169,10 @@ def api_local_organization(volume_id=None, identifier=None):
     from backend.internals.db import DBConnection
     try:
         if identifier is not None:
-            result = apply_preview(DBConnection.default_file, identifier)
+            from backend.features.import_draft import apply_draft
+            result = apply_draft(DBConnection.default_file, identifier)
+            if result is None:
+                result = apply_preview(DBConnection.default_file, identifier)
         elif volume_id is not None:
             result = scan_preview(DBConnection.default_file, volume_id)
         else:
@@ -1089,7 +1190,12 @@ def api_local_organization(volume_id=None, identifier=None):
         return return_api({'code':'association_lookup_failed'}, 'OrganizationReviewRequired', 409)
     except (OSError, ValueError) as error:
         LOGGER.error('Local organization request failed for volume %s: %s', volume_id, type(error).__name__)
-        return return_api({'code':'local_inspection_failed'}, 'OrganizationReviewRequired', 409)
+        code = str(error) if isinstance(error, ValueError) else 'local_inspection_failed'
+        if code not in {'stale_import_draft','import_apply_in_progress',
+                        'stale_import_source','stale_import_catalogue',
+                        'occupied_import_target'}:
+            code = 'local_inspection_failed'
+        return return_api({'code':code}, 'OrganizationReviewRequired', 409)
 
 
 @api.route('/volumes/<int:volume_id>/local-scan/<identifier>/review/<int:index>', methods=['GET', 'POST'])

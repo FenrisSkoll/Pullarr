@@ -25,6 +25,10 @@ database and comics before upgrades or filesystem operations.
 - Reviewed Maintenance, including CBR → CBZ, CBZ integrity verification and
   explicit deterministic repack. Page bytes and admitted metadata are preserved;
   replacements are journaled and never mutate shared seed bytes in place.
+- Library Import discovers local archives independently of metadata availability,
+  lets you choose a provider publication and its exact issues on one page, and
+  previews canonical destinations before a journalled import. See
+  [workflow details](docs/reliability-workflows.md).
 
 Use sources only for content you are entitled to obtain. Provider and indexer
 availability, terms and rate limits are outside Pullarr's control.

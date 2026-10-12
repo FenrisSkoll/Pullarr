@@ -538,7 +538,16 @@ class OrganizationExecutor:
             raise OrganizationError(ExecutionCode.CONFLICT, 'Metadata replacement state not proven')
         if kind == EffectKind.DIRECTORY.value:
             safe_path(intent['folder'])
-            return Path(intent['folder']).is_dir()
+            if Path(intent['folder']).is_dir():
+                from backend.features.managed_permissions import \
+                    apply_managed_permissions
+                for path, device, inode in value.get('created', ()):
+                    current = os.stat(path, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) != (device, inode):
+                        raise OrganizationError(ExecutionCode.CONFLICT)
+                    apply_managed_permissions(path, directory=True)
+                return True
+            return False
         if kind == CLEANUP:
             return False  # rmdir is conditional; missing directories are skipped.
         # DB mutation and receipt use one SQLite transaction. STARTED with old
@@ -554,6 +563,15 @@ class OrganizationExecutor:
             if self._database(intent, fid) != before:
                 raise OrganizationError(ExecutionCode.CONFLICT)
             self._metadata_guard(intent, before['folder'])
+            if (kind == EffectKind.FILE_RECORD.value and intent.get('library_import')
+                    and intent['source'] != intent['target']):
+                from backend.features.managed_permissions import \
+                    apply_managed_permissions
+
+                # Apply and verify file access before recording ownership or
+                # issue links. Never change the mode of a shared source inode.
+                if os.stat(intent['target'], follow_symlinks=False).st_nlink == 1:
+                    apply_managed_permissions(intent['target'], directory=False)
             db = self.store.db
             if kind == EffectKind.VOLUME_FOLDER.value:
                 if before['folder']:
@@ -644,6 +662,8 @@ class OrganizationExecutor:
                 execute(self, job, intent, ordinal, value)
                 return
         if kind == EffectKind.DIRECTORY.value:
+            from backend.features.managed_permissions import \
+                apply_managed_permissions
             for path in value['missing']:
                 self._scope(path)
                 if not os.path.lexists(path):
@@ -653,6 +673,7 @@ class OrganizationExecutor:
                     sync_directory(os.path.dirname(path))
                     with self.store.transaction():
                         self.store.checkpoint(job.id, ordinal, StepState.STARTED, value)
+                    apply_managed_permissions(path, directory=True)
                 elif not Path(path).is_dir():
                     raise OrganizationError(ExecutionCode.CONFLICT)
         elif kind == EffectKind.RELOCATE.value:

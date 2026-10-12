@@ -24,6 +24,8 @@ const liEls = {
 	buttons: {
 		cancel: document.querySelectorAll('.cancel-button'),
 		run: document.getElementById('run-import-button'),
+		preview: document.getElementById('preview-import-button'),
+		previewRename: document.getElementById('preview-import-rename-button'),
 		import: document.getElementById('import-button'),
 		importRename: document.getElementById('import-rename-button')
 	}
@@ -32,6 +34,127 @@ const liEls = {
 const rowidToFilepath = {}
 let shiftSelectStart = null
 const selectedRows = new Set()
+const issueRequests = new Map();
+let scanGeneration = 0;
+
+function issueCell(rowid) {
+	return liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"] .issue-column`);
+}
+
+function issueSummary(rowid) {
+	const entry = rowidToFilepath[rowid], cell = issueCell(rowid);
+	if (!cell) return;
+	cell.replaceChildren();
+	const status = document.createElement('span');
+	if (!entry.identity) {
+		status.textContent = 'Choose publication first'; cell.appendChild(status); return;
+	}
+	const labels = (entry.catalog?.issues || []).filter(issue => entry.issueIds?.includes(issue.id))
+		.map(issue => `${issue.number}${issue.title ? ' · ' + issue.title : ''}`);
+	status.textContent = labels.length ? labels.join(', ') :
+		(entry.catalog ? 'Choose issue · needs review' : 'Issue catalogue not loaded');
+	if (labels.length && entry.issueConfidence)
+		status.textContent += ` · ${entry.issueConfidence}`;
+	cell.appendChild(status);
+	const button = document.createElement('button');
+	button.type = 'button'; button.textContent = entry.catalog ? 'Edit issues' : 'Load issues';
+	button.onclick = () => openIssueEditor(rowid);
+	cell.appendChild(button);
+}
+
+async function loadIssueCatalogue(rowid, apiKey, showEditor=false) {
+	const entry = rowidToFilepath[rowid];
+	if (!entry?.identity) return;
+	const generation = (issueRequests.get(rowid) || 0) + 1;
+	issueRequests.set(rowid, generation);
+	const identity = {...entry.identity};
+	const cell = issueCell(rowid);
+	if (cell) cell.textContent = 'Loading provider issue catalogue…';
+	try {
+		const response = await sendAPI('POST', '/libraryimport/catalog', apiKey, {}, {
+			provider: identity.provider, provider_id: identity.id, files: [entry.filepath]
+		});
+		if (!response.ok) throw response;
+		const catalog = (await response.json()).result;
+		if (generation !== issueRequests.get(rowid) || rowidToFilepath[rowid] !== entry
+			|| entry.identity.provider !== identity.provider || entry.identity.id !== identity.id) return;
+		entry.catalog = catalog;
+		if (!entry.manualIssues) {
+			const proposal = catalog.proposals[entry.filepath];
+			entry.issueIds = ['exact', 'strong'].includes(proposal?.confidence) ? proposal.issue_ids : [];
+			entry.issueReason = proposal?.reason || '';
+			entry.issueConfidence = proposal?.confidence || 'none';
+		}
+		issueSummary(rowid);
+		if (showEditor) openIssueEditor(rowid);
+	} catch (_) {
+		if (generation === issueRequests.get(rowid) && rowidToFilepath[rowid] === entry && cell) {
+			issueSummary(rowid);
+			const notice = document.createElement('p');
+			notice.textContent = 'Catalogue unavailable. Retry Load issues; local file remains listed.';
+			cell.appendChild(notice);
+		}
+	}
+}
+
+function openIssueEditor(rowid) {
+	const entry = rowidToFilepath[rowid];
+	if (!entry?.identity) return;
+	if (!entry.catalog) {
+		usingApiKey().then(key => loadIssueCatalogue(rowid, key, true));
+		return;
+	}
+	issueSummary(rowid);
+	const cell = issueCell(rowid), panel = document.createElement('section');
+	panel.className = 'import-issue-editor';
+	panel.setAttribute('aria-label', 'Choose issues for ' + entry.filepath.split(/[\\/]/).pop());
+	const heading = document.createElement('p');
+	heading.textContent = `${entry.catalog.provider}:${entry.catalog.provider_id} · ${entry.catalog.reported_issue_count ?? 'unknown'} reported · ${entry.catalog.loaded_issue_count} loaded (${entry.catalog.completeness})`;
+	panel.appendChild(heading);
+	const reason = document.createElement('p');
+	reason.textContent = entry.issueReason || 'Choose exact issues from this publication.';
+	panel.appendChild(reason);
+	const search = document.createElement('input');
+	search.type = 'search'; search.placeholder = 'Search number or title';
+	search.setAttribute('aria-label', 'Search provider issues'); panel.appendChild(search);
+	const list = document.createElement('div'); list.className = 'import-issue-list'; panel.appendChild(list);
+	const chosen = new Set(entry.issueIds || []);
+	const render = () => {
+		list.replaceChildren();
+		const query = search.value.trim().toLowerCase();
+		const matches = entry.catalog.issues.filter(issue => !query ||
+			`${issue.number} ${issue.title || ''} ${issue.date || ''}`.toLowerCase().includes(query));
+		for (const issue of matches.slice(0, 100)) {
+			const label = document.createElement('label');
+			const input = document.createElement('input'); input.type = 'checkbox';
+			input.checked = chosen.has(issue.id);
+			input.onchange = () => input.checked ? chosen.add(issue.id) : chosen.delete(issue.id);
+			label.appendChild(input);
+			const span = document.createElement('span');
+			span.textContent = `${issue.number}${issue.title ? ' · ' + issue.title : ''}${issue.date ? ' · ' + issue.date : ''}${issue.owned ? ' · already owned' : ''}`;
+			label.appendChild(span); list.appendChild(label);
+		}
+		if (matches.length > 100) {
+			const more = document.createElement('p'); more.textContent = `${matches.length} results; narrow the search.`; list.appendChild(more);
+		}
+	};
+	search.oninput = render; render();
+	const overlapLabel = document.createElement('label');
+	const overlap = document.createElement('input'); overlap.type = 'checkbox';
+	overlap.checked = !!entry.allowOverlap; overlapLabel.appendChild(overlap);
+	const overlapText = document.createElement('span');
+	overlapText.textContent = 'I reviewed overlap with another file or an already owned issue';
+	overlapLabel.appendChild(overlapText); panel.appendChild(overlapLabel);
+	const save = document.createElement('button'); save.type='button'; save.textContent='Use selected issues';
+	save.onclick = () => {
+		entry.issueIds = [...chosen]; entry.manualIssues = true;
+		entry.allowOverlap = overlap.checked;
+		entry.issueReason = 'Reviewed issue selection; validated against publication identity during preview.';
+		entry.issueConfidence = 'reviewed';
+		issueSummary(rowid);
+	};
+	panel.appendChild(save); cell.appendChild(panel); search.focus();
+}
 
 function buildMatchTitle(title, year, issueCount) {
 	let result = ''
@@ -58,18 +181,42 @@ function updateSelection() {
 	})
 }
 
-function loadProposal(apiKey) {
-	const params = {
-		auto_match: document.getElementById('auto-match-input').checked,
-		limit: parseInt(document.querySelector('#limit-input').value),
+function loadPublicationProposals(apiKey, scanParams, generation) {
+	const params = {auto_match: true, limit: Math.min(scanParams.folder_limit, 20),
 		limit_parent_folder: document.querySelector('#folder-input').value,
-		only_english: document.querySelector('#lang-input').value
+		only_english: document.querySelector('#lang-input').value};
+	if (scanParams.folder_filter) params.folder_filter = scanParams.folder_filter;
+	fetchAPI('/libraryimport', apiKey, params).then(json => {
+		if (generation !== scanGeneration) return;
+		const byPath = new Map(Object.entries(rowidToFilepath).map(([id, value]) => [value.filepath, id]));
+		let matched = 0;
+		for (const result of json.result) {
+			const rowid = byPath.get(result.filepath);
+			if (rowid === undefined || result.cv?.id == null || rowidToFilepath[rowid].identity) continue;
+			rowidToFilepath[rowid].identity = {provider:'comicvine', id:String(result.cv.id)};
+			matched++;
+			const link = liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"] a`);
+			link.href = result.cv.link || '';
+			link.textContent = buildMatchTitle(result.cv.title, null, result.cv.issue_count) + ' · ComicVine proposal';
+			issueSummary(rowid);
+		}
+		if (matched) document.getElementById('scan-summary').textContent += ` · ${matched} ComicVine publication suggestions loaded`;
+	}).catch(() => {
+		liEls.rateLimitBanner.textContent = 'Automatic publication suggestions are unavailable. All discovered files remain listed; choose a publication manually.';
+		hide([], [liEls.rateLimitBanner]);
+	});
+}
+
+function loadProposal(apiKey, offset=0) {
+	const params = {
+		folder_limit: parseInt(document.querySelector('#limit-input').value),
+		page_size: 100, offset
 	};
 	const ffi = document.querySelector('#folder-filter-input');
 	if (ffi.offsetParent !== null && (ffi.value || null) !== null)
 		params.folder_filter = encodeURIComponent(ffi.value);
 
-	hide(
+	if (!offset) hide(
 		[
 			liEls.views.start,
 			document.querySelector('#folder-filter-error'),
@@ -78,30 +225,73 @@ function loadProposal(apiKey) {
 		[liEls.views.loading]
 	);
 
-	liEls.proposalList.innerHTML = '';
-	selectedRows.clear();
-	Object.keys(rowidToFilepath).forEach(key => delete rowidToFilepath[key]);
-	liEls.selectAll.checked = true;
+	if (!offset) {
+		scanGeneration++;
+		liEls.proposalList.innerHTML = '';
+		lastRenderedFolder = null; stagedImport = null;
+		selectedRows.clear(); issueRequests.clear();
+		Object.keys(rowidToFilepath).forEach(key => delete rowidToFilepath[key]);
+		liEls.selectAll.checked = true;
+	}
+	const generation = scanGeneration;
 
-	fetchAPI('/libraryimport', apiKey, params)
+	fetchAPI('/libraryimport/files', apiKey, params)
 	.then(json => {
-		json.result.forEach((result, rowid) => {
+		if (generation !== scanGeneration) return;
+		const page = json.result;
+		const summary = page.counts;
+		document.getElementById('scan-summary').textContent =
+			`${summary.scanned_folders}/${summary.eligible_folders} folders scanned · ${summary.discovered} unmanaged archives · ${summary.already_managed} already managed · ${summary.invalid} invalid · ${summary.skipped} skipped${page.enumeration_complete ? '' : ' · partial scan; increase folder limit or narrow the filter'}`;
+		const next = document.getElementById('import-next-page');
+		next.classList.toggle('hidden', page.next_offset === null);
+		next.onclick = () => loadProposal(apiKey, page.next_offset);
+		page.items.forEach((result, index) => {
+			const rowid = offset + index;
+			if (result.folder !== lastRenderedFolder) {
+				const group = document.createElement('tr');
+				group.className = 'import-source-group';
+				const label = document.createElement('th');
+				label.colSpan = 5; label.scope = 'rowgroup';
+				label.textContent = result.folder;
+				group.appendChild(label); liEls.proposalList.appendChild(group);
+				lastRenderedFolder = result.folder;
+			}
 			const entry = liEls.preBuild.liResult.cloneNode(true);
 			entry.dataset.rowid = rowid;
 			rowidToFilepath[rowid] = {
 				identity: result.metadata_source || (result.cv.id === null ? null : {
 					provider: 'comicvine', id: String(result.cv.id)
 				}),
-				filepath: result.filepath
+				filepath: result.filepath, stamp: result.stamp,
+				issueIds: [], manualIssues: false, allowOverlap: false
 			};
 			entry.addEventListener("click", e => e.stopPropagation())
 
-			const toggle = entry.querySelector("input[type='checkbox']")
+			const toggle = entry.querySelector('.import-file-select')
 			toggle.onchange = () => toggleSelected(rowid)
 
 			const title = entry.querySelector('.file-column');
 			title.innerText = result.file_title;
 			title.title = result.filepath;
+			const evidence = document.createElement('details');
+			const summary = document.createElement('summary'); summary.textContent = 'File details';
+			evidence.appendChild(summary);
+			const facts = document.createElement('p');
+			facts.textContent = `${result.filepath} · ${result.size} bytes · ${result.extension}` +
+				(result.parsed ? ` · parsed year ${result.parsed.year ?? 'unknown'}, number ${result.parsed.issue_number ?? 'unknown'}, volume ${result.parsed.volume_number ?? 'unknown'}` : '');
+			evidence.appendChild(facts); title.appendChild(evidence);
+			if (result.embedded) {
+				const embedded = document.createElement('p');
+				embedded.textContent = `ComicInfo: ${result.embedded.series || 'unknown series'} · Number ${result.embedded.number || 'unknown'} · ${result.embedded.title || 'untitled'}` +
+					(result.embedded.references?.length ? ` · exact IDs ${result.embedded.references.map(ref => `${ref.provider}:${ref.kind}:${ref.id}`).join(', ')}` : '');
+				evidence.appendChild(embedded);
+			}
+			if (result.warnings?.length) {
+				const warning = document.createElement('p');
+				warning.textContent = `Archive evidence: ${result.warnings.join(', ')}`;
+				evidence.appendChild(warning);
+			}
+			evidence.onclick = event => event.stopPropagation();
 			title.onclick = (e) => {
 				e.stopPropagation()
 
@@ -145,61 +335,41 @@ function loadProposal(apiKey) {
 
 			const CV_link = entry.querySelector('a');
 			CV_link.href = result.cv.link || '';
-			CV_link.innerText = buildMatchTitle(
-				result.cv.title, null, result.cv.issue_count
-			) + (result.cv.id === null ? '' : ' · ComicVine')
+			CV_link.innerText = result.metadata_source ?
+				`Embedded ${result.metadata_source.provider}:${result.metadata_source.id} · verify publication` :
+				buildMatchTitle(result.cv.title, null, result.cv.issue_count) +
+				(result.cv.id === null ? '' : ' · ComicVine')
 
 			entry.querySelector('button').onclick = e => openEditCVMatch(rowid);
 
 			liEls.proposalList.appendChild(entry);
+			issueSummary(rowid);
 		});
 
-		if (json.result.length > 0) {
+		if (page.items.length > 0 || offset > 0) {
 			hide([liEls.views.loading], [liEls.views.list]);
-
-			const has_empty_matches = json.result.some(
-				r => r.cv.id === null
-			);
-			if (has_empty_matches) {
-				fetchAPI('/system/status', apiKey)
-				.then(checks => {
-					const search_limited = checks.result.some(
-						st => st.type === 'cv_rate_limit'
-							&& st.display_subtypes.includes('search_volumes')
-					);
-					if (search_limited)
-						hide([], [liEls.rateLimitBanner]);
-				});
-			};
+			if (!offset && document.getElementById('auto-match-input').checked)
+				loadPublicationProposals(apiKey, params, generation);
 		} else
 			hide([liEls.views.loading], [liEls.views.noResult]);
 	})
-	.catch(e => {
-		e.json().then(j => {
-			if (
-				j.error === "InvalidKeyValue"
-				&& j.result.key === "comicvine_api_key"
-			)
-				hide([liEls.views.loading], [liEls.views.noCv]);
-
-			else if (
-				j.error === "InvalidKeyValue"
-				&& j.result.key === "folder_filter"
-			)
-				hide(
-					[liEls.views.loading],
-					[liEls.views.start, document.querySelector('#folder-filter-error')]
-				);
-
-			else
-				console.log(j);
-		});
+	.catch(async error => {
+		if (generation !== scanGeneration) return;
+		const body = await error?.json?.().catch(() => null);
+		const code = body?.result?.code;
+		if (code === 'unsafe_folder_filter' || code === 'invalid_scan_parameters')
+			hide([liEls.views.loading], [liEls.views.start, document.querySelector('#folder-filter-error')]);
+		else {
+			hide([liEls.views.loading], [liEls.views.start]);
+			document.getElementById('scan-summary').textContent =
+				`Local scan failed: ${code || 'filesystem unavailable'}. Retry after checking the selected root.`;
+		}
 	});
 };
 
 function toggleSelectAll() {
 	const checked = liEls.selectAll.checked;
-	liEls.proposalList.querySelectorAll('input[type="checkbox"]').forEach(
+	liEls.proposalList.querySelectorAll('.import-file-select').forEach(
 		e => e.checked = checked
 	);
 };
@@ -209,12 +379,12 @@ function toggleSelected(rowid) {
 		return
 
 	const checked = liEls.proposalList.querySelector(
-		`tr[data-rowid="${rowid}"] input[type="checkbox"]`
+		`tr[data-rowid="${rowid}"] .import-file-select`
 	).checked
 
 	selectedRows.forEach(rowid =>
 		liEls.proposalList.querySelector(
-			`tr[data-rowid="${rowid}"] input[type="checkbox"]`
+			`tr[data-rowid="${rowid}"] .import-file-select`
 		).checked = checked
 	)
 }
@@ -242,22 +412,39 @@ function editCVMatch(
 		site_url, title, year, issue_count);
 };
 
-function editMetadataMatch(identity, site_url, title, year, issue_count) {
+function editMetadataMatch(identity, site_url, title, year, issue_count, bulk=false) {
 	// Editing a row never silently overwrites other selected rows' authority.
-	const target_td = [editMatchId];
+	const target_td = bulk ? [...liEls.proposalList.querySelectorAll('tr[data-rowid]')]
+		.filter(row => row.querySelector('.import-file-select')?.checked)
+		.map(row => row.dataset.rowid) : [editMatchId];
+	if (!target_td.length) {
+		document.getElementById('match-error').textContent = 'Check at least one file before bulk assignment.';
+		return false;
+	}
 
 	target_td.forEach(rowid => {
 		const tr = liEls.proposalList.querySelector(`tr[data-rowid="${rowid}"]`)
 		rowidToFilepath[rowid].identity = {provider: identity.provider, id: identity.id};
+		rowidToFilepath[rowid].catalog = null;
+		rowidToFilepath[rowid].issueIds = [];
+		rowidToFilepath[rowid].manualIssues = false;
+		rowidToFilepath[rowid].issueReason = '';
+		rowidToFilepath[rowid].issueConfidence = 'none';
+		rowidToFilepath[rowid].allowOverlap = false;
 		const link = tr.querySelector('a');
 		link.href = site_url;
 		link.innerText = buildMatchTitle(title, year, issue_count) + ` · ${identity.provider}`
+		issueSummary(rowid);
+		usingApiKey().then(key => loadIssueCatalogue(rowid, key, true));
 	});
+	return true;
 };
 
 let metadataSearchGeneration = 0;
+let importSearchArtwork = null;
 function searchMetadata() {
 	const generation = ++metadataSearchGeneration;
+	if (importSearchArtwork) importSearchArtwork.stop();
 	const input = liEls.search.input;
 	const provider = liEls.search.provider.value;
 	const query = input.value;
@@ -266,12 +453,15 @@ function searchMetadata() {
 	usingApiKey()
 	.then(api_key => {
 		liEls.search.results.innerHTML = '';
-		const params = {query: encodeURIComponent(query), expand_relations: 'false'};
-		if (provider !== 'comicvine') params.provider = provider;
+		const params = {query: encodeURIComponent(query), provider,
+			presentation: 'v2', artwork: 'true', expand_relations: 'false'};
 		fetchAPI('/volumes/search', api_key, params)
 		.then(json => {
 			if (generation !== metadataSearchGeneration || provider !== liEls.search.provider.value || query !== input.value) return;
 			const groups = MetadataSearchPresentation.groups(json.result);
+			importSearchArtwork = MetadataSearchPresentation.artwork(
+				json.result.artwork_ticket, api_key,
+				() => generation === metadataSearchGeneration && provider === liEls.search.provider.value);
 			const entries = groups ? groups.flatMap(group => [{search_group: group}, ...group.results]) : json.result;
 			entries.forEach(result => {
 				if (result.search_group) {
@@ -282,12 +472,18 @@ function searchMetadata() {
 
 				const title = entry.querySelector('td:nth-child(1) a');
 				title.href = groups ? MetadataSearchPresentation.safeLink(result.site_url) : result.site_url;
+				const cover = document.createElement('img');
+				cover.className = 'import-publication-cover'; cover.alt = '';
+				cover.src = MetadataSearchPresentation.safeLink(result.cover_link) ||
+					`${typeof url_base === 'string' ? url_base : ''}/static/img/favicon.svg`;
 				title.innerText = buildMatchTitle(
 					result.title, result.year, result.issue_count
 				) + ` · ${result.metadata_source ? result.metadata_source.provider + ':' + result.metadata_source.id : provider}`;
+				title.prepend(cover);
 				if (groups) {
 					const note = document.createElement('p');
-					note.textContent = MetadataSearchPresentation.annotations(result);
+					note.textContent = (result.already_added == null ? '' : 'Already in Library · ') +
+						MetadataSearchPresentation.annotations(result);
 					entry.querySelector('td:nth-child(1)').appendChild(note);
 				}
 
@@ -302,8 +498,17 @@ function searchMetadata() {
 					);
 					closeWindow();
 				};
+				const bulkButton = entry.querySelector('.bulk-match');
+				bulkButton.onclick = e => {
+					const assigned = editMetadataMatch(result.metadata_source ||
+						{provider: 'comicvine', id: String(result.comicvine_id)},
+						groups ? MetadataSearchPresentation.safeLink(result.site_url) : result.site_url,
+						result.title, result.year, result.issue_count, true);
+					if (assigned) closeWindow();
+				};
 
 				liEls.search.results.appendChild(entry);
+				importSearchArtwork.observe(entry, result);
 			});
 			hide([], [liEls.search.container]);
 		}).catch(() => {
@@ -316,41 +521,128 @@ function searchMetadata() {
 };
 
 let importPending = false;
-async function importLibrary(api_key, rename=false) {
-	if (importPending) return;
-	const data = [...liEls.proposalList.querySelectorAll(
-		'tr:has(input[type="checkbox"]:checked)'
-	)]
+let stagedImport = null;
+let lastRenderedFolder = null;
+function selectedImportData() {
+	return [...liEls.proposalList.querySelectorAll('tr[data-rowid]')]
+		.filter(row => row.querySelector('.import-file-select')?.checked)
 		.filter(i => rowidToFilepath[i.dataset.rowid].identity !== null)
 		.map(e => {
 			const rowid = e.dataset.rowid;
 			return {
 				'filepath': rowidToFilepath[rowid].filepath,
+				'stamp': rowidToFilepath[rowid].stamp || null,
 				'provider': rowidToFilepath[rowid].identity.provider,
-				'provider_id': rowidToFilepath[rowid].identity.id
+				'provider_id': rowidToFilepath[rowid].identity.id,
+				'issue_ids': rowidToFilepath[rowid].issueIds || [],
+				'issue_override': !!rowidToFilepath[rowid].manualIssues,
+				'catalog_revision': rowidToFilepath[rowid].catalog?.revision || null,
+				'overlap_override': !!rowidToFilepath[rowid].allowOverlap
 			};
 		});
+}
 
-    if (!data.length) return;
+function showImportPreflight(panel, stage, apiKey, rename, unmatched=0) {
+	panel.replaceChildren();
+	const heading = document.createElement('h3'); heading.textContent = 'Import preflight'; panel.appendChild(heading);
+	const counts = document.createElement('p');
+	counts.textContent = `${stage.counts.ready} ready · ${stage.counts.review_required} need review · ${stage.counts.blocked} blocked · ${stage.counts.already_imported || 0} already imported`;
+	panel.appendChild(counts);
+	if (unmatched) {
+		const skipped = document.createElement('p');
+		skipped.textContent = `${unmatched} checked local files have no selected publication and are excluded from this import.`;
+		panel.appendChild(skipped);
+	}
+	if (stage.plans.some(plan => (plan.identification_reasons || []).some(reason => reason.startsWith('destination_')))
+		&& stage.worker?.platform !== 'windows') {
+		const worker = document.createElement('p');
+		worker.textContent = `Pullarr worker UID ${stage.worker.uid}, GID ${stage.worker.gid}, groups ${(stage.worker.groups || []).join(', ')}, umask ${stage.worker.umask || 'unknown'}. SMB access still requires a share-client test.`;
+		panel.appendChild(worker);
+	}
+	for (const plan of stage.plans) {
+		const row = document.createElement('div'); row.className = 'import-plan-row';
+		const label = document.createElement('p');
+		label.textContent = `${plan.source} → ${plan.target || 'No safe destination'} · ${plan.status}`;
+		row.appendChild(label);
+		const detail = document.createElement('p');
+		detail.textContent = plan.status === 'ready' ?
+			`${plan.authority.provider}:${plan.authority.id} · issues ${(plan.issue_labels || []).join(', ')}${plan.issue_owned?.some(Boolean) ? ' · already owned' : ''}${plan.warnings?.length ? ' · overlap reviewed' : ''} · ${plan.operation} · ${plan.registration} publication` :
+			(plan.identification_reasons || []).join(', ');
+		row.appendChild(detail); panel.appendChild(row);
+		if (plan.repair_available) {
+			const repair = document.createElement('button'); repair.type = 'button';
+			repair.textContent = 'Repair this empty canonical folder';
+			repair.onclick = async () => {
+				repair.disabled = true;
+				try {
+					const response = await sendAPI('POST', '/libraryimport/repair-folder', apiKey, {},
+						{volume_id:plan.volume_id, folder:plan.target, source:plan.source});
+					if (!response.ok) throw response;
+					await prepareImport(apiKey, rename);
+				} catch (error) {
+					const body = await error?.json?.().catch(() => null);
+					detail.textContent = `Repair failed: ${body?.result?.code || 'check worker identity and ACL permissions'}.`;
+					repair.disabled = false;
+				}
+			}; row.appendChild(repair);
+		}
+	}
+}
+
+async function prepareImport(api_key, rename=false) {
+	if (importPending) return;
+	const data = selectedImportData();
+    const unmatched = [...liEls.proposalList.querySelectorAll('tr[data-rowid]')]
+        .filter(row => row.querySelector('.import-file-select')?.checked &&
+            !rowidToFilepath[row.dataset.rowid]?.identity).length;
+    const status = document.getElementById('import-error');
+    if (!data.length) { status.textContent = 'Choose a publication for at least one checked file.'; return; }
+    importPending = true;
+    status.textContent = 'Checking files, issue identities and destinations…';
+    const panel = LocalOrganizationUI.panel(status, 'library-import-results');
+    try {
+        const response = await sendAPI('POST', '/libraryimport/stage', api_key, {rename_files: rename}, data);
+        if (!response.ok) throw response;
+        const stage = (await response.json()).result;
+        stagedImport = {id:stage.id, rename, selection:JSON.stringify(data)};
+        showImportPreflight(panel, stage, api_key, rename, unmatched);
+        status.textContent = stage.counts.ready ?
+            `Review the paths and issues below, then press ${rename ? 'Import and Rename' : 'Import'} to confirm ready rows.` :
+            'No ready file. Correct issue selections or destination conflicts and preview again.';
+    } catch (error) {
+        stagedImport = null;
+        const detail = await error?.json?.().catch(() => null);
+        status.textContent = `Preflight failed: ${detail?.result?.code || 'check provider, file and folder access, then retry'}.`;
+    } finally { importPending = false; }
+}
+
+async function importLibrary(api_key, rename=false) {
+	if (importPending) return;
+	const data = selectedImportData();
+    if (!stagedImport || stagedImport.rename !== rename || stagedImport.selection !== JSON.stringify(data)) {
+        await prepareImport(api_key, rename);
+        return;
+    }
+
     importPending = true;
     liEls.buttons.import.disabled = liEls.buttons.importRename.disabled = true;
     const status = document.getElementById('import-error');
     status.innerText = 'Importing selected files…';
     const panel = LocalOrganizationUI.panel(status, 'library-import-results');
     try {
-        const response = await sendAPI('POST', '/libraryimport/preview', api_key, {rename_files: rename}, data);
-        if (!response.ok) throw response;
-        const preview = (await response.json()).result;
-        const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(preview.id)}/apply`, api_key);
+        const applied = await sendAPI('POST', `/local-organization/${encodeURIComponent(stagedImport.id)}/apply`, api_key);
         if (!applied.ok) throw applied;
         const result = (await applied.json()).result;
         const completed = new Set(LocalOrganizationUI.result(panel, result).map(job => job.source));
         for (const row of liEls.proposalList.querySelectorAll('tr[data-rowid]')) {
             if (completed.has(rowidToFilepath[row.dataset.rowid]?.filepath)) row.remove();
         }
-        status.innerText = 'Import finished. See results below.';
-    } catch (_) {
-        status.innerText = 'Import could not be confirmed. Check the selected provider and Maintenance history before retrying.';
+        status.innerText = result.jobs?.length ? 'Import attempt finished. Check each file result below.' :
+            'No file imported. Review the row reasons below.';
+        stagedImport = null;
+    } catch (error) {
+        const detail = await error?.json?.().catch(() => null);
+        status.innerText = `Import could not be confirmed: ${detail?.result?.code || 'check the provider and Maintenance history'}.`;
     } finally {
         importPending = false;
         liEls.buttons.import.disabled = liEls.buttons.importRename.disabled = false;
@@ -362,6 +654,8 @@ async function importLibrary(api_key, rename=false) {
 usingApiKey()
 .then(api_key => {
 	liEls.buttons.run.onclick = e => loadProposal(api_key);
+	liEls.buttons.preview.onclick = e => prepareImport(api_key, false);
+	liEls.buttons.previewRename.onclick = e => prepareImport(api_key, true);
 	liEls.buttons.import.onclick = e => importLibrary(api_key, false);
 	liEls.buttons.importRename.onclick = e => importLibrary(api_key, true);
 	fetchAPI('/settings', api_key).then(json => {
@@ -376,6 +670,7 @@ usingApiKey()
 
 liEls.search.provider.onchange = () => {
 	metadataSearchGeneration++;
+	if (importSearchArtwork) importSearchArtwork.stop();
 	liEls.search.results.innerHTML = '';
 	document.getElementById('match-error').innerText = '';
 	hide([liEls.search.container]);

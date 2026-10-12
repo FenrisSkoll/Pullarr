@@ -16,7 +16,7 @@
 <tr class="li-result" data-rowid="">
 	<td>
 		<label>
-			<input type="checkbox" title="Whether to import the file" checked>
+			<input type="checkbox" class="import-file-select" title="Whether to import the file" checked>
 		</label>
 	</td>
 	<td class="file-column" title=""></td>
@@ -28,12 +28,13 @@
 			<img src="{{ url_for('static', filename='img/edit.svg') }}" alt="">
 		</button>
 	</td>
+	<td class="issue-column"></td>
 </tr>
 <tr class="search-result">
 	<td>
 		<a target="_blank" rel="noopener noreferrer" href=""></a>
 	</td>
-	<td><button>Select</button></td>
+	<td><button>Select for this file</button><button type="button" class="bulk-match">Apply to checked files</button></td>
 </tr>
 {% endblock pre_build_rows %}
 
@@ -83,17 +84,17 @@
 			<tbody>
 				<tr>
 					<td><label for="auto-match-input">Automatically match with ComicVine</label></td>
-					<td><input type="checkbox" id="auto-match-input" checked><p>Uncheck to scan without ComicVine requests and match manually using either provider.</p></td>
+						<td><input type="checkbox" id="auto-match-input" checked><p>After local discovery, request ComicVine publication suggestions for at most 20 folders. Provider failure never removes local file rows.</p></td>
 				</tr>
 				<tr>
-					<td><label for="limit-input">Max folders scanned</label></td>
+						<td><label for="limit-input">Max folders scanned (up to 500; results paged by 100 files)</label></td>
 					<td>
 						<select id="limit-input">
 							<option value="1">1</option>
 							<option value="5">5</option>
-							<option value="20" selected>20</option>
+							<option value="20">20</option>
 							<option value="100">100</option>
-							<option value="500">500</option>
+							<option value="500" selected>500</option>
 						</select>
 					</td>
 				</tr>
@@ -147,16 +148,19 @@
 		<a href="{{url_base}}/settings/general#cv-input">Go to settings</a>
 	</div>
 	<div id="list-window" class="hidden">
+		<p id="scan-summary" aria-live="polite"></p>
 		<p id="import-error" role="alert"></p>
 		<div class="action-container">
 			<button class="cancel-button">Cancel</button>
+			<button id="preview-import-button" type="button">Preview Import</button>
+			<button id="preview-import-rename-button" type="button">Preview Import and Rename</button>
 			<button
 				id="import-button"
-				title="Add volumes, set volume folder to the folder that the files are in, don't rename the volume folder, don't rename the files. If the volume is already added, move file into volume folder."
+					title="Move selected archives into their canonical managed folders, preserving filenames."
 			>Import</button>
 			<button
 				id="import-rename-button"
-				title="Add volumes, move files into automatically generated volume folder (named following the settings), rename files. If the volume is already added, move the file into volume folder and rename."
+					title="Move selected archives into their canonical managed folders and apply configured filenames."
 			>Import and Rename</button>
 		</div>
 		<p id="rate-limit-banner" class="hidden">
@@ -174,10 +178,12 @@
 					<th>File</th>
 					<th>Match</th>
 					<th>Action</th>
+						<th>Issue association</th>
 				</thead>
 				<tbody class="proposal-list"></tbody>
 			</table>
 		</div>
+		<button id="import-next-page" type="button" class="hidden">Show next 100 files</button>
 	</div>
 </main>
 {% endblock %}

@@ -117,10 +117,20 @@ def apply_preview(database: str, identifier: str) -> dict:
         for index, job in tuple(session.jobs.items()):
             result = executor.store.get(job) if replay else executor.apply_job(job)
             plan = session.batch.plans[index]
+            chosen = tuple(plan.identification.selected.local_issue_ids)
+            verified = False
+            if result.state.value == 'completed' and plan.target_path and os.path.isfile(plan.target_path):
+                rows = executor.store.db.execute('''SELECT i.id FROM files f
+                    JOIN issues_files b ON b.file_id=f.id JOIN issues i ON i.id=b.issue_id
+                    WHERE f.filepath=? AND i.volume_id=?''',
+                    (plan.target_path, plan.identification.selected.local_volume_id)).fetchall()
+                verified = set(chosen) == {row[0] for row in rows}
             outcomes.append(dict(source=plan.source_path, target=plan.target_path,
                                  publication=plan.identification.selected.title,
                                  volume_id=plan.identification.selected.local_volume_id,
-                                 job_id=job, state=result.state.value, error=result.error))
+                                 issue_ids=list(chosen), operation='move' if plan.source_path != plan.target_path else 'associate',
+                                 job_id=job, state=result.state.value if verified or result.state.value != 'completed' else 'recovery_required',
+                                 error=result.error if verified or result.state.value != 'completed' else 'verification_failed'))
         from backend.features.import_folder_cleanup import cleanup_sources
         cleanup_sources(executor, session, outcomes)
         return dict(id=identifier, jobs=outcomes, replay=replay,
@@ -161,6 +171,16 @@ def import_preview(database: str, matches: object, rename: bool) -> dict:
     from backend.internals.provider_identity import ProviderIdentityDB
 
     normalized = normalize_import_matches(matches)
+    requested = {}
+    for entry, (identity, path) in zip(matches, normalized):
+        values = entry.get('issue_ids')
+        if values is not None:
+            if (not isinstance(values, list) or not 1 <= len(values) <= 100
+                    or any(not isinstance(v, str) or not v for v in values)
+                    or len(set(values)) != len(values)
+                    or type(entry.get('issue_override', False)) is not bool):
+                raise IntakeFailure(E.IDENTIFICATION)
+            requested[path] = (identity, tuple(values), entry.get('issue_override', False))
     if not 1 <= len(normalized) <= 1000 or len({p for _, p in normalized}) != len(normalized):
         raise IntakeFailure(E.CONFIGURATION)
     db = sqlite3.connect(database)
@@ -216,10 +236,26 @@ def import_preview(database: str, matches: object, rename: bool) -> dict:
                     contexts[path] = (DiscoveryScope(operation, root), existing)
         batch = OrganizationBatch(())
         if contexts:
+            chosen = {}
+            overrides = set()
+            for path, (identity, external_ids, override) in requested.items():
+                if path not in contexts:
+                    continue
+                volume_id = contexts[path][1]
+                rows = db.execute('''SELECT e.provider_id,e.issue_id FROM issue_external_ids e
+                    JOIN issues i ON i.id=e.issue_id
+                    WHERE i.volume_id=? AND e.provider=?''', (volume_id, identity.provider))
+                members = dict(rows)
+                if any(value not in members for value in external_ids):
+                    raise IntakeFailure(E.IDENTIFICATION)
+                chosen[path] = tuple(members[value] for value in external_ids)
+                if override:
+                    overrides.add(path)
             first_scope = next(iter(contexts.values()))[0]
             batch = preview_local_artifacts(db, tuple(contexts), first_scope,
                 PlanningPolicy(windows=os.name == 'nt', case_sensitive=os.name != 'nt', rename=rename, move=True),
-                path_contexts=contexts, authority=PublicationAuthority.IMPORT_SELECTION)
+                path_contexts=contexts, path_issue_ids=chosen, issue_overrides=overrides,
+                authority=PublicationAuthority.IMPORT_SELECTION)
         value = retain_preview(database, tuple(r[1] for r in roots), batch, reviews)
         with _lock:
             session = _sessions[value['id']]

@@ -11,8 +11,8 @@ from types import MappingProxyType
 from typing import Optional, Tuple
 
 from backend.base.acquisition_intake import IntakeErrorCode as E, IntakeFailure
-from backend.base.identification import (MatchReason, MatchState,
-                                         PublicationAuthority)
+from backend.base.identification import (MatchContribution, MatchReason,
+                                         MatchState, PublicationAuthority)
 from backend.base.import_candidate import (CoverageHypothesis, CoverageKind,
                                            DiscoveryScope, EvidenceSource,
                                            MatchHypothesis, Provenance)
@@ -36,6 +36,8 @@ def preview_local_artifacts(
     policy: PlanningPolicy, *, volume_id: Optional[int] = None,
     issue_ids: Tuple[int, ...] = (),
     path_contexts: Optional[dict[str, tuple[DiscoveryScope, int]]] = None,
+    path_issue_ids: Optional[dict[str, tuple[int, ...]]] = None,
+    issue_overrides: Optional[set[str]] = None,
     authority: PublicationAuthority = PublicationAuthority.HYPOTHESIS,
 ) -> OrganizationBatch:
     """One shared snapshot and batch collision pass for the declared paths.
@@ -49,7 +51,11 @@ def preview_local_artifacts(
     if not scope.root or not 1 <= len(paths) <= MAX_ARTIFACTS or len(set(paths)) != len(paths):
         raise IntakeFailure(E.CONFIGURATION)
     contexts = path_contexts or {}
+    choices = path_issue_ids or {}
+    overrides = issue_overrides or set()
     if set(contexts) - set(paths):
+        raise IntakeFailure(E.CONFIGURATION)
+    if set(choices) - set(paths) or set(overrides) - set(choices):
         raise IntakeFailure(E.CONFIGURATION)
     ordered = tuple(sorted(contained(path, contexts[path][0].root or '' if path in contexts else scope.root)
                            for path in paths))
@@ -85,6 +91,27 @@ def preview_local_artifacts(
         result = (identify_authorized(candidate, matching, local_volume, authority)
                   if authority != PublicationAuthority.HYPOTHESIS and local_volume is not None
                   else identify(candidate, matching))
+        if path in choices and result.selected is not None:
+            wanted = choices[path]
+            if (not wanted or len(set(wanted)) != len(wanted)
+                    or any(i not in matching.issues or matching.issues[i].volume_id != local_volume for i in wanted)):
+                raise IntakeFailure(E.IDENTIFICATION)
+            forbidden = {MatchReason.INVALID_LOCAL, MatchReason.IDENTITY_CONFLICT,
+                         MatchReason.UNKNOWN_IDENTITY, MatchReason.DIAGNOSTIC}
+            exact_claims = [c.reference for c in candidate.claims if c.reference.kind.value == 'issue']
+            selected_refs = {ref for i in wanted for ref in matching.issues[i].references}
+            if (result.state == MatchState.BLOCKED or forbidden.intersection(result.reasons)
+                    or any(ref not in selected_refs for ref in exact_claims)):
+                raise IntakeFailure(E.IDENTIFICATION)
+            if (MatchReason.EVIDENCE_CONFLICT in result.reasons
+                    and path not in overrides):
+                raise IntakeFailure(E.IDENTIFICATION)
+            selected = replace(result.selected, local_issue_ids=tuple(sorted(wanted)),
+                               review_reasons=(), rejections=(),
+                               contributions=result.selected.contributions + (
+                                   MatchContribution(MatchReason.FORCED, 'library-import-reviewed-issue/v1'),))
+            result = replace(result, selected=selected, state=MatchState.AUTOMATIC,
+                             reasons=())
         if result.selected is not None and (
                 (local_volume is not None and result.selected.local_volume_id != local_volume)
                 or (issue_ids and not set(result.selected.local_issue_ids).issubset(issue_ids))):

@@ -71,7 +71,7 @@ const text=node=>node.textContent+node.children.map(text).join('');
     assert.equal(get(panel,'button','Apply ready associations').disabled,true);
     assert.ok(text(panel).includes('Already associated'));
     panel.replaceChildren();ui.result(panel,{jobs:[{source:'/fixture/Book.cbz',publication:'Selected book',state:'recovery_required',error:'target_occupied'}],review:[]});
-    assert.ok(text(panel).includes('Book.cbz → Selected book. The destination became occupied. The source is preserved.'));
+    assert.ok(text(panel).includes('/fixture/Book.cbz → unresolved destination · Selected book · The destination became occupied. The source is preserved.'));
     assert.ok(get(panel,'a','Review in Maintenance'));
     panel.replaceChildren();ui.rows(panel,[{source:'/fixture/Book.cbz',status:'blocked',authority:{provider:'comicvine',id:'101'},diagnostics:[{code:'filesystem_target_occupied'}]}]);
     assert.ok(text(panel).includes('comicvine:101'));assert.ok(text(panel).includes('Resolve the collision'));

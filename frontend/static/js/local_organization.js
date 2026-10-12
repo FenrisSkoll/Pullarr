@@ -20,7 +20,19 @@ const LocalOrganizationUI = (() => {
         permission_denied: 'Filesystem access was denied.',
         disk_full: 'The destination has insufficient free space.',
         publication_registration_conflict: 'Publication identity or folder ownership conflicts with the selection.',
-        publication_registration_unavailable: 'Publication registration failed. Check the selected metadata provider.'
+        publication_registration_unavailable: 'Publication registration failed. Check the selected metadata provider.',
+        issue_selection_required: 'Choose an issue on Library Import, or exclude this file.',
+        issue_not_in_selected_publication: 'The selected issue is not in this provider publication.',
+        embedded_identity_conflict: 'Embedded exact publication or issue identity conflicts with the selection.',
+        stale_catalogue: 'Issue catalogue changed; reload and review the selection.',
+        catalog_unavailable: 'Provider catalogue is unavailable. The local file remains listed.',
+        duplicate_issue_selection: 'Multiple selected files cover the same issue. Review overlap explicitly.',
+        issue_already_owned_confirm_overlap: 'This issue already has a file. Review overlap explicitly.',
+        shared_inode_requires_seed_policy: 'This file has another hardlink. Use the reviewed seeding import policy.',
+        destination_group_access_denied: 'Destination ACL denies group write. Review a narrow folder repair.',
+        destination_group_mismatch: 'Destination group differs from the configured group.',
+        stale_destination_policy: 'The canonical destination changed after preview. Re-preview this file.',
+        verification_failed: 'Final archive or issue link verification failed. Review the organizer job.'
     };
     const name = path => String(path || '').split(/[\\/]/).pop();
     function text(parent, tag, value) {
@@ -43,6 +55,8 @@ const LocalOrganizationUI = (() => {
             text(row, 'p', `${name(plan.source)} → ${ready ? (plan.status === 'associated' ? 'Associated: ' : plan.status === 'no_changes' ? 'Already associated: ' : '') + ((plan.issue_labels || []).join(', ') || 'Ready to associate') : 'Needs review'}`);
             if (plan.publication) text(row, 'p', `Selected publication: ${plan.publication}`);
             else if (plan.authority) text(row, 'p', `Selected publication: ${plan.authority.provider}:${plan.authority.id}`);
+            if (!ready && Number.isSafeInteger(plan.volume_id) && plan.target && plan.source !== plan.target)
+                text(row, 'p', 'Publication may be registered, but this archive was not imported. Review this row before retrying.');
             if (!ready) {
                 const reason = [...(plan.identification_reasons || []), ...(plan.diagnostics || []).map(d => d.code)].map(code => reasons[code]).find(Boolean);
                 text(row, 'p', reason || 'Issue matching or file ownership needs review. Files remain unchanged.');
@@ -62,12 +76,15 @@ const LocalOrganizationUI = (() => {
         const failures = (value.jobs || []).filter(job => job.state !== 'completed');
         const publications = new Set(completed.map(j => j.volume_id).filter(Number.isSafeInteger));
         text(parent, 'h3', publications.size ? `Imported ${completed.length} files into ${publications.size} publications.` : `${completed.length} files imported or associated.`);
-        for (const job of completed) if (job.publication) text(parent, 'p', `${name(job.source)} → ${job.publication}`);
+        for (const job of completed) if (job.publication) text(parent, 'p',
+            `${name(job.source)} → ${job.target || job.publication} · ${job.publication}` +
+            (job.issue_ids?.length ? ` · issues ${job.issue_ids.join(', ')}` : '') +
+            (job.operation ? ` · ${job.operation}` : ''));
         if (value.review?.length) text(parent, 'p', `${value.review.length} files need issue matching or folder review.`);
         rows(parent, value.review || []);
         if (failures.length) text(parent, 'p', `${failures.length} operations need recovery. Check Maintenance history before retrying.`);
         for (const job of failures) {
-            text(parent, 'p', `${name(job.source)} → ${job.publication || 'Selected publication'}. ${reasons[job.error] || 'The operation needs recovery review.'}`);
+            text(parent, 'p', `${job.source} → ${job.target || 'unresolved destination'} · ${job.publication || 'Selected publication'} · ${reasons[job.error] || 'The operation needs recovery review.'}`);
             const link = text(parent, 'a', 'Review in Maintenance');
             link.href = `${typeof url_base === 'string' ? url_base : ''}/maintenance`;
         }

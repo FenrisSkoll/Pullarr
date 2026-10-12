@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
 
+import os
+import sqlite3
 from asyncio import run
+from contextlib import closing
+from fnmatch import fnmatchcase
 from glob import glob
+from hashlib import sha256
 from itertools import chain
 from os.path import abspath, basename, dirname, isfile, join, splitext
+from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 from uuid import uuid4
 
 from typing_extensions import TypedDict
 
+from backend.base.acquisition_intake import IntakeFailure
 from backend.base.custom_exceptions import (InvalidKeyValue,
                                             MetadataSourceRateLimitReached,
                                             VolumeAlreadyAdded,
@@ -23,8 +30,9 @@ from backend.base.files import (change_basefolder, common_folder,
                                 list_files, rename_file)
 from backend.base.helpers import force_suffix
 from backend.base.import_candidate import (DiscoveryKind, DiscoveryScope,
-                                           ImportCandidate)
+                                           ImportCandidate, ResourceKind)
 from backend.base.logging import LOGGER
+from backend.implementations.comicinfo_candidate import enrich_comicinfo
 from backend.implementations.comicvine import ComicVine
 from backend.implementations.file_matching import scan_files
 from backend.implementations.import_candidates import (
@@ -47,6 +55,144 @@ class ProviderFileMapping(TypedDict):
     filepath: str
     provider: str
     provider_id: str
+
+
+def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
+                        folder_limit: int = 500, folder_filter: str | None = None) -> dict:
+    """Deterministic filesystem discovery, independent of metadata providers.
+
+    A pattern without a separator matches directory basenames. An absolute
+    pattern matches complete directory paths. Traversal never follows links.
+    The bound is explicit in the response; no truncated page claims completion.
+    """
+    if (type(offset) is not int or offset < 0 or type(page_size) is not int
+            or not 1 <= page_size <= 100 or type(folder_limit) is not int
+            or not 1 <= folder_limit <= 500 or folder_filter is not None
+            and (not isinstance(folder_filter, str) or len(folder_filter) > 500  # type: ignore[redundant-expr]
+                 or '..' in Path(folder_filter).parts)):
+        raise ValueError('invalid_scan_parameters')
+    with closing(sqlite3.connect(database)) as db:
+        roots = [Path(row[0]) for row in db.execute('SELECT folder FROM root_folders ORDER BY folder')]
+    if folder_filter and (os.path.isabs(folder_filter) or '/' in folder_filter or '\\' in folder_filter):
+        if not os.path.isabs(folder_filter) or not any(
+                Path(root) in Path(folder_filter).parents or Path(root) == Path(folder_filter)
+                for root in roots):
+            raise ValueError('unsafe_folder_filter')
+    folders, invalid = [], 0
+    visited = 0
+    bounded = False
+    for root in roots:
+        if not root.is_dir() or root.is_symlink():
+            invalid += 1
+            continue
+        for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+            if len(Path(current).relative_to(root).parts) >= 32:
+                bounded = True
+                dirs.clear()
+            visited += 1 + len(dirs) + len(files)
+            if visited > 50000:
+                bounded = True
+                dirs.clear()
+                break
+            admitted_dirs = sorted((d for d in dirs if not (Path(current) / d).is_symlink()),
+                                   key=str.casefold)
+            invalid += len(dirs) - len(admitted_dirs)
+            dirs[:] = admitted_dirs
+            invalid += len(files) - len([f for f in files if not (Path(current) / f).is_symlink()])
+            folders.append((str(Path(current)), tuple(sorted(files, key=str.casefold)), str(root)))
+        if bounded:
+            break
+    def selected(path):
+        if not folder_filter:
+            return True
+        pattern = folder_filter.casefold()
+        current = Path(path)
+        while True:
+            value = str(current).casefold() if os.path.isabs(folder_filter) or '/' in folder_filter or '\\' in folder_filter else current.name.casefold()
+            if fnmatchcase(value, pattern):
+                return True
+            if any(current == root for root in roots) or current.parent == current:
+                return False
+            current = current.parent
+    eligible_folders = [(path, files, root) for path, files, root in folders if selected(path)]
+    chosen = eligible_folders[:folder_limit]
+    available, already, skipped = [], 0, 0
+    extensions = {suffix.casefold() for suffix in FileConstants.CONTENT_EXTENSIONS}
+    with closing(sqlite3.connect(database)) as lookup:
+        for folder, files, root in chosen:
+            for name in files:
+                path = str(Path(folder) / name)
+                if Path(name).suffix.casefold() not in extensions:
+                    skipped += 1
+                    continue
+                try:
+                    from backend.implementations.acquisition_paths import \
+                        contained
+                    contained(path, root)
+                    info = os.stat(path, follow_symlinks=False)
+                    if not os.path.isfile(path):
+                        invalid += 1
+                        continue
+                except (OSError, ValueError, IntakeFailure):
+                    invalid += 1
+                    continue
+                if lookup.execute('SELECT 1 FROM files WHERE filepath=? LIMIT 1', (path,)).fetchone():
+                    already += 1
+                    continue
+                stamp = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                available.append((path, root, stamp))
+    available.sort(key=lambda row: row[0].casefold())
+    items = []
+    for path, root, stamp in available[offset:offset + page_size]:
+        try:
+            parsed = extract_filename_data(path, prefer_folder_year=True)
+            evidence = dict(year=parsed.get('year'), issue_number=parsed.get('issue_number'),
+                            volume_number=parsed.get('volume_number'), title=parsed.get('series'))
+        except (ValueError, IndexError):
+            evidence = {}
+        embedded = None
+        embedded_source = None
+        warnings = []
+        try:
+            candidate = enrich_comicinfo(observe_import_candidate(
+                path, DiscoveryScope('library-import-scan', root)))
+            document = candidate.comicinfo.document
+            if document:
+                volume_claims = {(claim.reference.provider, claim.reference.provider_id)
+                                 for claim in candidate.claims
+                                 if claim.reference.kind == ResourceKind.VOLUME}
+                if len(volume_claims) == 1:
+                    provider, provider_id = next(iter(volume_claims))
+                    if provider in ('comicvine', 'metron', 'gcd'):
+                        embedded_source = dict(provider=provider, id=provider_id)
+                embedded = dict(series=(document.series or '')[:160],
+                    number=(document.number or '')[:80],
+                    title=(document.title or '')[:160],
+                    year=document.date.year,
+                    references=[dict(provider=claim.reference.provider,
+                                     kind=claim.reference.kind.value,
+                                     id=claim.reference.provider_id)
+                                for claim in candidate.claims
+                                if claim.reference.kind in (ResourceKind.VOLUME, ResourceKind.ISSUE)][:20])
+            if candidate.comicinfo.diagnostics:
+                warnings.append('embedded_metadata_needs_review')
+        except Exception:
+            # Archive inspection is optional evidence; local discovery survives it.
+            warnings.append('embedded_metadata_unavailable')
+        items.append(dict(row_id=sha256(repr((path, stamp)).encode()).hexdigest(),
+                          filepath=path, file_title=splitext(basename(path))[0],
+                          folder=str(Path(path).parent), size=stamp[2], extension=Path(path).suffix,
+                          stamp=[str(value) for value in stamp], parsed=evidence,
+                          embedded=embedded, warnings=warnings,
+                          metadata_source=embedded_source,
+                          cv=dict(id=None, title=None, issue_count=None, link=None)))
+    return dict(version=2, items=items, counts=dict(scanned_folders=len(chosen),
+        eligible_folders=len(eligible_folders), not_yet_scanned_folders=max(0, len(eligible_folders)-len(chosen)),
+        discovered=len(available), already_managed=already, matched=0,
+        unmatched=len(available),
+        invalid=invalid, skipped=skipped, limited=bounded),
+        next_offset=offset + len(items) if offset + len(items) < len(available) else None,
+        enumeration_complete=not bounded and len(chosen) == len(eligible_folders))
 
 
 def normalize_import_matches(matches: Any) -> List[Tuple[ProviderVolumeIdentity, str]]:

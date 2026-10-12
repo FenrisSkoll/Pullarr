@@ -8,9 +8,44 @@ folder can contain several publications: correcting one row never changes anothe
 row's selection. Existing publications retain their established managed folders.
 An invalid existing folder requires repair rather than silent reassignment.
 
+The current Library Import page discovers local archives in deterministic
+pages of 100 files, independently of metadata availability. The folder limit
+defaults to 500; a lower limit is reported as partial. A folder pattern
+without separators matches directory basenames (`*Batman*`); an absolute
+pattern matches full paths. ComicVine publication suggestions are optional
+and limited to 20 folders per scan. Failed suggestions leave local rows visible.
+Displayed file rows include bounded filename and embedded ComicInfo evidence when
+readable; a unique embedded provider publication ID is shown as a proposal.
+Selecting a publication fetches its actual issue catalogue; the provider's
+reported count and loaded list length are shown separately. Existing managed
+volumes use their local issue records. Book and volume filenames are suggested
+only when the selected catalogue supports that interpretation. Conflicts and
+incomplete catalogues stay in review.
+
+Select the exact provider issue or issues in the inline editor, then use
+**Preview Import** or **Preview Import and Rename**. This read-only stage binds
+the source stamp, issue identities, catalogue revision, destination and naming
+policy. The matching **Import** button confirms ready rows. Excluded and
+unresolved rows stay visible. Drafts expire after ten minutes or process
+restart. Once apply starts, OrganizationJobs and Maintenance history provide
+durable recovery receipts. A changed source, occupied destination or changed
+target policy stops the row for a fresh preview. A completed result requires
+both the final archive and expected local issue links. Batch rows can have
+different outcomes.
+
 Destinations use the normal Library & Organization folder policy, including its
 configured suffixes. Folders needed for incoming files are created even when
 **Create Empty Volume Folders** is off; that preference controls empty precreation.
+On POSIX hosts, newly created managed directories receive configured mode and
+group after creation, preserving inherited setgid. Imported ordinary files
+receive non-executable group permissions; shared hardlink inodes are not
+chmodded. The owning-group access ACL entry and mask are checked without
+removing default or named ACL entries. An existing empty canonical managed
+destination can be repaired through the narrowly reviewed import action.
+Pullarr never recursively rewrites a library during import. The preflight
+shows the application worker UID, GID, groups and available umask when a
+destination access problem is found. An SMB client write/delete test is still
+needed to establish effective share access.
 **Delete Empty Folders** (off by default) also controls Library Import source
 cleanup. Cleanup only removes the unchanged, empty immediate source directory
 after all selected moves succeed; it never recursively removes content or deletes

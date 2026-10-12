@@ -46,7 +46,11 @@ def run(rename):
             setup_db();Settings().update({'api_key':'fixture-fixture','delete_empty_folders':True,'create_empty_volume_folders':False})
             db=get_db();db.execute('UPDATE indexer_clients SET enabled=0');db.execute('INSERT INTO root_folders VALUES(1,?)',(str(library),));commit()
             assert Settings().sv.api_key=='fixture-fixture', 'Synthetic API settings did not persist'
-        with patch('backend.features.library_import.ComicVine') as comicvine, patch('backend.implementations.volumes.get_volume_provider',return_value=object()), patch('backend.implementations.volumes.fetch_volume_result',side_effect=fetched):
+        with patch('backend.features.library_import.ComicVine') as comicvine, \
+                patch('backend.implementations.volumes.get_volume_provider',return_value=object()), \
+                patch('backend.implementations.volumes.fetch_volume_result',side_effect=fetched), \
+                patch('backend.features.import_issue_catalog.get_volume_provider',return_value=object()), \
+                patch('backend.features.import_issue_catalog.fetch_volume_result',side_effect=fetched):
             comicvine.return_value.filenames_to_cvs=proposals
             http=make_server('127.0.0.1',0,server.app,threaded=True,request_handler=QuietHandler)
             Thread(target=http.serve_forever,daemon=True).start();origin=f'http://127.0.0.1:{http.server_port}'
@@ -61,17 +65,21 @@ def run(rename):
                         dict(comicvine_id=110000+n,title=t,year=2018,issue_count=1,site_url=f'https://comicvine.gamespot.com/volume/4050-{110000+n}/') for n,t in enumerate(titles,1)]}))
                     page.goto(origin+'/library-import');page.locator('#run-import-button').click()
                     rows=page.locator('.proposal-list tr[data-rowid]');expect(rows).to_have_count(3)
-                    # Correct individual rows through the actual search/select UI.
-                    for index in (1,2):
-                        rows.nth(index).locator('button').click()
+                    # Select each exact publication, then hydrate its issue catalogue.
+                    for index in (0,1,2):
+                        rows.nth(index).locator('button').first.click()
                         page.locator('#search-input').fill(names[index]);page.locator('#search-input').press('Enter')
                         result=page.locator('.search-results tr').filter(has_text=titles[index])
-                        result.locator('button').click()
-                    with page.expect_request(lambda r:'/libraryimport/preview?' in r.url) as request:
-                        page.locator('#import-rename-button' if rename else '#import-button').click()
+                        result.locator('button').first.click()
+                        expect(rows.nth(index).locator('.issue-column')).to_contain_text(str(index+1))
+                    with page.expect_request(lambda r:'/libraryimport/stage?' in r.url) as request:
+                        page.locator('#preview-import-rename-button' if rename else '#preview-import-button').click()
                     payload=request.value.post_data_json
                     assert [r['provider_id'] for r in payload]==['110001','110002','110003'],payload
+                    assert [r['issue_ids'] for r in payload]==[['210001'],['210002'],['210003']],payload
                     panel=page.locator('#library-import-results')
+                    expect(panel).to_contain_text('3 ready')
+                    page.locator('#import-rename-button' if rename else '#import-button').click()
                     expect(panel).to_contain_text('Imported 3 files into 3 publications.',timeout=60000)
                     for title in titles:expect(panel).to_contain_text(title)
                     expect(rows).to_have_count(0)

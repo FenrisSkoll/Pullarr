@@ -278,3 +278,12 @@ main {
 	color: var(--text-color);
 	background-color: var(--foreground-color);
 }
+.issue-column { min-width: 18rem; vertical-align: top; }
+.issue-column > button { margin-left: .5rem; }
+.import-issue-editor { margin-top: .5rem; padding: .7rem; border: 1px solid currentColor; max-width: 32rem; }
+.import-issue-editor input[type="search"] { width: 100%; }
+.import-issue-list { max-height: 16rem; overflow: auto; margin: .5rem 0; }
+.import-issue-list label { display: block; padding: .2rem; }
+.import-source-group th { text-align: left; padding: .7rem .4rem; font-weight: 600; }
+.import-plan-row { padding: .5rem; border-top: 1px solid currentColor; overflow-wrap: anywhere; }
+.import-publication-cover { width: 3rem; height: 4rem; object-fit: contain; vertical-align: middle; margin-right: .5rem; }

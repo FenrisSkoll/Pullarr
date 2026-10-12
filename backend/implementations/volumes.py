@@ -1400,13 +1400,25 @@ class Library:
             # Import establishes a usable destination in the registration
             # transaction. Other organizer callers retain explicit adoption.
             if import_destination:
+                from backend.features.managed_permissions import \
+                    apply_managed_permissions
                 from backend.implementations.acquisition_paths import contained
                 folder = contained(generate_volume_folder_path(root_folder.folder, volume.get_data()), root_folder.folder)
                 owners = cursor.execute("SELECT folder FROM volumes WHERE id<>? AND folder<>''", (volume_id,)).fetchall()
                 if any(normcase(realpath(row[0])) == normcase(realpath(folder)) for row in owners):
                     raise ValueError('Import destination already has a publication owner')
                 # Required for incoming files, independent of empty-folder precreation.
+                missing = []
+                current = folder
+                while not isdir(current):
+                    missing.append(current)
+                    parent = dirname(current)
+                    if parent == current:
+                        raise ValueError('Import destination parent is unavailable')
+                    current = parent
                 create_folder(folder)
+                for created in reversed(missing):
+                    apply_managed_permissions(created, directory=True)
             elif organizer_registration and volume_folder is not None:
                 from backend.implementations.acquisition_paths import contained
                 folder = contained(volume_folder, root_folder.folder)

@@ -9,6 +9,11 @@ The image supports PUID/PGID. Its compatibility default is root; for an existing
 shared library choose the owning user's numeric IDs and grant that user the
 necessary group access. Do not use `chmod 777`. The entrypoint adjusts only app
 database/log/download directory ownership; it does not recursively chown comics.
+For Library Import, new managed directories and ordinary imported files receive
+the configured folder mode/group at creation or verified transfer. A failed
+permission change is reported on that file's import result. See the
+[Unraid permission acceptance steps](unraid.md#library-import-permission-check)
+for setgid, ACL and SMB verification with copied test media.
 
 ## Shared download mounts
 

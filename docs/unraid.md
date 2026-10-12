@@ -41,6 +41,29 @@ directories.
 
 Do not use `chmod 777`.
 
+### Library Import permission check
+
+Library Import applies **Chmod Folder** and **Chown Group** when it creates a
+managed destination. With mode `775` under a setgid parent, the expected
+new-directory mode is usually `2775`, with effective `rwx` for the owning group.
+Imported regular archives normally receive non-executable `664`-style access.
+Pullarr checks the owning-group access ACL entry and mask; the parent's default
+ACL is kept. A failed chmod, chgrp or ACL update stops the import row. The
+preflight reports the *application worker's* UID/GID/groups and available umask;
+`docker exec ... id` describes the exec shell, not necessarily that worker.
+
+For manual acceptance, use only a copied synthetic archive in a disposable
+folder under the configured library root. Preview and import it to a new
+publication, then verify the final archive and exact issue link in Pullarr.
+On the host, inspect the exact new directory and file with `stat` and
+`getfacl -cp`; confirm the owning group has effective write access and that
+the directory retained setgid. From the intended Windows SMB account, create
+and delete a small test file in that exact destination. This SMB check is
+separate from POSIX mode verification. If an empty canonical destination from
+a failed import has wrong access, use the single-folder reviewed repair shown
+in Library Import, then preview again. Do not run recursive chmod/chown over
+the collection.
+
 `TZ` is supported through the process timezone and defaults to `Etc/UTC` in the
 Unraid template. `UMASK` is not an implemented Pullarr image variable and is not
 exposed by the template.
