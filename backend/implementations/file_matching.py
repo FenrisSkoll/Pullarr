@@ -105,7 +105,7 @@ def _scan_files(
         if settings.create_empty_volume_folders:
             from backend.features.managed_permissions import \
                 create_managed_folder
-            create_managed_folder(volume_data.folder)
+            create_managed_folder(volume_data.folder, settings=settings)
         else:
             return
 

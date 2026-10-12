@@ -6,12 +6,44 @@ creation or a separately reviewed repair of the exact path.
 
 import errno
 import os
+import sqlite3
 import stat
 import struct
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 from backend.base.organization_job import ExecutionCode, OrganizationError
 from backend.internals.settings import Settings
+
+
+def _permission_settings(database: sqlite3.Connection | str | None = None,
+                         settings=None):
+    """Read the executing journal's policy without requiring a Flask context."""
+    if settings is not None:
+        return settings
+    if database is None:
+        return Settings().sv
+    if isinstance(database, sqlite3.Connection):
+        connection, owned = database, False
+    else:
+        connection = sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True)
+        owned = True
+    try:
+        try:
+            values = dict(connection.execute('''SELECT key,value FROM config
+                WHERE key IN ('chmod_folder','chown_group')'''))
+        except sqlite3.OperationalError as error:
+            if 'no such table: config' not in str(error):
+                raise
+            # Standalone journal stores without app configuration have no
+            # configured permission policy. A normal Pullarr DB has config.
+            values = {}
+        return SimpleNamespace(chmod_folder=values.get('chmod_folder', ''),
+                               chown_group=values.get('chown_group', ''))
+    finally:
+        if owned:
+            connection.close()
 
 
 def _configured_group(name: str) -> int:
@@ -103,11 +135,11 @@ def _grant_owning_group_acl(path: str | int, required: int) -> None:
     raise ValueError('POSIX ACL lacks owning group entry')
 
 
-def managed_directory_problem(path: str) -> str | None:
+def managed_directory_problem(path: str, *, database: sqlite3.Connection | str | None = None) -> str | None:
     """Read-only diagnostic for an exact existing managed destination."""
     if os.name == 'nt' or not sys.platform.startswith('linux'):
         return None
-    settings = Settings().sv
+    settings = _permission_settings(database)
     if not settings.chmod_folder and not settings.chown_group:
         return None
     try:
@@ -125,11 +157,11 @@ def managed_directory_problem(path: str) -> str | None:
     return None
 
 
-def managed_file_problem(path: str) -> str | None:
+def managed_file_problem(path: str, *, database: sqlite3.Connection | str | None = None) -> str | None:
     """Read-only effective group policy check for an imported regular file."""
     if os.name == 'nt' or not sys.platform.startswith('linux'):
         return None
-    settings = Settings().sv
+    settings = _permission_settings(database)
     if not settings.chmod_folder and not settings.chown_group:
         return None
     try:
@@ -167,7 +199,7 @@ def worker_permission_context() -> dict:
     return value
 
 
-def create_managed_folder(path: str) -> None:
+def create_managed_folder(path: str, *, settings=None) -> None:
     """Create only missing components and apply policy to those exact inodes."""
     missing = []
     current = os.path.abspath(path)
@@ -190,7 +222,7 @@ def create_managed_folder(path: str) -> None:
                 continue
             info = os.lstat(part)
             created.append((part, info.st_dev, info.st_ino))
-            apply_managed_permissions(part, directory=True)
+            apply_managed_permissions(part, directory=True, settings=settings)
     except BaseException:
         for part, device, inode in reversed(created):
             try:
@@ -202,7 +234,9 @@ def create_managed_folder(path: str) -> None:
         raise
 
 
-def apply_managed_permissions(path: str, *, directory: bool, repair: bool = False) -> None:
+def apply_managed_permissions(path: str, *, directory: bool, repair: bool = False,
+                              database: sqlite3.Connection | str | None = None,
+                              settings=None) -> None:
     """Set and verify mode/group without following a replaced symlink.
 
     ``repair`` is reserved for a specifically reviewed existing destination;
@@ -213,11 +247,11 @@ def apply_managed_permissions(path: str, *, directory: bool, repair: bool = Fals
     """
     if os.name == 'nt' or not (sys.platform.startswith('linux') or sys.platform == 'darwin'):
         return
-    settings = Settings().sv
-    mode_text, group_name = settings.chmod_folder, settings.chown_group
-    if not mode_text and not group_name:
-        return
     try:
+        values = _permission_settings(database, settings)
+        mode_text, group_name = values.chmod_folder, values.chown_group
+        if not mode_text and not group_name:
+            return
         if not hasattr(os, 'O_NOFOLLOW'):
             raise OrganizationError(ExecutionCode.UNSUPPORTED, 'No symlink-safe permission operation')
         descriptor = _open_nofollow(path, directory=directory)
@@ -252,5 +286,6 @@ def apply_managed_permissions(path: str, *, directory: bool, repair: bool = Fals
             os.close(descriptor)
     except OrganizationError:
         raise
-    except (OSError, ValueError, KeyError, NotImplementedError) as error:
+    except (OSError, ValueError, KeyError, NotImplementedError,
+            sqlite3.Error, RuntimeError) as error:
         raise OrganizationError(ExecutionCode.PERMISSION, type(error).__name__) from None

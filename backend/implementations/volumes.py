@@ -784,7 +784,7 @@ class Volume:
         if Settings().sv.create_empty_volume_folders:
             from backend.features.managed_permissions import \
                 create_managed_folder
-            create_managed_folder(new_folder)
+            create_managed_folder(new_folder, settings=Settings().sv)
 
         mass_process_files(self.id)
 
@@ -844,7 +844,7 @@ class Volume:
         if Settings().sv.create_empty_volume_folders:
             from backend.features.managed_permissions import \
                 create_managed_folder
-            create_managed_folder(new_volume_folder)
+            create_managed_folder(new_volume_folder, settings=Settings().sv)
 
         # Delete old folder if possible
         if isdir(new_volume_folder) and folder_is_inside_folder(
@@ -1412,7 +1412,7 @@ class Library:
                 if any(normcase(realpath(row[0])) == normcase(realpath(folder)) for row in owners):
                     raise ValueError('Import destination already has a publication owner')
                 # Required for incoming files, independent of empty-folder precreation.
-                create_managed_folder(folder)
+                create_managed_folder(folder, settings=Settings().sv)
             elif organizer_registration and volume_folder is not None:
                 from backend.implementations.acquisition_paths import contained
                 folder = contained(volume_folder, root_folder.folder)
@@ -1432,7 +1432,7 @@ class Library:
             if fetched.snapshot is None and not organizer_registration and Settings().sv.create_empty_volume_folders:
                 from backend.features.managed_permissions import \
                     create_managed_folder
-                create_managed_folder(folder)
+                create_managed_folder(folder, settings=Settings().sv)
                 scan_files(volume_id)
 
             volume.apply_monitor_scheme(monitor_scheme)

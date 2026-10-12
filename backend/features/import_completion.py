@@ -105,7 +105,8 @@ def verify_import_job(database: str, job_id: str, plan: dict) -> dict:
                         or not matches(active_target, active_artifact)):
                     result['error'] = 'archive_missing_or_changed'
                     return result
-                if managed_directory_problem(folder) or managed_file_problem(active_target):
+                if (managed_directory_problem(folder, database=db)
+                        or managed_file_problem(active_target, database=db)):
                     result['error'] = 'destination_permission_denied'
                     return result
                 owned = db.execute('SELECT id FROM files WHERE filepath=?', (active_target,)).fetchall()

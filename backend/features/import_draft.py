@@ -419,7 +419,7 @@ def stage_import(database: str, matches: object, rename: bool, *,
                     continue
                 folder = contained(decision.target_folder, root)
             if os.path.isdir(folder):
-                permission_problem = managed_directory_problem(folder)
+                permission_problem = managed_directory_problem(folder, database=db)
                 if permission_problem:
                     try:
                         empty_destination = not os.listdir(folder)
@@ -805,8 +805,8 @@ def repair_empty_import_destination(database: str, volume_id: int,
         canonical = decide_folder(publication, context, FolderPolicy(default_root_id=root_id))
         if canonical.target_folder != folder:
             raise ValueError('repair_folder_not_canonical')
-        apply_managed_permissions(folder, directory=True, repair=True)
-        problem = managed_directory_problem(folder)
+        apply_managed_permissions(folder, directory=True, repair=True, database=db)
+        problem = managed_directory_problem(folder, database=db)
         if problem:
             raise ValueError(problem)
         return dict(folder=folder, repaired=True)

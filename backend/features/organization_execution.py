@@ -545,7 +545,7 @@ class OrganizationExecutor:
                     current = os.stat(path, follow_symlinks=False)
                     if (current.st_dev, current.st_ino) != (device, inode):
                         raise OrganizationError(ExecutionCode.CONFLICT)
-                    apply_managed_permissions(path, directory=True)
+                    apply_managed_permissions(path, directory=True, database=self.store.db)
                 return True
             return False
         if kind == CLEANUP:
@@ -571,7 +571,8 @@ class OrganizationExecutor:
                 # Apply and verify file access before recording ownership or
                 # issue links. Never change the mode of a shared source inode.
                 if os.stat(intent['target'], follow_symlinks=False).st_nlink == 1:
-                    apply_managed_permissions(intent['target'], directory=False)
+                    apply_managed_permissions(intent['target'], directory=False,
+                                              database=self.store.db)
             db = self.store.db
             if kind == EffectKind.VOLUME_FOLDER.value:
                 if before['folder']:
@@ -673,7 +674,7 @@ class OrganizationExecutor:
                     sync_directory(os.path.dirname(path))
                     with self.store.transaction():
                         self.store.checkpoint(job.id, ordinal, StepState.STARTED, value)
-                    apply_managed_permissions(path, directory=True)
+                    apply_managed_permissions(path, directory=True, database=self.store.db)
                 elif not Path(path).is_dir():
                     raise OrganizationError(ExecutionCode.CONFLICT)
         elif kind == EffectKind.RELOCATE.value:

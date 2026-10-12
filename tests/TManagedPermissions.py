@@ -1,10 +1,11 @@
 """Scoped permission policy, including owning-group ACL entry and mask."""
 
 import os
+import sqlite3
 import stat
 import struct
 from types import SimpleNamespace
-from unittest import TestCase
+from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 from backend.base.organization_job import ExecutionCode, OrganizationError
@@ -17,6 +18,20 @@ def acl(group=5, mask=7):
 
 
 class ManagedPermissionTests(TestCase):
+    def test_journal_reads_its_own_database_policy_without_flask(self):
+        with sqlite3.connect(':memory:') as database:
+            database.execute('CREATE TABLE config(key TEXT PRIMARY KEY,value TEXT)')
+            database.executemany('INSERT INTO config VALUES(?,?)',
+                                 [('chmod_folder', '775'), ('chown_group', 'users')])
+            with patch.object(policy, 'Settings', side_effect=AssertionError('Global settings used')):
+                values = policy._permission_settings(database)
+                self.assertEqual((values.chmod_folder, values.chown_group), ('775', 'users'))
+
+    def test_standalone_journal_without_config_has_no_policy(self):
+        with sqlite3.connect(':memory:') as database:
+            values = policy._permission_settings(database)
+            self.assertEqual((values.chmod_folder, values.chown_group), ('', ''))
+
     def test_new_setgid_directory_grants_group_access_without_stripping_acl(self):
         state = SimpleNamespace(mode=stat.S_IFDIR | 0o2755, gid=100,
                                 access=acl(), default=acl(7, 7))
@@ -63,6 +78,7 @@ class ManagedPermissionTests(TestCase):
                 policy.apply_managed_permissions('/root/folder', directory=True)
         self.assertEqual(raised.exception.code, ExecutionCode.PERMISSION)
 
+    @skipUnless(os.name == 'nt', 'Windows native access control only')
     def test_windows_uses_native_access_control(self):
         with patch.object(policy, 'Settings', side_effect=AssertionError('POSIX settings used')):
             policy.apply_managed_permissions('C:\\Comics\\Volume', directory=True)

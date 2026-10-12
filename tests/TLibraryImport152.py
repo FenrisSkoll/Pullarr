@@ -446,7 +446,7 @@ class Import152Tests(ImportHarness,TestCase):
         self.response.json.side_effect = responses * 2
         stage = stage_import(self.database, [dict(filepath=str(source),
             provider='comicvine', provider_id='2127', issue_ids=['301'])], False)
-        def deny_file_permissions(path, *, directory, repair=False):
+        def deny_file_permissions(path, *, directory, repair=False, database=None, settings=None):
             if not directory:
                 raise OrganizationError(ExecutionCode.PERMISSION)
         with patch('backend.features.managed_permissions.apply_managed_permissions',

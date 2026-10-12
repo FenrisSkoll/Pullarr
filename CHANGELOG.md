@@ -23,6 +23,8 @@
   setgid/POSIX ACL acceptance tests. These Linux ACL tests were not run on the
   Windows release workstation; effective Unraid ACLs and Windows SMB write access
   still need a manual check with copied media before use on the live library.
+- Read permission settings from the executing journal's database for Linux
+  background jobs, including recovery outside a web request.
 - Schema 73 adds persistent import drafts. Back up the complete Pullarr appdata
   database directory, including SQLite WAL/SHM files, before upgrading. A
   rollback to 1.5.2 requires its matching pre-upgrade database backup; changing
