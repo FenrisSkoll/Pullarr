@@ -3,6 +3,8 @@ class Node {
     constructor(tag='div') { this.tag=tag; this.children=[]; this.nodes=new Map(); this.dataset={}; this.value=''; this.style={}; this.classList={contains:()=>true}; }
     appendChild(child) { this.children.push(child); }
     append(child) { this.appendChild(child); }
+    prepend(child) { this.children.unshift(child); }
+    replaceChildren(...children) { this.children = children; }
     querySelector(selector) { if (!this.nodes.has(selector)) this.nodes.set(selector,new Node()); return this.nodes.get(selector); }
     querySelectorAll(selector) { return selector.includes('entry-description') ? [this.querySelector('description')] : []; }
     cloneNode() { return new Node('button'); }
@@ -13,7 +15,8 @@ function harness(script) {
     const root=new Node(), requests=[], submissions=[];
     const context=vm.createContext({document:{querySelector:s=>root.querySelector(s), getElementById:s=>root.querySelector('#'+s),
         createElement:tag=>new Node(tag), querySelectorAll:()=>[]}, URL, URLSearchParams, console,
-        window:{location:{search:''}}, url_base:'', hide:()=>{}, usingApiKey:()=>Promise.resolve('fixture-key'),
+        setTimeout:()=>0, clearTimeout:()=>{},
+        window:{location:{search:''},addEventListener:()=>{}}, url_base:'', hide:()=>{}, usingApiKey:()=>Promise.resolve('fixture-key'),
         showLoadWindow:()=>{}, setLocalStorage:()=>{}, closeWindow:()=>{}, showWindow:()=>{},
         fetchAPI:async (path,key,params)=> { requests.push({path,key,params}); return {result:context.data}; },
         sendAPI:async (method,path,key,params,data)=> {
