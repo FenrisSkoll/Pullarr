@@ -116,7 +116,8 @@ def rename_no_replace(source: str, target: str) -> None:
         if operation(-100, os.fsencode(source), -100, os.fsencode(target), 1):
             number = ctypes.get_errno()
             if number in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP, errno.EXDEV):
-                raise OrganizationError(ExecutionCode.UNSUPPORTED)
+                raise OrganizationError(ExecutionCode.UNSUPPORTED,
+                                        f'renameat2 RENAME_NOREPLACE errno={number}')
             raise OSError(number, os.strerror(number))
     else:
         raise OrganizationError(ExecutionCode.UNSUPPORTED, 'No verified exclusive rename primitive')

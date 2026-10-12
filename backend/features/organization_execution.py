@@ -695,10 +695,28 @@ class OrganizationExecutor:
                                 raise OrganizationError(ExecutionCode.SOURCE)
                         yield
 
+            copy_fallback = None
             with rename_guard():
                 if not matches(intent['source'], value['artifact_before']):
                     raise OrganizationError(ExecutionCode.SOURCE)
-                rename_no_replace(intent['source'], intent['target'])
+                try:
+                    rename_no_replace(intent['source'], intent['target'])
+                except OrganizationError as error:
+                    if (error.code != ExecutionCode.UNSUPPORTED or not intent.get('library_import')
+                            or intent['inverse'] or intent.get('rename_authority') is not None):
+                        raise
+                    copy_fallback = error.detail or 'exclusive_rename_unsupported'
+            if copy_fallback is not None:
+                # Keep the global no-clobber rename strict. Only a reviewed
+                # Library Import may use its existing journalled copy effect.
+                from backend.features.organization_import_move import execute
+
+                value['import_copy_reason'] = copy_fallback
+                with self.store.transaction():
+                    self.store.checkpoint(job.id, ordinal, StepState.STARTED, value)
+                execute(self, job, intent, ordinal, value)
+                return
+            value.pop('import_copy_reason', None)
             value['artifact_after'] = artifact(intent['target'])
             if value['artifact_after'] != value['artifact_before']:
                 raise OrganizationError(ExecutionCode.CONFLICT)
@@ -969,8 +987,11 @@ class OrganizationExecutor:
                                         moved=moved or intent['inverse'])
                     elif not matches(self._current_path(simulated, intent), self._expected_artifact(simulated, validation)):
                         raise OrganizationError(ExecutionCode.SOURCE)
+                    copy_pending = (intent.get('library_import') and any(
+                        step.kind == EffectKind.RELOCATE.value and step.state == StepState.STARTED
+                        and json.loads(step.evidence).get('import_copy_identity') for step in job.steps))
                     if ('archive_effect' not in intent and 'upgrade_effect' not in intent and 'seed_copy_effect' not in intent and intent['source'] != intent['target'] and observations['source_exists']
-                            and observations['target_exists']):
+                            and observations['target_exists'] and not copy_pending):
                         raise OrganizationError(ExecutionCode.CONFLICT)
                     observations['recorded_artifact_matches'] = True
                     observations['recorded_database_matches'] = True

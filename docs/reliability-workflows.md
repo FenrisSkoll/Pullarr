@@ -78,6 +78,14 @@ after all selected moves succeed; it never recursively removes content or delete
 roots, managed folders or directories referenced by live recovery work. Conflicting
 destinations preserve the source for review. Cross-filesystem imports copy in
 bounded chunks, verify payloads, then retire only the source directory entry.
+If a filesystem rejects the exclusive `renameat2(RENAME_NOREPLACE)` operation,
+reviewed Library Import uses that same journalled verified-copy path even when
+source and destination report the same device. It creates the destination
+exclusively, verifies its SHA-256 and recorded identity, and retires the source
+entry only after the ownership check. An interrupted or older
+`unsupported_operation` job must be reviewed in Maintenance history before
+continuing; a partial or unrelated destination blocks recovery and is not
+overwritten. This fallback does not change ordinary organizer renames.
 
 Publication registration and a valid folder commit together. Exact embedded issue
 identity, ComicInfo numbering and safe unique filename numbering determine issue

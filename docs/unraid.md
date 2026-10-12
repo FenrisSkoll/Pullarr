@@ -64,6 +64,18 @@ a failed import has wrong access, use the single-folder reviewed repair shown
 in Library Import, then preview again. Do not run recursive chmod/chown over
 the collection.
 
+Unraid user shares may reject Linux's exclusive `renameat2` flag even when
+both paths appear on the same device. Library Import then uses its journalled,
+exclusive verified-copy fallback. A previously interrupted import showing
+`unsupported_operation` should be opened in **Maintenance → History** for
+**Review Recovery**. Confirm the original archive still exists, the intended
+destination is absent, and the recorded publication and issue are correct
+before **Continue Recovery**. An occupied or partial destination needs separate
+inspection; do not manually overwrite it or start another import for the same
+file. The exact filesystem cause requires a disposable user-share syscall test
+or captured errno; the journal state alone cannot prove which FUSE operation
+was rejected.
+
 For a disposable acceptance run, copy one small CBR/CBZ into an isolated test
 root mounted into a separate Pullarr test instance with a copied database.
 Configure **Chmod Folder = 775** and **Chown Group = users** in that instance.

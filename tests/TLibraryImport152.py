@@ -172,6 +172,14 @@ class Import152Tests(ImportHarness,TestCase):
     def test_read_only_stage_and_rename(self):
         self._staged_synthetics(True)
 
+    def test_reviewed_import_completes_after_unsupported_exclusive_rename(self):
+        from backend.base.organization_job import (ExecutionCode,
+                                                   OrganizationError)
+
+        with patch('backend.features.organization_execution.rename_no_replace',
+                   side_effect=OrganizationError(ExecutionCode.UNSUPPORTED)):
+            self._staged_synthetics(False)
+
     def _staged_synthetics(self, rename):
         self.settings.volume_folder_naming = '{series_name} ({year})'
         self.db.execute("UPDATE config SET value=? WHERE key='volume_folder_naming'",
@@ -201,7 +209,8 @@ class Import152Tests(ImportHarness,TestCase):
         if not rename:
             self.assertEqual(Path(result['jobs'][0]['target']).name, source.name)
         self.assertFalse(source.exists())
-        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM issues_files').fetchone()[0], 1)
+        self.assertEqual(self.db.execute('''SELECT i.comicvine_id FROM issues i
+            JOIN issues_files b ON b.issue_id=i.id''').fetchall(), [(3333,)])
 
     def test_four_book_http_stage_apply_uses_real_executor_and_db(self):
         from flask import Flask

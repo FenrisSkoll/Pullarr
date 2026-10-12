@@ -1,4 +1,8 @@
-"""Journal-owned cross-device Library Import transfer; never overwrite or edit source."""
+"""Journal-owned verified Library Import copy, including unsupported no-clobber renames.
+
+The destination is exclusively created, and the source directory entry is retired
+only after journalled identity, SHA-256 and database authority checks.
+"""
 import os
 from pathlib import Path
 
