@@ -1,5 +1,22 @@
 # Release notes
 
+## 1.5.8 — Library Import UX Refinements
+
+- Redesigned Library Import with a cleaner five-column layout.
+- Consolidated Choose/Change publication into one clear control.
+- Added visual distinctions between manual, ComicVine-suggested,
+  and embedded metadata matches.
+- Improved publication title readability and responsive layouts.
+- Separated import selection and bulk matching with clearer
+  labels, counters and actions.
+- Added targeted confirmation for potentially destructive bulk
+  publication reassignment.
+- Preserved per-file issue matching during bulk operations.
+- Removed redundant Public source gates triggered by version tags.
+- Preserved existing cover artwork, lightbox and metadata search.
+- Kept the Direct Import execution path unchanged.
+- Database schema remains 73; no migration required.
+
 ## 1.5.7 — Library Import Search & Artwork
 
 - Restored configurable library folder scan limits.
