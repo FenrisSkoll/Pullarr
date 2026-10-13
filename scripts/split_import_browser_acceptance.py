@@ -70,7 +70,7 @@ def run(rename):
                         rows.nth(index).locator('button').first.click()
                         page.locator('#search-input').fill(names[index]);page.locator('#search-input').press('Enter')
                         result=page.locator('.search-results tr').filter(has_text=titles[index])
-                        result.locator('button').first.click()
+                        result.get_by_role('button', name='Select', exact=True).click()
                         expect(rows.nth(index).locator('.issue-column')).to_contain_text(str(index+1))
                     for width in (1280,680,390):
                         page.set_viewport_size({'width':width,'height':850})

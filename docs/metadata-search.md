@@ -22,9 +22,13 @@ break ties; provider order is retained for equivalent candidates. Publisher,
 volume number and issue count remain visible facts, not inferred query constraints.
 
 `metadata-search/v2` adds `relations`, `search_origin`, `relation_reason` and
-`rank_components`. Add Comics requests `presentation=v2&artwork=true`. Library
-Import requests `expand_relations=false` and does not request artwork. Selecting
-any candidate always uses its exact provider-qualified ID.
+`rank_components`. Add Comics and Library Import request
+`presentation=v2&artwork=true`; Library Import also requests
+`expand_relations=false`. Its compact result covers use the same bounded lazy
+artwork ticket. Clicking an available cover opens a view-only lightbox; the
+original provider URL is used only when already supplied and validated. A
+resolved artwork-ticket image is a compact preview, not a full-resolution cover.
+Selecting any candidate always uses its exact provider-qualified ID.
 
 ## Artwork and request bounds
 

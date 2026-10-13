@@ -7,6 +7,11 @@ pages of 100. It lists local files even when a metadata provider is unavailable.
 Already registered paths are counted and omitted from new import rows. Filter
 the visible rows by folder, filename, publication or import status; continue
 through the pages to reach the whole configured scope.
+Choose **Max folders scanned** before scanning: 20 through 1,000 or **All
+(bounded)**, which requests the scanner's 50,000-folder cap. The scanner also
+reports partial results if its independent traversal safety bound is reached.
+Optional ComicVine publication suggestions have a separate 20–500 eligible-folder
+budget and can be stopped without removing local results.
 
 Choose the provider-qualified publication and exact issue or issues represented
 by each file. Suggested matches use local filename and ComicInfo evidence, but

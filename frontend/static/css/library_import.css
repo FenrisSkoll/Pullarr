@@ -51,6 +51,12 @@ main {
 	text-align: right;
 }
 
+#start-window table { width: min(100%, 44rem); }
+#start-window table td { vertical-align: top; }
+#advanced-matching { margin-top: .5rem; }
+#advanced-matching summary { cursor: pointer; }
+#advanced-matching select { margin: .4rem; }
+
 #start-window table :where(select, input) {
 	min-width: 4rem;
 	height: 2rem;
@@ -192,9 +198,13 @@ main {
 .li-result .file-column { width: 19rem; overflow-wrap: normal; word-break: normal; }
 .li-result .file-column details { max-width: 18rem; overflow-wrap: anywhere; word-break: normal; }
 .li-result .import-match { display: block; max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li-result .publication-choice { display: block; max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-color); text-align: left; }
+.li-result .provider-link { display: block; margin-top: .3rem; }
+.li-result .bulk-target { display: block; white-space: nowrap; font-size: .8rem; }
 .li-result .issue-column { min-width: 18rem; overflow-wrap: normal; word-break: normal; }
 .li-result .import-status { overflow-wrap: break-word; word-break: normal; }
-#import-filter { width: min(100%, 28rem); margin: .5rem; }
+.import-filter-label { display: block; max-width: 100%; }
+#import-filter { display: block; width: min(100%, 28rem); margin: .5rem 0; }
 
 .li-result button img {
 	height: 1.5rem;
@@ -252,8 +262,13 @@ main {
 }
 
 .search-results-container table {
-	min-width: 25rem;
+	width: 100%;
+	min-width: 0;
 }
+
+#cv-window[show-window] { width: min(92vw, 820px); max-height: 90dvh; }
+#cv-window .window-content { min-width: 0; }
+#bulk-match-count { font-size: .9rem; }
 
 .search-results-container th {
 	padding-left: 1rem;
@@ -273,7 +288,7 @@ main {
 }
 
 .search-results td:last-child {
-	width: 5rem;
+	width: 11rem;
 }
 
 .search-results td a {
@@ -286,6 +301,38 @@ main {
 	padding: .3rem;
 	color: var(--text-color);
 	background-color: var(--foreground-color);
+}
+.import-search-content { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; }
+.import-cover-button { flex: 0 0 48px; width: 48px; height: 72px; padding: 0 !important; overflow: hidden; }
+.import-cover-button img { width: 48px; height: 72px; object-fit: contain; display: block; }
+.import-cover-button:disabled { cursor: default; opacity: .8; }
+.import-search-details { min-width: 0; overflow-wrap: anywhere; }
+.import-search-details strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.import-search-details p { margin: .25rem 0; font-size: .85rem; }
+.import-search-actions { vertical-align: middle; }
+.import-search-actions button { display: block; width: 100%; margin: .2rem 0; white-space: normal; }
+.import-search-actions button:disabled { opacity: .55; cursor: default; }
+#import-cover-lightbox { width: max-content; max-width: 75vw; max-height: 85dvh; padding: 1rem; overflow: auto;
+    border: 1px solid #626b72; border-radius: 8px; background: #171b20; color: #fff; text-align: center; }
+#import-cover-lightbox::backdrop { background: rgba(0, 0, 0, .8); }
+#import-cover-close { display: block; margin-left: auto; color: #fff; font-size: 1.75rem; line-height: 1; }
+#import-cover-caption { margin: .25rem 0 .6rem; font-size: .9rem; }
+#import-cover-image { display: block; width: auto; height: auto; max-width: calc(75vw - 2rem);
+    max-height: calc(85dvh - 6rem); object-fit: contain; margin: auto; }
+#import-cover-image[hidden] { display: none; }
+#import-cover-feedback, #import-cover-resolution { font-size: .8rem; }
+@media (max-width: 600px) {
+    #cv-window[show-window] { width: 96vw; max-height: 90dvh; }
+    #cv-window .window-content { padding-inline: .45rem; }
+    .search-results-container { padding: .25rem; }
+    .search-results-container thead { display: none; }
+    .search-results tr.search-result { display: block; border-top: 1px solid var(--border-color); }
+    .search-results tr.search-result td { display: block; border: 0; width: 100%; padding: .3rem; }
+    .import-search-actions { display: flex !important; gap: .4rem; }
+    .import-search-actions button { width: auto; flex: 1; margin: 0; }
+    #import-cover-lightbox { max-width: 95vw; max-height: 90dvh; }
+    #import-cover-image { max-width: calc(95vw - 2rem); max-height: calc(90dvh - 6rem); }
+    #start-window table td { padding: .4rem; }
 }
 .issue-column { min-width: 18rem; vertical-align: top; }
 .issue-column > button { margin-left: .5rem; }

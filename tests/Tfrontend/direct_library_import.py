@@ -366,7 +366,7 @@ class DirectLibraryImport(ImportAPIHarness, TestCase):
 
 
 class LargeLocalDiscovery(TestCase):
-    def test_all_904_folders_and_1409_archives_are_paged(self):
+    def test_all_904_folders_and_2924_archives_are_paged(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary) / 'Comics'
             root.mkdir()
@@ -376,7 +376,7 @@ class LargeLocalDiscovery(TestCase):
                     CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);''')
                 db.execute('INSERT INTO root_folders VALUES(1,?)', (str(root),))
                 db.commit()
-            for index in range(1409):
+            for index in range(2924):
                 folder = root / f'Folder {index % 904:04d}'
                 folder.mkdir(exist_ok=True)
                 (folder / f'Issue {index:04d}.cbz').write_bytes(b'')
@@ -386,7 +386,59 @@ class LargeLocalDiscovery(TestCase):
                 page = scan_library_import(database, offset=offset)
                 seen.update(item['filepath'] for item in page['items'])
                 offset = page['next_offset']
-            self.assertEqual(len(seen), 1409)
+            self.assertEqual(len(seen), 2924)
             self.assertEqual(page['counts']['scanned_folders'], 905)
             self.assertEqual(page['counts']['not_yet_scanned_folders'], 0)
             self.assertTrue(page['enumeration_complete'])
+            partial = scan_library_import(database, folder_limit=500)
+            self.assertEqual(partial['counts']['scanned_folders'], 500)
+            self.assertEqual(partial['counts']['not_yet_scanned_folders'], 405)
+            self.assertFalse(partial['enumeration_complete'])
+            self.assertEqual(scan_library_import(database, folder_limit=1000)['counts']['discovered'], 2924)
+            self.assertEqual(scan_library_import(database, folder_limit=50000)['counts']['discovered'], 2924)
+
+    def test_depth_bound_does_not_claim_complete_scan(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'Comics'
+            root.mkdir()
+            database = str(Path(temporary) / 'library.db')
+            with closing(sqlite3.connect(database)) as db:
+                db.executescript('''CREATE TABLE root_folders(id INTEGER PRIMARY KEY,folder TEXT);
+                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);''')
+                db.execute('INSERT INTO root_folders VALUES(1,?)', (str(root),))
+                db.commit()
+            current = root
+            for _ in range(33):
+                current = current / 'd'
+                current.mkdir()
+            (current / 'hidden.cbz').write_bytes(b'fixture')
+            result = scan_library_import(database, folder_limit=50000)
+            self.assertTrue(result['counts']['limited'])
+            self.assertFalse(result['enumeration_complete'])
+            self.assertEqual(result['counts']['discovered'], 0)
+
+
+class ScopedSuggestions(ImportAPIHarness, TestCase):
+    def test_bounded_authenticated_proposal_never_registers(self):
+        source = self.comic_file(name='Book 1.cbz')
+        database = self.root / 'suggestions.db'
+        with closing(sqlite3.connect(database)) as disk:
+            self.db.backup(disk)
+        async def matched(groups, only_english):
+            self.assertTrue(only_english)
+            return {number:dict(id=2127,title='Books',issue_count=3,link='https://comicvine.gamespot.com')
+                    for number in groups}
+        with patch('backend.internals.db.DBConnection.default_file', str(database)), \
+                patch('backend.features.library_import.ComicVine') as comicvine:
+            comicvine.return_value.filenames_to_cvs.side_effect = matched
+            response = self.client.post('/api/libraryimport/suggestions',
+                json={'files':[source]}, query_string={'api_key':FAKE_APP_KEY})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['result'][0]['filepath'], source)
+        self.assertEqual(self.rows('volumes'), [])
+        self.assertEqual(self.rows('files'), [])
+        with patch('backend.internals.db.DBConnection.default_file', str(database)):
+            for paths in ([source] * 11, [str(Path(source).parent.parent / 'outside.cbz')]):
+                rejected = self.client.post('/api/libraryimport/suggestions',
+                    json={'files':paths}, query_string={'api_key':FAKE_APP_KEY})
+                self.assertEqual(rejected.status_code, 400, rejected.get_json())

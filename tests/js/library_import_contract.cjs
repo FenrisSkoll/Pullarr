@@ -11,14 +11,14 @@ function element() {
         querySelector() { return element(); },
         querySelectorAll() { return []; },
         classList:{add(){}, remove(){}, toggle(){}},
-        focus(){}, setAttribute(){}};
+        focus(){}, setAttribute(){}, addEventListener(){}, hasAttribute(){return false;}};
 }
 const elements = new Map();
 function byId(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }
 byId('import-mode').value = 'keep';
 let submitted;
 const context = vm.createContext({
-    document:{getElementById:byId, querySelector:()=>element(), querySelectorAll:()=>[],
+    document:{getElementById:byId, querySelector:()=>element(), querySelectorAll:()=>[], addEventListener(){},
         createElement:element, createTextNode:text => ({textContent:text})},
     localStorage:{getItem:()=>null, setItem(){}},
     usingApiKey:()=>Promise.resolve('test-key'),
@@ -30,7 +30,7 @@ const context = vm.createContext({
             {status:'failed',source:'/library/Book 2.cbz',reason:'target_exists: /library/Owned.cbz'}
         ]}})};
     },
-    MetadataSearchPresentation:{groups:()=>null},
+    MetadataSearchPresentation:{groups:()=>null, safeLink:()=>''},
     showWindow(){}, closeWindow(){}, console
 });
 vm.runInContext(fs.readFileSync('frontend/static/js/library_import.js','utf8'), context);

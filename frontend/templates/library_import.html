@@ -19,22 +19,18 @@
 		</label>
 	</td>
 	<td class="file-column" title=""></td>
-	<td>
-		<a href="" target="_blank" rel="noopener noreferrer"></a>
+	<td class="match-column">
+		<button type="button" class="publication-choice">Choose publication</button>
+		<a class="provider-link hidden" target="_blank" rel="noopener noreferrer">View on provider</a>
 	</td>
 	<td>
-		<button title="Change match">
+		<button type="button" class="change-match" title="Change match" aria-label="Change publication">
 			<img src="{{ url_for('static', filename='img/edit.svg') }}" alt="">
 		</button>
+		<label class="bulk-target"><input type="checkbox" class="bulk-match-select"> Match in bulk</label>
 	</td>
 	<td class="issue-column"></td>
 	<td class="import-status" aria-live="polite"></td>
-</tr>
-<tr class="search-result">
-	<td>
-		<a target="_blank" rel="noopener noreferrer" href=""></a>
-	</td>
-	<td><button>Select for this file</button><button type="button" class="bulk-match">Apply to checked files</button></td>
 </tr>
 {% endblock pre_build_rows %}
 
@@ -54,18 +50,26 @@
 				<img src="{{url_base}}/static/img/search.svg" alt="">
 			</button>
 		</form>
+		<p id="bulk-match-count" aria-live="polite"></p>
 		<div class="search-results-container">
 			<table>
-				<thead>
+				<thead><tr>
 					<th>Search Result</th>
 					<th>Action</th>
-				</thead>
+				</tr></thead>
 				<tbody class="search-results"></tbody>
 			</table>
 		</div>
 	{% endset %}
 
 	{{ window(False, "cv-window", "Edit Metadata Match", edit_cv_content) }}
+	<dialog id="import-cover-lightbox" aria-label="Publication cover preview">
+		<button id="import-cover-close" type="button" aria-label="Close cover preview">×</button>
+		<p id="import-cover-caption"></p>
+		<p id="import-cover-feedback" role="status">Loading cover…</p>
+		<img id="import-cover-image" alt="" hidden>
+		<p id="import-cover-resolution" class="hidden">Preview resolution only</p>
+	</dialog>
 {% endblock windows %}
 
 {% block main %}
@@ -77,8 +81,15 @@
 			<tbody>
 				<tr>
 					<td><label for="auto-match-input">Automatically match with ComicVine</label></td>
-						<td><input type="checkbox" id="auto-match-input" checked><p>After local discovery, request ComicVine publication suggestions for at most 20 folders. Provider failure never removes local file rows.</p></td>
+					<td><input type="checkbox" id="auto-match-input" checked><p>Optional publication suggestions after local discovery. Provider failure never removes local file rows.</p>
+						<details id="advanced-matching"><summary>Advanced matching options</summary>
+							<label for="match-folder-limit">Automatically suggest publications for up to</label>
+							<select id="match-folder-limit"><option>20</option><option>50</option><option>100</option><option>200</option><option>500</option></select> eligible folders
+						</details></td>
 				</tr>
+				<tr><td><label for="scan-folder-limit">Max folders scanned</label></td>
+					<td><select id="scan-folder-limit"><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option value="1000">1,000</option><option value="50000">All (bounded)</option></select>
+						<p>File results show 100 per page; this limit controls local folder discovery.</p></td></tr>
 				<tr>
 					<td><label for="target-input">Folder(s) to scan</label></td>
 					<td>
@@ -112,20 +123,21 @@
 	</div>
 	<div id="list-window" class="hidden">
 		<p id="scan-summary" aria-live="polite"></p>
+		<p id="matching-status" aria-live="polite"></p>
+		<button id="stop-matching" type="button" class="hidden">Stop matching</button>
 		<p id="import-error" role="alert"></p>
 		<div class="action-container">
 			<button class="cancel-button">Back</button>
 			<label>Import behaviour <select id="import-mode"><option value="keep">Keep in place</option><option value="move">Move and rename</option></select></label>
 			<button id="import-button" type="button">Import selected</button>
 		</div>
-		<label>Filter files <input id="import-filter" type="search" placeholder="Folder, filename, publication or status"></label>
+		<label class="import-filter-label">Filter files <input id="import-filter" type="search" placeholder="Folder, filename, publication or status"></label>
 		<p id="rate-limit-banner" class="hidden">
-			Some matches may be missing because the ComicVine API rate limit was reached.
-			Entries with empty Match columns were likely affected.
+			Automatic ComicVine matching could not finish. Provider errors or rate limits do not hide local files; unmatched rows remain editable.
 		</p>
 		<div class="table-container icon-text-color">
 			<table aria-label="File list">
-				<thead>
+				<thead><tr>
 					<th>
 						<label>
 							<input type="checkbox" id="selectall-input" aria-label="Select all entries for importing" checked>
@@ -133,10 +145,10 @@
 					</th>
 					<th>File</th>
 					<th>Match</th>
-					<th>Action</th>
-						<th>Issue association</th>
-						<th>Status</th>
-				</thead>
+					<th>Action / bulk selection</th>
+					<th>Issue association</th>
+					<th>Status</th>
+				</tr></thead>
 				<tbody class="proposal-list"></tbody>
 			</table>
 		</div>

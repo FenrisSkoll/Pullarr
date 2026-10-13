@@ -1074,6 +1074,26 @@ def api_library_import_files():
                           'LibraryImportScan', 400)
 
 
+@api.route('/libraryimport/suggestions', methods=['POST'])
+@error_handler
+@auth
+def api_library_import_suggestions():
+    from backend.features.library_import import suggest_scanned_import_files
+    from backend.internals.db import DBConnection
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return return_api({'code':'invalid_suggestion_files'}, 'LibraryImportSuggestion', 400)
+    try:
+        return return_api(suggest_scanned_import_files(DBConnection.default_file,
+            body.get('files')))
+    except ValueError as error:
+        code = str(error)
+        if code not in {'invalid_suggestion_files', 'invalid_suggestion_file'}:
+            code = 'invalid_suggestion_file'
+        return return_api({'code':code}, 'LibraryImportSuggestion', 400)
+
+
 @api.route('/libraryimport/catalog', methods=['POST'])
 @error_handler
 @auth

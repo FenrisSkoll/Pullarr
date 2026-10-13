@@ -1,6 +1,10 @@
 /* Local discovery and explicit one-step import. No draft writes during scans. */
-const importRows = new Map(), importCatalogues = new Map();
-let importKey, importOffset, importEditing, importGeneration = 0;
+const importRows = new Map(), importCatalogues = new Map(), importProposals = new Map();
+const importEvidence = new Map(), importCatalogueQueue = new Map(), importSuggestions = new Map();
+const importRowsByPath = new Map();
+let importKey, importOffset, importEditing, importGeneration = 0, importMatchGeneration = 0;
+let importSearchGeneration = 0, importArtwork, importCoverObserver, importScope, importPageLoading = false;
+let importAutoCatalogueQueue = Promise.resolve();
 const imp = id => document.getElementById(id);
 const importError = message => { imp('import-error').textContent = message; };
 const identityKey = row => `${row.identity.provider}:${row.identity.id}`;
@@ -22,7 +26,7 @@ function importReason(reason) {
 function filterImport() {
     const query = imp('import-filter').value.toLowerCase();
     for (const row of importRows.values())
-        row.element.hidden = !!query && !`${row.data.filepath} ${row.catalogue?.title || ''} ${row.status || ''}`.toLowerCase().includes(query);
+        row.element.hidden = !!query && !`${row.data.filepath} ${row.element.querySelector('.publication-choice').textContent} ${row.status || ''}`.toLowerCase().includes(query);
 }
 function setImportStatus(row, status) {
     row.status = status;
@@ -41,27 +45,49 @@ function showIssueChoice(row) {
 async function loadCatalogue(row) {
     if (!row.identity) throw new Error('Choose a publication first');
     const key = identityKey(row);
-    if (!importCatalogues.has(key)) {
-        const group = [...importRows.values()].filter(item => item.identity && identityKey(item) === key).slice(0, 100);
-        const request = sendAPI('POST', '/libraryimport/catalog', importKey, {}, {
-            provider:row.identity.provider, provider_id:row.identity.id,
-            files:group.map(item => item.data.filepath)
-        }).then(response => response.json()).then(json => {
-            for (const item of group) {
-                item.proposal = json.result.proposals?.[item.data.filepath];
-                item.catalogue = json.result;
-                if (!item.manual && !item.issueIds.length && item.proposal?.issue_ids?.length)
-                    item.issueIds = item.proposal.issue_ids;
-                showIssueChoice(item);
+    const identity = {...row.identity};
+    const generation = importGeneration, rowVersion = row.choiceVersion;
+    const previous = importCatalogueQueue.get(key) || Promise.resolve();
+    const task = previous.catch(() => {}).then(async () => {
+        const seen = importEvidence.get(key) || new Set();
+        const proposals = importProposals.get(key) || new Map();
+        importEvidence.set(key, seen); importProposals.set(key, proposals);
+        const group = [...importRows.values()].filter(item => item.identity &&
+            identityKey(item) === key && !seen.has(item.data.filepath));
+        for (let start = 0; start < group.length; start += 100) {
+            const batch = group.slice(start, start + 100);
+            const versions = new Map(batch.map(item => [item, item.choiceVersion]));
+            const response = await sendAPI('POST', '/libraryimport/catalog', importKey, {}, {
+                provider:identity.provider, provider_id:identity.id,
+                files:batch.map(item => item.data.filepath)
+            });
+            if (!response.ok) throw new Error('Issue catalogue unavailable');
+            const result = (await response.json()).result;
+            if (generation !== importGeneration) return;
+            importCatalogues.set(key, result);
+            for (const item of batch) {
+                const path = item.data.filepath;
+                seen.add(path); proposals.set(path, result.proposals?.[path]);
+                if (item.identity && identityKey(item) === key && item.choiceVersion === versions.get(item)) {
+                    item.catalogue = result; item.proposal = proposals.get(path);
+                    if (!item.manual && !item.issueIds.length && item.proposal?.issue_ids?.length)
+                        item.issueIds = item.proposal.issue_ids;
+                    showIssueChoice(item);
+                }
             }
-            return json.result;
-        }).catch(error => { importCatalogues.delete(key); throw error; });
-        importCatalogues.set(key, request);
-    }
-    row.catalogue = await importCatalogues.get(key);
-    if (!row.manual && !row.issueIds.length && row.proposal?.issue_ids?.length)
-        row.issueIds = row.proposal.issue_ids;
-    showIssueChoice(row);
+        }
+        if (row.identity && identityKey(row) === key && row.choiceVersion === rowVersion &&
+                importCatalogues.has(key)) {
+            row.catalogue = importCatalogues.get(key);
+            row.proposal = proposals.get(row.data.filepath);
+            if (!row.manual && !row.issueIds.length && row.proposal?.issue_ids?.length)
+                row.issueIds = row.proposal.issue_ids;
+            showIssueChoice(row);
+        }
+    });
+    importCatalogueQueue.set(key, task);
+    try { await task; }
+    finally { if (importCatalogueQueue.get(key) === task) importCatalogueQueue.delete(key); }
 }
 async function editIssues(row) {
     try { await loadCatalogue(row); }
@@ -91,18 +117,63 @@ async function editIssues(row) {
     apply.onclick = () => { row.issueIds = [...chosen]; row.manual = true; showIssueChoice(row); };
     panel.append(heading, search, list, apply); row.element.querySelector('.issue-column').append(panel); search.focus();
 }
-function choosePublication(row, identity, title, url, load=true) {
-    row.identity = identity; row.catalogue = null; row.issueIds = []; row.manual = false;
-    const link = row.element.querySelector('a'); link.href = url || '#';
-    link.textContent = `${title} · ${identity.provider}:${identity.id}`;
-    link.title = link.textContent;
+function choosePublication(row, identity, title, url, load=true, userChosen=true) {
+    if (row.identity && identityKey(row) === `${identity.provider}:${identity.id}` && row.userChosen && !userChosen) return;
+    const changed = !row.identity || identityKey(row) !== `${identity.provider}:${identity.id}`;
+    if (changed) {
+        row.choiceVersion = (row.choiceVersion || 0) + 1;
+        row.catalogue = null; row.proposal = null; row.issueIds = []; row.manual = false;
+    }
+    row.identity = identity; row.userChosen = userChosen;
+    const button = row.element.querySelector('.publication-choice');
+    button.textContent = `${title} · ${identity.provider}:${identity.id}`;
+    button.title = button.textContent;
+    button.setAttribute('aria-label', `Change publication: ${button.textContent}`);
+    const link = row.element.querySelector('.provider-link');
+    const safe = MetadataSearchPresentation.safeLink(url);
+    if (safe) link.href = safe;
+    else link.removeAttribute('href');
+    link.classList.toggle('hidden', !safe);
     showIssueChoice(row);
-    if (load) loadCatalogue(row).catch(() => setImportStatus(row, 'Catalogue unavailable; retry Edit issues'));
+    filterImport();
+    if (load && (changed || !row.catalogue)) loadCatalogue(row).catch(() =>
+        setImportStatus(row, 'Catalogue unavailable; retry Edit issues'));
+}
+function updateBulkCount() {
+    const count = [...importRows.values()].filter(row => row.element.querySelector('.bulk-match-select').checked).length;
+    imp('bulk-match-count').textContent = `${count} files explicitly chosen for bulk publication matching.`;
+    document.querySelectorAll('.bulk-match').forEach(button => {
+        button.disabled = count === 0;
+        button.textContent = `Apply to ${count} chosen files`;
+    });
+}
+function openPublicationSearch(row) {
+    importEditing = row;
+    updateBulkCount();
+    showWindow('cv-window');
+    requestAnimationFrame(() => {
+        if (imp('cv-window').hasAttribute('show-window')) imp('search-input').focus();
+    });
+}
+function applyAutoSuggestion(row) {
+    const suggestion = importSuggestions.get(row.data.filepath);
+    if (!row.identity && suggestion?.id) {
+        choosePublication(row, {provider:'comicvine', id:String(suggestion.id)},
+            suggestion.title, suggestion.link, false, false);
+        const generation = importGeneration, matchRun = importMatchGeneration;
+        importAutoCatalogueQueue = importAutoCatalogueQueue.catch(() => {}).then(async () => {
+            if (generation === importGeneration && matchRun === importMatchGeneration &&
+                    row.identity && !row.userChosen)
+                await loadCatalogue(row).catch(() => setImportStatus(row, 'Catalogue unavailable; retry Edit issues'));
+        });
+    }
 }
 function addImportRow(data) {
     const element = document.querySelector('.pre-build-els .li-result').cloneNode(true);
-    const row = {data, element, identity:null, catalogue:null, issueIds:[], manual:false, status:''};
+    const row = {data, element, identity:null, catalogue:null, issueIds:[], manual:false,
+        userChosen:false, choiceVersion:0, status:''};
     importRows.set(data.row_id, row);
+    importRowsByPath.set(data.filepath, row);
     element.dataset.rowid = data.row_id;
     const file = element.querySelector('.file-column'); file.textContent = data.file_title; file.title = data.filepath;
     const details = document.createElement('details'), summary = document.createElement('summary');
@@ -110,88 +181,265 @@ function addImportRow(data) {
     const evidence = document.createElement('p');
     evidence.textContent = `${data.filepath} · ${data.size} bytes${data.embedded ? ' · ComicInfo: ' + data.embedded.series + ' #' + data.embedded.number : ''}`;
     details.append(summary, evidence); file.append(details);
-    element.querySelector('a').textContent = 'Choose publication';
-    element.querySelector('button').onclick = () => {
-        importEditing = row;
-        showWindow('cv-window'); imp('search-input').focus();
-    };
+    element.querySelector('.publication-choice').onclick = () => openPublicationSearch(row);
+    element.querySelector('.change-match').onclick = () => openPublicationSearch(row);
+    element.querySelector('.bulk-match-select').onchange = updateBulkCount;
     if (data.metadata_source) choosePublication(row, data.metadata_source, data.embedded?.series || data.file_title, '');
     else showIssueChoice(row);
+    applyAutoSuggestion(row);
     return element;
 }
 async function scanImport(reset=true) {
+    if (importPageLoading || (!reset && importOffset === null)) return;
+    importPageLoading = true;
     const generation = reset ? ++importGeneration : importGeneration;
     if (reset) {
-        importRows.clear(); importOffset = 0;
+        ++importMatchGeneration;
+        importRows.clear(); importRowsByPath.clear(); importOffset = 0;
+        importSuggestions.clear(); importCatalogues.clear(); importProposals.clear();
+        importEvidence.clear(); importCatalogueQueue.clear();
+        importAutoCatalogueQueue = Promise.resolve();
+        importEditing = null;
+        const folder = imp('folder-filter-input').value.trim();
+        importScope = {folder_limit:Number(imp('scan-folder-limit').value)};
+        if (imp('target-input').value === 'false' && folder)
+            importScope.folder_filter = encodeURIComponent(folder);
         document.querySelector('.proposal-list').replaceChildren();
         imp('list-window').classList.add('hidden'); imp('loading-window').classList.remove('hidden');
         imp('start-window').classList.add('hidden');
+        imp('scan-summary').textContent = '';
+        imp('matching-status').textContent = '';
+        imp('rate-limit-banner').classList.add('hidden');
+        importError('');
+        imp('stop-matching').classList.add('hidden');
+        imp('selectall-input').checked = true;
     }
-    const params = {offset:importOffset, page_size:100};
-    const folder = imp('folder-filter-input').value.trim();
-    if (imp('target-input').value === 'false' && folder) params.folder_filter = encodeURIComponent(folder);
+    const params = {...importScope, offset:importOffset, page_size:100};
+    imp('import-next-page').disabled = true;
     try {
         const page = (await fetchAPI('/libraryimport/files', importKey, params)).result;
         if (generation !== importGeneration) return;
         importOffset = page.next_offset;
-        imp('scan-summary').textContent = `${page.counts.scanned_folders} folders scanned · ${page.counts.discovered} unregistered archives · ${page.counts.already_managed} already in library`;
+        const counts = page.counts;
+        const reason = counts.limited ? 'Traversal safety bound reached' :
+            counts.not_yet_scanned_folders ? `${counts.not_yet_scanned_folders} eligible folders outside selected limit` :
+            'Folder scan complete';
+        imp('scan-summary').textContent = `${counts.scanned_folders} of ${counts.eligible_folders} eligible folders scanned · ` +
+            `${counts.discovered} unregistered archives · ${counts.already_managed} already in library · ` +
+            `${reason} · ${importOffset === null ? 'All result pages shown' : 'More result pages available'}`;
         const body = document.querySelector('.proposal-list');
-        for (const item of page.items) body.appendChild(addImportRow(item));
+        for (const item of page.items)
+            if (!importRowsByPath.has(item.filepath))
+                body.appendChild(addImportRow(item));
+        filterImport();
         imp('import-next-page').classList.toggle('hidden', importOffset === null);
         imp('list-window').classList.remove('hidden'); imp('loading-window').classList.add('hidden');
         imp('no-result-window').classList.toggle('hidden', importRows.size > 0);
-        if (reset && imp('auto-match-input').checked) suggestImportPublications();
+        updateBulkCount();
+        if (reset && imp('auto-match-input').checked) void suggestImportPublications(++importMatchGeneration);
     } catch (_) {
+        if (generation !== importGeneration) return;
         imp('loading-window').classList.add('hidden'); imp('start-window').classList.remove('hidden');
         importError('Local scan failed. Check the selected folder and retry.');
-    }
+    } finally { importPageLoading = false; imp('import-next-page').disabled = false; }
 }
-async function suggestImportPublications() {
+async function suggestImportPublications(run) {
+    const current = () => run === importMatchGeneration;
+    const budget = Math.min(importScope.folder_limit, Number(imp('match-folder-limit').value));
+    const scope = {...importScope, folder_limit:budget, page_size:100};
+    const all = [];
+    let offset = 0;
+    imp('stop-matching').classList.remove('hidden');
     try {
-        const results = (await fetchAPI('/libraryimport', importKey, {limit:20, auto_match:true})).result;
-        const selected = new Map();
-        for (const suggestion of results) {
-            if (!suggestion.cv?.id) continue;
-            const row = [...importRows.values()].find(item => item.data.filepath === suggestion.filepath);
-            if (row && !row.identity) {
-                choosePublication(row, {provider:'comicvine', id:String(suggestion.cv.id)},
-                    suggestion.cv.title, suggestion.cv.link, false);
-                selected.set(identityKey(row), row);
-            }
+        do {
+            const page = (await fetchAPI('/libraryimport/files', importKey, {...scope, offset})).result;
+            if (!current()) return;
+            all.push(...page.items);
+            offset = page.next_offset;
+            imp('matching-status').textContent = `Preparing suggestions for ${all.length} of ${page.counts.discovered} files in ` +
+                `${page.counts.scanned_folders} eligible folders (limit ${budget}).`;
+        } while (offset !== null && current());
+        const groups = new Map();
+        for (const item of all) {
+            const title = item.parsed?.title?.trim().toLowerCase();
+            if (!title) continue;
+            const key = `${title}|${item.parsed?.year || ''}`;
+            if (!groups.has(key)) groups.set(key, {representative:item.filepath, paths:[]});
+            groups.get(key).paths.push(item.filepath);
         }
-        for (const row of selected.values()) loadCatalogue(row).catch(() =>
-            setImportStatus(row, 'Catalogue unavailable; retry Edit issues'));
-    } catch (_) { imp('rate-limit-banner').classList.remove('hidden'); }
+        const entries = [...groups.values()];
+        for (let start = 0; start < entries.length && current(); start += 10) {
+            if (start) {
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                if (!current()) return;
+            }
+            const batch = entries.slice(start, start + 10);
+            const response = await sendAPI('POST', '/libraryimport/suggestions', importKey, {},
+                {files:batch.map(group => group.representative)});
+            if (!current()) return;
+            if (!response.ok) throw new Error('ComicVine suggestions unavailable');
+            const results = (await response.json()).result;
+            if (!current()) return;
+            const byPath = new Map(results.map(item => [item.filepath, item.cv]));
+            for (const group of batch) {
+                const cv = byPath.get(group.representative);
+                if (!cv?.id) continue;
+                for (const path of group.paths) {
+                    importSuggestions.set(path, cv);
+                    const row = importRowsByPath.get(path);
+                    if (row) applyAutoSuggestion(row);
+                }
+            }
+            imp('matching-status').textContent = `Publication suggestions checked for ` +
+                `${Math.min(start + 10, entries.length)} of ${entries.length} series groups in up to ${budget} folders.`;
+        }
+        if (current()) imp('matching-status').textContent += ' Matching complete; unmatched files remain editable.';
+    } catch (_) {
+        if (current()) {
+            imp('rate-limit-banner').classList.remove('hidden');
+            imp('matching-status').textContent = 'Automatic matching stopped by provider error or rate limit; local files remain available.';
+        }
+    } finally { if (current()) imp('stop-matching').classList.add('hidden'); }
+}
+function closeImportCover() {
+    const viewer = imp('import-cover-lightbox');
+    if (!viewer?.open) return;
+    viewer.close();
+    imp('import-cover-image').removeAttribute('src');
+    const trigger = viewer._trigger;
+    viewer._trigger = null;
+    if (trigger?.isConnected) trigger.focus();
+}
+function resetImportSearch() {
+    ++importSearchGeneration;
+    importArtwork?.stop(); importArtwork = null;
+    importCoverObserver?.disconnect(); importCoverObserver = null;
+    closeImportCover();
+}
+function openImportCover(button, entry, source) {
+    const viewer = imp('import-cover-lightbox'), image = imp('import-cover-image');
+    if (!source || !viewer?.showModal) return;
+    const generation = importSearchGeneration;
+    viewer._trigger = button;
+    imp('import-cover-caption').textContent = `${entry.title} (${entry.year || 'year unknown'}) · ` +
+        `${entry.metadata_source?.provider || 'comicvine'}:${entry.metadata_source?.id || entry.comicvine_id}`;
+    imp('import-cover-feedback').textContent = 'Loading cover…';
+    imp('import-cover-resolution').classList.add('hidden');
+    image.hidden = true;
+    image.alt = `Cover of ${entry.title} (${entry.year || 'year unknown'})`;
+    image.onload = () => {
+        if (generation !== importSearchGeneration || !viewer.open) return;
+        image.hidden = false;
+        imp('import-cover-feedback').textContent = '';
+        imp('import-cover-resolution').classList.toggle('hidden',
+            image.naturalWidth >= 500 && image.naturalHeight >= 700);
+    };
+    image.onerror = () => {
+        if (generation !== importSearchGeneration || !viewer.open) return;
+        image.hidden = true;
+        imp('import-cover-feedback').textContent = 'No cover available';
+    };
+    viewer.showModal();
+    imp('import-cover-close').focus();
+    image.src = source;
+}
+function importResult(entry, artwork, generation) {
+    const identity = entry.metadata_source || {provider:'comicvine', id:String(entry.comicvine_id)};
+    const tr = document.createElement('tr'); tr.className = 'search-result';
+    const title = document.createElement('td'), action = document.createElement('td');
+    const content = document.createElement('div'); content.className = 'import-search-content';
+    const thumb = document.createElement('button'); thumb.type = 'button';
+    thumb.className = 'import-cover-button';
+    thumb.setAttribute('aria-label', `View full cover: ${entry.title} (${entry.year || 'year unknown'})`);
+    const image = document.createElement('img');
+    image.width = 48; image.height = 72; image.loading = 'lazy'; image.decoding = 'async';
+    image.alt = ''; thumb.append(image);
+    const placeholder = `${url_base}/static/img/cover-placeholder.svg`;
+    const safeCover = MetadataSearchPresentation.safeLink(entry.cover_link);
+    tr.dataset.cover = safeCover;
+    image.src = safeCover || placeholder;
+    thumb.disabled = !safeCover;
+    image.onerror = () => {
+        if (generation !== importSearchGeneration) return;
+        tr.dataset.cover = ''; thumb.disabled = true; image.onerror = null; image.src = placeholder;
+    };
+    thumb.onclick = () => openImportCover(thumb, entry, tr.dataset.cover);
+    const details = document.createElement('div'); details.className = 'import-search-details';
+    const name = document.createElement('strong');
+    name.textContent = `${entry.title} (${entry.year || 'year unknown'})`;
+    const facts = document.createElement('p');
+    facts.textContent = `${identity.provider}:${identity.id} · ${entry.issue_count ?? 'unknown'} issues` +
+        (entry.publisher ? ` · ${entry.publisher}` : '');
+    const safeProvider = MetadataSearchPresentation.safeLink(entry.site_url);
+    if (safeProvider) {
+        const titleLink = document.createElement('a');
+        titleLink.href = safeProvider; titleLink.target = '_blank';
+        titleLink.rel = 'noopener noreferrer'; titleLink.append(name);
+        details.append(titleLink);
+    } else details.append(name);
+    details.append(facts);
+    if (safeProvider) {
+        const link = document.createElement('a');
+        link.href = safeProvider; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        link.textContent = 'View on provider';
+        details.append(link);
+    }
+    content.append(thumb, details); title.append(content);
+    const select = document.createElement('button'); select.type = 'button'; select.textContent = 'Select';
+    select.onclick = () => {
+        if (importEditing) choosePublication(importEditing, identity, entry.title, entry.site_url);
+        resetImportSearch(); closeWindow();
+    };
+    const bulk = document.createElement('button'); bulk.type = 'button'; bulk.className = 'bulk-match';
+    bulk.onclick = () => {
+        const selected = [...importRows.values()].filter(row => row.element.querySelector('.bulk-match-select').checked);
+        if (!selected.length) return;
+        for (const row of selected) choosePublication(row, identity, entry.title, entry.site_url, false);
+        loadCatalogue(selected[0]).catch(() =>
+            selected.forEach(row => setImportStatus(row, 'Catalogue unavailable; retry Edit issues')));
+        for (const row of selected) row.element.querySelector('.bulk-match-select').checked = false;
+        resetImportSearch(); closeWindow(); updateBulkCount();
+    };
+    action.className = 'import-search-actions'; action.append(select, bulk);
+    tr.append(title, action);
+    if (!safeCover) artwork.observe(tr, entry);
+    if (importCoverObserver) importCoverObserver.observe(tr, {attributes:true, attributeFilter:['data-cover']});
+    return tr;
 }
 async function searchImport(event) {
     event.preventDefault();
     const query = imp('search-input').value.trim(); if (!query) return;
+    resetImportSearch();
+    const generation = importSearchGeneration;
     const results = document.querySelector('.search-results'); results.replaceChildren();
+    imp('match-error').textContent = '';
     try {
         const response = await fetchAPI('/volumes/search', importKey, {query:encodeURIComponent(query),
-            provider:imp('import-metadata-provider').value, presentation:'v2', artwork:'false', expand_relations:'false'});
+            provider:imp('import-metadata-provider').value, presentation:'v2', artwork:'true', expand_relations:'false'});
+        if (generation !== importSearchGeneration) return;
         const groups = MetadataSearchPresentation.groups(response.result);
-        const entries = groups ? groups.flatMap(group => group.results) : response.result;
-        for (const entry of entries) {
-            const identity = entry.metadata_source || {provider:'comicvine', id:String(entry.comicvine_id)};
-            const tr = document.createElement('tr'), title = document.createElement('td'), action = document.createElement('td');
-            title.textContent = `${entry.title} (${entry.year || 'year unknown'}) · ${identity.provider}:${identity.id} · ${entry.issue_count ?? 'unknown'} issues`;
-            const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Select';
-            button.onclick = () => { if (importEditing) choosePublication(importEditing, identity, entry.title, entry.site_url); closeWindow(); };
-            action.append(button); tr.append(title, action); results.append(tr);
-            const bulk = document.createElement('button'); bulk.type = 'button';
-            bulk.textContent = 'Apply to checked files';
-            bulk.onclick = () => {
-                const selected = [...importRows.values()].filter(row => row.element.querySelector('.import-file-select').checked);
-                for (const row of selected) choosePublication(row, identity, entry.title, entry.site_url, false);
-                if (selected.length) loadCatalogue(selected[0]).catch(() =>
-                    selected.forEach(row => setImportStatus(row, 'Catalogue unavailable; retry Edit issues')));
-                closeWindow();
-            };
-            action.append(bulk);
+        importArtwork = MetadataSearchPresentation.artwork(response.result.artwork_ticket, importKey,
+            () => generation === importSearchGeneration && imp('cv-window').hasAttribute('show-window'));
+        if (typeof MutationObserver !== 'undefined') {
+            importCoverObserver = new MutationObserver(records => {
+                for (const record of records) {
+                    if (generation !== importSearchGeneration) return;
+                    const tr = record.target, source = tr.dataset.cover;
+                    tr.querySelector('.import-cover-button').disabled = !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(source || '') &&
+                        !MetadataSearchPresentation.safeLink(source);
+                }
+            });
         }
+        if (groups) for (const group of groups) {
+            results.append(MetadataSearchPresentation.heading(group, true));
+            for (const entry of group.results) results.append(importResult(entry, importArtwork, generation));
+        } else for (const entry of response.result) results.append(importResult(entry, importArtwork, generation));
+        updateBulkCount();
         document.querySelector('.search-results-container').classList.remove('hidden');
-    } catch (_) { imp('match-error').textContent = 'Publication search unavailable. Retry or choose another provider.'; }
+    } catch (_) {
+        if (generation === importSearchGeneration)
+            imp('match-error').textContent = 'Publication search unavailable. Retry or choose another provider.';
+    }
 }
 async function submitImport(only=null) {
     const selected = (only || [...importRows.values()]).filter(row =>
@@ -238,9 +486,35 @@ async function submitImport(only=null) {
 }
 usingApiKey().then(async key => {
     importKey = key;
+    const viewer = imp('import-cover-lightbox');
+    viewer.addEventListener('cancel', event => { event.preventDefault(); closeImportCover(); });
+    viewer.addEventListener('click', event => {
+        event.stopPropagation();
+        if (event.target === viewer) closeImportCover();
+    });
+    imp('import-cover-close').onclick = closeImportCover;
+    document.addEventListener('keydown', event => {
+        if (viewer.open && event.key === 'Escape') {
+            event.preventDefault(); event.stopImmediatePropagation(); closeImportCover();
+        }
+    }, true);
+    if (typeof MutationObserver !== 'undefined') new MutationObserver(() => {
+        if (!document.querySelector('.window').hasAttribute('show-window')) resetImportSearch();
+    }).observe(document.querySelector('.window'), {attributes:true, attributeFilter:['show-window']});
     try { imp('import-mode').value = localStorage.getItem('pullarr.importMode') || 'keep'; } catch (_) { /* private mode */ }
     imp('import-mode').onchange = () => { try { localStorage.setItem('pullarr.importMode', imp('import-mode').value); } catch (_) { /* private mode */ } };
     imp('run-import-button').onclick = () => scanImport();
+    imp('auto-match-input').onchange = () => {
+        imp('advanced-matching').hidden = !imp('auto-match-input').checked;
+        imp('match-folder-limit').disabled = !imp('auto-match-input').checked;
+    };
+    imp('stop-matching').onclick = () => {
+        ++importMatchGeneration;
+        for (const row of importRows.values()) if (row.identity && !row.userChosen)
+            ++row.choiceVersion;
+        imp('matching-status').textContent = 'Automatic matching stopped; local files remain available.';
+        imp('stop-matching').classList.add('hidden');
+    };
     imp('import-next-page').onclick = () => scanImport(false);
     imp('import-button').onclick = () => submitImport();
     imp('import-filter').oninput = filterImport;
@@ -248,7 +522,13 @@ usingApiKey().then(async key => {
         for (const row of importRows.values()) row.element.querySelector('.import-file-select').checked = event.target.checked;
     };
     document.querySelector('.search-bar').onsubmit = searchImport;
+    imp('import-metadata-provider').onchange = () => {
+        resetImportSearch();
+        document.querySelector('.search-results').replaceChildren();
+    };
     document.querySelectorAll('.cancel-button').forEach(button => button.onclick = () => {
+        ++importMatchGeneration;
+        imp('stop-matching').classList.add('hidden');
         imp('list-window').classList.add('hidden'); imp('no-result-window').classList.add('hidden');
         imp('start-window').classList.remove('hidden');
     });

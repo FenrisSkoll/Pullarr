@@ -172,6 +172,41 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
         enumeration_complete=not bounded and len(chosen) == len(eligible_folders))
 
 
+def suggest_scanned_import_files(database: str, paths: list[str]) -> list[dict]:
+    """Suggest publications for a bounded set of discovered files; never import them."""
+    from backend.implementations.acquisition_paths import contained
+
+    if not isinstance(paths, list) or not 1 <= len(paths) <= 10 or any(  # type: ignore[redundant-expr]
+            not isinstance(path, str) for path in paths):
+        raise ValueError('invalid_suggestion_files')
+    run_id = uuid4().hex
+    with closing(sqlite3.connect(database)) as db:
+        roots = [Path(row[0]) for row in db.execute('SELECT folder FROM root_folders')]
+        candidates = {}
+        for path in paths:
+            source = Path(path)
+            matches = [root for root in roots if root in source.parents]
+            if (len(matches) != 1 or source.suffix.casefold() not in ('.cbr', '.cbz')
+                    or source.is_symlink() or not source.is_file()):
+                raise ValueError('invalid_suggestion_file')
+            try:
+                contained(path, str(matches[0]))
+            except IntakeFailure:
+                raise ValueError('invalid_suggestion_file') from None
+            if db.execute('SELECT 1 FROM files WHERE filepath=? LIMIT 1', (path,)).fetchone():
+                continue
+            parsed = extract_filename_data(path, prefer_folder_year=True)
+            candidates[path] = observe_import_candidate(path,
+                DiscoveryScope(run_id, str(matches[0]), kind=DiscoveryKind.LIBRARY_SCAN),
+                parsed=parsed)
+    if not candidates:
+        return []
+    groups = create_groups(legacy_filename_inputs(candidates))
+    matches = run(ComicVine().filenames_to_cvs(groups, only_english=True))
+    return [dict(filepath=path, cv=matches[number])
+            for number, files in groups.items() for path in files]
+
+
 def normalize_import_matches(matches: Any) -> List[Tuple[ProviderVolumeIdentity, str]]:
     """Bare legacy id means ComicVine only; reject partial/ambiguous identities."""
     if not isinstance(matches, list):
