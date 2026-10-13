@@ -82,11 +82,13 @@ def main(image, template=None, browser=False):
                 page.on('request',lambda r:errors.append('external') if not r.url.startswith(origin) else None)
                 for width in (1440,390):
                     page.set_viewport_size(dict(width=width,height=900))
-                    for route in ('/','/maintenance','/settings/general','/settings/downloadclients'):
+                    for route in ('/','/library-import','/settings/general','/settings/downloadclients'):
                         assert page.goto(origin+route).status==200
                         page.wait_for_timeout(500)
                         assert 'Pullarr' in page.title()
+                        assert page.locator('nav[aria-label="Primary navigation"] a[href$="/maintenance"]').count() == 0, route
                 browser_instance.close()
+            assert requests.get(origin+'/maintenance', timeout=5).status_code==404
         assert not errors, errors
         for _ in range(100):
             if json.loads(docker('inspect',name))[0]['State']['Health']['Status']=='healthy': break

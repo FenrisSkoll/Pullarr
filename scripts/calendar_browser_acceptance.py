@@ -191,7 +191,7 @@ def main():
                 assert dialog.is_visible()
                 assert dialog.bounding_box()['width'] <= 650
                 page.keyboard.press('Escape')
-                for path in ('/', '/volumes/1', '/add', '/activity/queue', '/settings/mediamanagement', '/library-import', '/collections', '/maintenance', '/volumes/1/provider-switch', '/wanted', '/calendar'):
+                for path in ('/', '/volumes/1', '/add', '/activity/queue', '/settings/mediamanagement', '/library-import', '/collections', '/volumes/1/provider-switch', '/wanted', '/calendar'):
                     response = page.goto(origin + path)
                     assert response.status == 200, path
                     page.wait_for_timeout(100)

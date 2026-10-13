@@ -202,7 +202,7 @@ def main():
                 assert page.evaluate("document.getElementById('d-dialog').contains(document.activeElement)")
                 page.keyboard.press('Escape')
                 assert not page.locator('#d-dialog').evaluate('(e)=>e.open')
-                for path in ('/','/collections','/calendar','/reading-orders','/maintenance','/wanted','/settings/quality','/library-import','/discover'):
+                for path in ('/','/collections','/calendar','/reading-orders','/wanted','/settings/quality','/library-import','/discover'):
                     response=page.goto(origin+path)
                     assert response.status==200,path
                     page.wait_for_timeout(200)

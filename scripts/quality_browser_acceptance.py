@@ -186,7 +186,7 @@ def main():
                 fixture['state']['label']='Digital';lower=page.evaluate(async_script,{'issue':1});assert lower['results'][0]['quality']['result']=='downgrade' and not lower['results'][0]['download_eligible']
                 assert len(fixture['remote']['uploads'])==2
                 page.set_viewport_size({'width':600,'height':800});page.goto(origin+'/settings/quality?volume=1');page.get_by_role('button',name='Save Volume Assignment').wait_for();assert page.locator('.q-table').is_visible()
-                for route in ('/','/volumes/1','/collections','/calendar','/reading-orders','/maintenance','/wanted','/activity/queue','/settings/metadata','/library-import'):
+                for route in ('/','/volumes/1','/collections','/calendar','/reading-orders','/wanted','/activity/queue','/settings/metadata','/library-import'):
                     assert page.goto(origin+route).status==200
                     page.wait_for_function("typeof socket !== 'undefined' && socket?.connected")
                     page.wait_for_timeout(200)

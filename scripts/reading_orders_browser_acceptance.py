@@ -149,7 +149,7 @@ def main():
                 page.set_viewport_size({'width':540,'height':820}); assert page.locator('.ro-table').evaluate('(e)=>e.clientWidth<=window.innerWidth')
                 page.get_by_role('button', name='Detach from Source', exact=True).focus(); page.keyboard.press('Enter'); assert dialog.is_visible(); page.keyboard.press('Escape'); assert not dialog.is_visible()
                 page.set_viewport_size({'width':1280,'height':900})
-                for route_path in ('/', '/volumes/1', '/add', '/activity/queue', '/settings/metadata', '/library-import', '/volumes/1/provider-switch', '/wanted', '/collections', '/calendar', '/maintenance'):
+                for route_path in ('/', '/volumes/1', '/add', '/activity/queue', '/settings/metadata', '/library-import', '/volumes/1/provider-switch', '/wanted', '/collections', '/calendar'):
                     response=page.goto(origin+route_path); assert response.status==200, route_path
                 page.goto(origin+'/reading-orders'); page.get_by_role('heading', name='Provider Ordered Fixture').wait_for()
                 assert not errors and not consoles, (errors,consoles)

@@ -120,7 +120,7 @@ def run(version):
                     assert next(e for e in entries if any(r['issue_id']=='901' for r in e['refs']))['canonical_id'] is not None
                     exported=requests.get(origin+f'/api/reading-orders/{order_id}/export',params={'api_key':key},timeout=10)
                     assert exported.status_code==200 and b'<ReadingList>' in exported.content
-                    for path in ('/reading-orders','/collections','/calendar','/maintenance','/wanted','/settings/metadata'):
+                    for path in ('/reading-orders','/collections','/calendar','/library-import','/wanted','/settings/metadata'):
                         assert requests.get(origin+path,timeout=10).status_code==200
                     requests.post(origin+'/api/system/power/shutdown',params={'api_key':key},timeout=10)
                     process.wait(timeout=30); assert process.returncode==0

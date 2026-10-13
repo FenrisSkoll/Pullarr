@@ -23,7 +23,7 @@ from backend.internals.db import get_db, set_db_location, setup_db
 from backend.internals.server import Server
 from backend.internals.settings import Settings
 
-ROUTES = ('/', '/add', '/library-import', '/maintenance', '/collections',
+ROUTES = ('/', '/add', '/library-import', '/collections',
           '/calendar', '/discover', '/reading-orders', '/settings/quality',
           '/volumes/1', '/volumes/1/provider-switch', '/activity/queue',
           '/activity/history', '/activity/intake', '/wanted', '/activity/blocklist',

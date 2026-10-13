@@ -127,7 +127,7 @@ def run(version):
                     repeated=api('POST','/issues/2/release-search',{})
                     assert not any(r['download_eligible'] for r in repeated['results'])
                     assert len(fixture['remote']['uploads'])==2
-                    for path in ('/collections','/calendar','/reading-orders','/maintenance','/wanted','/settings/quality'):
+                    for path in ('/collections','/calendar','/reading-orders','/library-import','/wanted','/settings/quality'):
                         assert requests.get(origin+path,timeout=10).status_code==200
                     requests.post(origin+'/api/system/power/shutdown',params={'api_key':key},timeout=10)
                     process.wait(timeout=40);assert process.returncode==0

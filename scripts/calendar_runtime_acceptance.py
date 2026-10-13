@@ -113,7 +113,7 @@ def run(version):
                     event = api('GET', '/calendar/events/' + subject_id)
                     assert event['status'] == 'in_library' and event['id'] == subject_id
                     assert api('GET', '/calendar?from=2027-01-01&to=2027-12-31')['items']
-                    for route in ('/calendar', '/collections', '/maintenance', '/', '/wanted', '/settings/metadata'):
+                    for route in ('/calendar', '/collections', '/library-import', '/', '/wanted', '/settings/metadata'):
                         assert requests.get(origin + route, timeout=10).status_code == 200
                     requests.post(origin + '/api/system/power/shutdown', params={'api_key': key}, timeout=10)
                     process.wait(timeout=30)
