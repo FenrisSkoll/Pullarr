@@ -16,7 +16,7 @@ for (const [label, date] of [['[nn]', '2021-12'], ['1A', '2021'], ['01', '2021-1
         setMonitorIcon() {}
         setDownloaded() {}
     }
-    const context = {IssueEntry, ViewEls: {
+    const context = {IssueEntry, document:{querySelector:()=>null}, ViewEls: {
         issues_list: {appendChild() {}},
         pre_build: {issue_entry: {cloneNode() { return {dataset: {}}; }}}
     }};

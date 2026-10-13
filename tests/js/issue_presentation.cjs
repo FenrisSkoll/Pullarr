@@ -23,7 +23,7 @@ for (const [fields, expected] of [
         setMonitorIcon() {}
         setDownloaded() {}
     }
-    const context = {IssueEntry, ViewEls: {
+    const context = {IssueEntry, document:{querySelector:()=>null}, ViewEls: {
         issues_list: {appendChild() {}},
         pre_build: {issue_entry: {cloneNode() { return {dataset: {}}; }}}
     }};

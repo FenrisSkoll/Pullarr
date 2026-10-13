@@ -1,82 +1,71 @@
-// Exercise staged issue selection and confirmation without a browser or network.
+// One submit sends exact provider-qualified choices without draft persistence.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function node() {
-    return {value:'', textContent:'', innerText:'', children:[],
+function element() {
+    return {value:'', textContent:'', checked:false, disabled:false, children:[],
+        append(child) { this.children.push(child); },
         appendChild(child) { this.children.push(child); return child; },
         replaceChildren() { this.children = []; },
+        querySelector() { return element(); },
         querySelectorAll() { return []; },
-        setAttribute() {}, focus() {}, classList:{toggle(){},add(){},remove(){}}};
+        classList:{add(){}, remove(){}, toggle(){}},
+        focus(){}, setAttribute(){}};
 }
 const elements = new Map();
-function element(key) { if (!elements.has(key)) elements.set(key, node()); return elements.get(key); }
-const link = node(), cell = node();
-const selectedBox = {checked:true}, unselectedBox = {checked:false};
-const row = {dataset:{rowid:'0'}, removed:false,
-    querySelector(selector) { return selector === 'a' ? link : selector === '.import-file-select' ? selectedBox : cell; },
-    remove() { this.removed = true; }};
-const other = {dataset:{rowid:'1'}, querySelector(selector) { return selector === '.import-file-select' ? unselectedBox : node(); }};
-const list = element('.proposal-list');
-list.querySelectorAll = selector => selector === 'tr[data-rowid]' ? [row, other] : [row];
-list.querySelector = selector => selector.includes('.issue-column') ? cell : row;
-let staged, applied;
-let saved;
+function byId(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }
+byId('import-mode').value = 'keep';
+let submitted;
 const context = vm.createContext({
-    document:{querySelector:element, getElementById:element, createElement:node, querySelectorAll:()=>[]},
-    window:{addEventListener(){}}, setTimeout, clearTimeout,
-    localStorage:{setItem(){},getItem(){return null;}},
-    usingApiKey:()=>Promise.resolve('fake-app-key'), hide:()=>{},
-    LocalOrganizationUI:{panel:()=>node(), result:(_, value)=>value.jobs || []},
-    sendAPI:async (method, url, key, params, data) => {
-        if (url === '/libraryimport/drafts' || url === '/libraryimport/drafts/draft-1') {
-            saved = {method,url,data};
-            return {ok:true,json:async()=>({result:{id:'draft-1',revision:
-                url === '/libraryimport/drafts' ? 1 : data.revision + 1,state:'draft'}})};
-        }
-        if (url === '/libraryimport/catalog') return {ok:true, json:async()=>({result:{
-            provider:'comicvine', provider_id:'2127', reported_issue_count:1,
-            loaded_issue_count:1, completeness:'complete', revision:'catalog-revision',
-            issues:[{id:'301',number:'1',title:'Book 1'}],
-            proposals:{'/disposable/Example.cbz':{confidence:'strong',issue_ids:['301'],reason:'Unique Book 1'}}}})};
-        if (url === '/libraryimport/stage') {
-            staged = {method,url,params,data};
-            return {ok:true,json:async()=>({result:{id:'draft-1',revision:2,state:'ready',plans:[{source:data[0].filepath,
-                target:'/managed/Example.cbz',status:'ready',authority:{provider:'comicvine',id:'2127'},
-                issue_labels:['1'],operation:'move',registration:'new'}],
-                counts:{ready:1,review_required:0,blocked:0}}})};
-        }
-        if (url === '/local-organization/draft-1/apply') {
-            applied = data;
-            return {ok:true,json:async()=>({result:{jobs:[{source:'/disposable/Example.cbz',state:'completed'}]}})};
-        }
-        throw Error('Unexpected API call: ' + url);
-    }, console
+    document:{getElementById:byId, querySelector:()=>element(), querySelectorAll:()=>[],
+        createElement:element, createTextNode:text => ({textContent:text})},
+    localStorage:{getItem:()=>null, setItem(){}},
+    usingApiKey:()=>Promise.resolve('test-key'),
+    fetchAPI:async()=>({result:{metron_api_token:true,gcd_enabled:true}}),
+    sendAPI:async (method, path, key, params, body) => {
+        submitted = {method,path,key,body};
+        return {ok:true,json:async()=>({result:{results:[
+            {status:'imported',source:'/library/Book 1.cbz'},
+            {status:'failed',source:'/library/Book 2.cbz',reason:'target_exists: /library/Owned.cbz'}
+        ]}})};
+    },
+    MetadataSearchPresentation:{groups:()=>null},
+    showWindow(){}, closeWindow(){}, console
 });
-const source = fs.readFileSync('frontend/static/js/library_import.js', 'utf8');
-vm.runInContext(source.split('// code run on load')[0], context);
+vm.runInContext(fs.readFileSync('frontend/static/js/library_import.js','utf8'), context);
 
-const finished = (async () => {
-    vm.runInContext(`editMatchId=0; rowidToFilepath[0]={filepath:'/disposable/Example.cbz',issueIds:[],manualIssues:false};
-        editCVMatch('2127','https://example.invalid/cv','Example',2021,1);`, context);
-    await new Promise(resolve=>setTimeout(resolve,0));
-    assert.equal(link.href, 'https://example.invalid/cv');
-    vm.runInContext(`rowidToFilepath[1]={filepath:'/disposable/Other.cbz',identity:null,issueIds:[]};
-        editMetadataMatch({provider:'comicvine',id:'2127'},'https://example.invalid/cv','Example',2021,1,true);`, context);
-    assert.equal(vm.runInContext('rowidToFilepath[1].identity', context), null);
-    await new Promise(resolve=>setTimeout(resolve,0));
-    await vm.runInContext("prepareImport('fake-app-key', false)", context);
-    assert.equal(saved.data.rows[0].provider, 'comicvine');
-    assert.equal(staged.url, '/libraryimport/stage');
-    assert.equal(staged.params.draft_id, 'draft-1');
-    assert.equal(staged.data[0].provider, 'comicvine');
-    assert.equal(staged.data[0].provider_id, '2127');
-    assert.deepEqual(Array.from(staged.data[0].issue_ids), ['301']);
-    assert.equal(staged.data[0].catalog_revision, 'catalog-revision');
-    await vm.runInContext("importLibrary('fake-app-key', false)", context);
-    assert.equal(applied.revision, 2);
-    assert.equal(row.removed, false);
-    console.log('Library Import catalogue → staged issues → apply contract passed');
-})().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = {context, finished, selectedBox, unselectedBox, submitted:() => staged};
+function row(path, provider, id, issue) {
+    const select = {checked:true}, status = element(), link = element(), issueCell = element();
+    const entry = {hidden:false, querySelector(selector) {
+        if (selector === '.import-file-select') return select;
+        if (selector === '.import-status') return status;
+        if (selector === '.issue-column') return issueCell;
+        if (selector === 'a') return link;
+        return element();
+    }};
+    return {data:{filepath:path,file_title:path}, element:entry,
+        identity:{provider,id}, issueIds:[issue], manual:true, status:'', select, result:status};
+}
+const first = row('/library/Book 1.cbz','comicvine','2127','301');
+const second = row('/library/Book 2.cbz','metron','2127','401');
+const finished = (async()=>{
+    await new Promise(resolve=>setImmediate(resolve));
+    context.first = first; context.second = second;
+    vm.runInContext("importRows.set('first',first); importRows.set('second',second);",context);
+    await vm.runInContext('submitImport()',context);
+    assert.equal(submitted.path,'/libraryimport/submit');
+    assert.equal(submitted.method,'POST');
+    assert.equal(submitted.body.files[0].provider,'comicvine');
+    assert.equal(submitted.body.files[1].provider,'metron');
+    assert.deepEqual(JSON.parse(JSON.stringify(submitted.body.files.map(file=>file.issue_ids[0]))),['301','401']);
+    assert.equal(submitted.body.files[0].mode,'keep');
+    assert.equal(first.result.textContent,'Imported');
+    assert.match(second.result.textContent,/Target already exists: \/library\/Owned\.cbz/);
+    assert.ok(!fs.readFileSync('frontend/static/js/library_import.js','utf8').includes('/libraryimport/drafts'));
+    const css=fs.readFileSync('frontend/static/css/library_import.css','utf8');
+    assert.match(css,/overflow-x:\s*auto/);
+    assert.match(css,/min-width:\s*62rem/);
+    console.log('Direct Library Import choice, per-file result and narrow-table contract passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+module.exports={context,finished,first,second,submitted:()=>submitted};

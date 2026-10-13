@@ -9,7 +9,6 @@
 	<script src="{{ url_for('static', filename='js/window.js') }}" defer></script>
 	<script src="{{ url_for('static', filename='js/metadata_search.js') }}" defer></script>
 	<script src="{{ url_for('static', filename='js/library_import.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='js/local_organization.js') }}" defer></script>
 {% endblock %}
 
 {% block pre_build_rows %}
@@ -29,6 +28,7 @@
 		</button>
 	</td>
 	<td class="issue-column"></td>
+	<td class="import-status" aria-live="polite"></td>
 </tr>
 <tr class="search-result">
 	<td>
@@ -72,57 +72,12 @@
 <main>
 	<div class="page-header"><h1>Library Import</h1></div>
 	<div id="start-window">
-		<p id="import-save-status" aria-live="polite">Review choices are saved as you work.</p>
-		<p>Choose an exact publication and its issues. Saved reviews survive restart.
-			Import keeps the archive format and filename; Import and Rename changes the filename.
-			CBR conversion is available later through a separate Archive Maintenance review.</p>
-		<button id="resume-import-draft" type="button" class="hidden">Resume saved import review</button>
-		<label for="saved-import-drafts">Saved import reviews</label>
-		<select id="saved-import-drafts" aria-label="Saved import reviews"></select>
-		<button id="open-import-draft" type="button">Open selected review</button>
-		<h2>Scan existing files, review matches, then import</h2>
-		<p>Choose the folders and matching options below. Scanning does not confirm an import.</p>
-		<ul>
-			<li>Review the exact publication and edition. Matching a title and year does not prove that an issue, collected edition or one-shot is the same publication.</li>
-			<li>Automatic ComicVine matching uses provider quota. Keep batches small, or scan without automatic matching and select a provider result manually.</li>
-			<li>Files are not allowed to be directly in the root folder. They have to be in a sub-folder.</li>
-			<li>If each issue has a separate sub-folder, enable 'Apply limit to parent folder' so that the limit is correctly applied.</li>
-		</ul>
+		<p>Scan local archives, choose a publication and exact issue for each file, then import selected files.</p>
 		<table class="fold-table">
 			<tbody>
 				<tr>
 					<td><label for="auto-match-input">Automatically match with ComicVine</label></td>
 						<td><input type="checkbox" id="auto-match-input" checked><p>After local discovery, request ComicVine publication suggestions for at most 20 folders. Provider failure never removes local file rows.</p></td>
-				</tr>
-				<tr>
-						<td><label for="limit-input">Max folders scanned (up to 500; results paged by 100 files)</label></td>
-					<td>
-						<select id="limit-input">
-							<option value="1">1</option>
-							<option value="5">5</option>
-							<option value="20">20</option>
-							<option value="100">100</option>
-							<option value="500" selected>500</option>
-						</select>
-					</td>
-				</tr>
-				<tr>
-					<td><label for="folder-input">Apply limit to parent folder</label></td>
-					<td>
-						<select id="folder-input">
-							<option value="true">Yes</option>
-							<option value="false" selected>No</option>
-						</select>
-					</td>
-				</tr>
-				<tr>
-					<td><label for="lang-input">Only match english volumes</label></td>
-					<td>
-						<select id="lang-input">
-							<option value="true" selected>Yes</option>
-							<option value="false">No</option>
-						</select>
-					</td>
 				</tr>
 				<tr>
 					<td><label for="target-input">Folder(s) to scan</label></td>
@@ -159,18 +114,11 @@
 		<p id="scan-summary" aria-live="polite"></p>
 		<p id="import-error" role="alert"></p>
 		<div class="action-container">
-			<button class="cancel-button">Cancel</button>
-			<button id="preview-import-button" type="button">Preview Import</button>
-			<button id="preview-import-rename-button" type="button">Preview Import and Rename</button>
-			<button
-				id="import-button"
-					title="Move selected archives into their canonical managed folders, preserving filenames."
-			>Import</button>
-			<button
-				id="import-rename-button"
-					title="Move selected archives into their canonical managed folders and apply configured filenames."
-			>Import and Rename</button>
+			<button class="cancel-button">Back</button>
+			<label>Import behaviour <select id="import-mode"><option value="keep">Keep in place</option><option value="move">Move and rename</option></select></label>
+			<button id="import-button" type="button">Import selected</button>
 		</div>
+		<label>Filter files <input id="import-filter" type="search" placeholder="Folder, filename, publication or status"></label>
 		<p id="rate-limit-banner" class="hidden">
 			Some matches may be missing because the ComicVine API rate limit was reached.
 			Entries with empty Match columns were likely affected.
@@ -187,6 +135,7 @@
 					<th>Match</th>
 					<th>Action</th>
 						<th>Issue association</th>
+						<th>Status</th>
 				</thead>
 				<tbody class="proposal-list"></tbody>
 			</table>

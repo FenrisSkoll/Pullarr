@@ -24,6 +24,14 @@ _cache = {}
 _lock = RLock()
 
 
+def cached_metadata_result(database: str, provider: str, provider_id: str):
+    """Reuse the selected catalogue's provider result while it is fresh."""
+    key = (os.path.abspath(database), provider, provider_id)
+    with _lock:
+        cached = _cache.get(key)
+        return cached[2] if cached and cached[0] > time.monotonic() and len(cached) > 2 else None
+
+
 def _number(value):
     """Exact decimal spelling class; never convert 6.1/6.2 through float."""
     value = str(value or '').strip().casefold().lstrip('#')
@@ -143,8 +151,15 @@ def issue_catalog(database: str, provider: str, provider_id: str, files: list[st
                         EXISTS(SELECT 1 FROM issues_files f WHERE f.issue_id=i.id)
                         FROM issues i JOIN issue_external_ids e ON e.issue_id=i.id AND e.provider=?
                         WHERE i.volume_id=? ORDER BY i.calculated_issue_number,i.id''', (provider, volume_id))]
-            count = None
-            completeness = 'local'
+            snapshot = db.execute('SELECT value FROM config WHERE key=?',
+                                  ('provider_snapshot:' + str(volume_id),)).fetchone()
+            try:
+                expected = json.loads(snapshot[0]).get('expected_count') if snapshot else None
+                count = expected if isinstance(expected, int) and expected >= 0 else None
+            except (ValueError, TypeError, KeyError):
+                count = None
+            completeness = ('unknown' if count is None else
+                            'complete' if count == len(issues) else 'partial')
         else:
             volume_id = None
             key = (os.path.abspath(database), provider, provider_id)
@@ -179,7 +194,7 @@ def issue_catalog(database: str, provider: str, provider_id: str, files: list[st
                     if len(_cache) >= 16:
                         _cache.pop(next(iter(_cache)))
                     _cache[key] = (time.monotonic() + 600, (title, year, publisher,
-                        volume_number, special_version, count, issues))
+                        volume_number, special_version, count, issues), fetched_result)
             completeness = ('unknown' if count is None else 'complete' if count == len(issues)
                             else 'partial' if issues else 'unavailable')
     proposals = {}

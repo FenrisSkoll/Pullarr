@@ -31,7 +31,6 @@
 		<td class="action-column" aria-label="Actions">
 			{{ icon_button('', "Auto search for this issue", "search.svg") }}
 			{{ icon_button('', "Manually search for this issue", "manual_search.svg") }}
-			{{ icon_button('', "Convert files for this issue", "convert.svg") }}
 		</td>
 	</tr>
 	<tr class="search-entry">
@@ -96,9 +95,10 @@
 	{{ loading_window("updating-window", "Updating volume...") }}
 
 	{% set delete_content %}
-		<p>Are you sure you want to delete this volume?</p>
+		<p>Remove this publication from Pullarr? <strong>Delete folder = No</strong> leaves every file and directory on disk. <strong>Yes</strong> deletes its registered files in the managed folder and is irreversible.</p>
 		<p id="volume-downloading-error" class="error hidden">*There is a download in the queue for this volume</p>
 		<p id="volume-tasking-error" class="error hidden">*There is a task running for this volume</p>
+		<p id="volume-delete-error" class="error hidden" role="alert"></p>
 		<form id="delete-form">
 			<table class="fold-table">
 				<tr>
@@ -261,25 +261,6 @@
 	{% endset %}
 	{{ window(False, "issue-info-window", "Issue info", issue_info_content, '') }}
 
-	{% set convert_content %}
-		<p id="convert-preference"></p>
-		<p class="empty-rename-message">Nothing to Convert</p>
-		<table class="rename-preview">
-			<thead>
-				<tr>
-                    <th colspan="2" aria-label="Select All">
-                        <input type="checkbox" id="selectall-convert-input" checked>
-                    </th>
-                    <th>Files</th>
-                </tr>
-			</thead>
-			<tbody></tbody>
-		</table>
-	{% endset %}
-	{% set convert_submit %}
-		<button id="submit-convert" type="submit">Convert</button>
-	{% endset %}
-	{{ window(True, "convert-window", "Convert volume files", convert_content, convert_submit) }}
 
 	{% set manage_issues_content %}
 		<table id="manage-issues-table">
@@ -398,12 +379,6 @@
 					"Preview Rename"
 				) }}
 				{{ icon_button(
-					"convert-button",
-					"Preview how the files of the volume will be converted to a different format",
-					"convert.svg",
-					"Preview Convert"
-				) }}
-				{{ icon_button(
 					"manage-button",
 					"Change the mapping of files to issues or the volume",
 					"manage_files.svg",
@@ -453,6 +428,8 @@
 				<p><a href="{{url_base}}/settings/quality?volume={{request.view_args.id}}">Quality, upgrades and acquisition provenance</a></p>
 			</div>
 			<div class="issues-table-container icon-text-color">
+				<p id="issue-availability-counts" aria-live="polite"></p>
+				<label>Show issues <select id="issue-availability-filter"><option value="all">All</option><option value="owned">Owned</option><option value="missing">Missing</option><option value="upcoming">Upcoming</option><option value="unknown">Unknown / unconfirmed</option><option value="unmonitored">Unmonitored</option></select></label>
 				<table class="issues-table" aria-label="Issue list">
 					<thead>
 						<tr>

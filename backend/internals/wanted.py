@@ -31,6 +31,16 @@ EXTERNAL_HOLD = '''
          AND w.acquisition_id=CASE WHEN json_valid(q.covered_issues) THEN json_extract(q.covered_issues,'$.completion_id') END))
 '''
 
+# A selected, provider-qualified release date can establish that an issue is
+# still in the future. Missing or imprecise dates do not claim this exclusion.
+FUTURE_HOLD = '''AND NOT EXISTS(SELECT 1 FROM issue_number_facts n
+    JOIN issue_date_facts d ON d.issue_id=n.issue_id
+        AND d.source_field=n.selected_date_field
+    WHERE n.issue_id=i.id AND d.kind IN ('on_sale','publication')
+        AND d.precision IN ('day','month','year') AND d.year IS NOT NULL
+        AND printf('%04d-%02d-%02d',d.year,COALESCE(d.month,1),COALESCE(d.day,1))
+            > date('now'))'''
+
 
 class WantedStore:
     def __init__(self, database, *, clock=time):
@@ -45,6 +55,7 @@ class WantedStore:
             self.db.close()
             raise WantedConflict('schema_unavailable')
         self.has_quality = bool(self.db.execute("SELECT 1 FROM sqlite_master WHERE name='quality_upgrade_issues'").fetchone())
+        self.has_issue_facts = bool(self.db.execute("SELECT 1 FROM sqlite_master WHERE name='issue_date_facts'").fetchone())
 
     def close(self):
         self.db.close()
@@ -64,12 +75,14 @@ class WantedStore:
         if not 1 <= limit <= 1000:
             raise WantedConflict('invalid_limit')
         upgrade = 'OR i.id IN (SELECT issue_id FROM quality_upgrade_issues)' if self.has_quality else ''
+        future = FUTURE_HOLD if self.has_issue_facts else ''
         return tuple(dict(r) for r in self.db.execute(f'''SELECT i.id,i.volume_id,i.issue_number,
             v.title,COALESCE(s.next_search,0) next_search,s.last_search,COALESCE(s.requested,0) requested
             FROM issues i JOIN volumes v ON v.id=i.volume_id
             LEFT JOIN wanted_schedule s ON s.issue_id=i.id
             WHERE i.monitored=1 AND v.monitored=1
             AND (NOT EXISTS(SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id) {upgrade})
+            {future}
             AND NOT EXISTS(SELECT 1 FROM wanted_reservations r WHERE r.issue_id=i.id AND r.active=1)
             AND (? OR COALESCE(s.next_search,0)<=?)
             AND (?=0 OR s.requested=1)
@@ -92,12 +105,14 @@ class WantedStore:
         return len(rows) == len(ids)
 
     def missing_members(self, volume_id):
+        future = FUTURE_HOLD if self.has_issue_facts else ''
         rows = self.db.execute(f'''SELECT i.id,
             (EXISTS(SELECT 1 FROM wanted_reservations r WHERE r.issue_id=i.id AND r.active=1)
              OR NOT(1 {EXTERNAL_HOLD})) held
             FROM issues i JOIN volumes v ON v.id=i.volume_id
             WHERE v.id=? AND i.monitored=1 AND v.monitored=1
             AND NOT EXISTS(SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id)
+            {future}
             ORDER BY i.id LIMIT 1001''', (volume_id,)).fetchall()
         if len(rows) > 1000:
             raise WantedConflict('coverage_target_limit')

@@ -76,11 +76,6 @@ def ui_library_import():
     return render('library_import.html')
 
 
-@ui.route('/maintenance', methods=methods)
-def ui_maintenance():
-    return render('maintenance.html')
-
-
 @ui.route('/collections', methods=methods)
 def ui_collections():
     return render('collections.html')

@@ -905,7 +905,23 @@ class Volume:
 
         volume_data = self.get_data()
         if delete_folder and exists(volume_data.folder):
-            for f in self.get_all_files():
+            owned_files = self.get_all_files()
+            for f in owned_files:
+                # The selected publication may own a file in a mixed source
+                # folder or share a file with another publication. Neither is
+                # part of a safe destructive volume-folder removal.
+                if (not folder_is_inside_folder(volume_data.folder, f['filepath'])
+                        or get_db().execute('''SELECT 1 FROM issues_files b
+                            JOIN issues i ON i.id=b.issue_id
+                            WHERE b.file_id=? AND i.volume_id<>? LIMIT 1''',
+                            (f['id'], self.id)).fetchone()
+                        or get_db().execute('''SELECT 1 FROM volume_files
+                            WHERE file_id=? AND volume_id<>? LIMIT 1''',
+                            (f['id'], self.id)).fetchone()
+                        or get_db().execute('''SELECT 1 FROM acquisition_seed_artifacts
+                            WHERE source_path=? LIMIT 1''', (f['filepath'],)).fetchone()):
+                    raise ValueError('shared_or_external_file_use_metadata_only_delete')
+            for f in owned_files:
                 delete_file_folder(f["filepath"])
 
             delete_empty_child_folders(volume_data.folder)
@@ -914,9 +930,19 @@ class Volume:
                 RootFolders()[volume_data.root_folder]
             )
 
-        # Delete file entries
-        # ON DELETE CASCADE will take care of issues_files
-        FilesDB.delete_linked_files(self.id)
+        # Remove this publication's links first. A file shared with another
+        # publication must retain its record and other issue associations.
+        linked_ids = [row[0] for row in get_db().execute('''SELECT file_id FROM issues_files
+            WHERE issue_id IN (SELECT id FROM issues WHERE volume_id=?)
+            UNION SELECT file_id FROM volume_files WHERE volume_id=?''', (self.id, self.id))]
+        get_db().execute('''DELETE FROM issues_files WHERE issue_id IN
+            (SELECT id FROM issues WHERE volume_id=?)''', (self.id,))
+        get_db().execute('DELETE FROM volume_files WHERE volume_id=?', (self.id,))
+        get_db().executemany('''DELETE FROM files WHERE id=? AND NOT EXISTS
+            (SELECT 1 FROM issues_files WHERE file_id=?) AND NOT EXISTS
+            (SELECT 1 FROM volume_files WHERE file_id=?) AND NOT EXISTS
+            (SELECT 1 FROM quarantined_files WHERE file_id=?)''',
+            ((file_id, file_id, file_id, file_id) for file_id in linked_ids))
 
         # Delete metadata entries
         # ON DELETE CASCADE will take care of issues
@@ -1181,7 +1207,8 @@ class Library:
         auto_search: bool = False,
         organizer_registration: bool = False,
         legacy_default_classification: bool = False,
-        import_destination: bool = False
+        import_destination: bool = False,
+        fetched_result: Any = None
     ) -> int:
         """Add a volume to the library.
 
@@ -1257,7 +1284,8 @@ class Library:
         root_folder = RootFolders().get_one(root_folder_id)
 
         provider = get_volume_provider(identity.provider)
-        fetched = run(fetch_volume_result(provider, identity.provider_id))
+        fetched = fetched_result if fetched_result is not None else run(
+            fetch_volume_result(provider, identity.provider_id))
         from backend.implementations.metadata.persistence import fetch_input
         vd = fetch_input(fetched, identity.provider)
         if vd['provider_id'] != identity.provider_id:

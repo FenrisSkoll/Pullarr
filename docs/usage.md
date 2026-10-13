@@ -5,7 +5,10 @@ provide release evidence. Review ambiguous identity rather than assuming a title
 or source post is an exact match. Provider Switching requires correspondence
 review and preserves local identities; it is not an ordinary provider dropdown.
 
-Missing means eligible unowned content; Upgrade concerns direct-owned content
+On a volume page, Owned means a linked file is present in a configured root.
+Missing means a monitored, unowned issue has credible past release evidence;
+Upcoming has credible future release evidence; Unknown / unconfirmed has no
+date precise enough to make either claim. Upgrade concerns direct-owned content
 below an explicitly configured quality cutoff. Release source/resolution labels
 are provisional. Imported file observations are separate, and better claimed
 quality cannot bypass verified replacement checks. Containers, bytes, DPI and
@@ -26,13 +29,10 @@ non-destructive; automatic cleanup policies also check import completion,
 review/recovery, exact torrent identity and supplied tracker minimums. Missing
 tracker evidence does not establish that a tracker has no rules.
 
-Archive Maintenance scans are observational. Review each proposed replacement;
-healthy CBZ repack is explicit, never automatic. JPEG/PNG/WebP payloads, admitted
-metadata and source member order are retained and hashed. Encrypted/multipart,
-unsafe, unreadable or unsupported archives require review. Complete embedded issue
-archives use normal intake; this is not arbitrary page splitting. Shared seeded
-bytes are never rewritten in place. Recovery is not indefinite Undo.
+Library Import scans local CBR/CBZ archives without rewriting them. Choose the
+exact publication and issue links, then Keep in place or Move and rename. A
+failed or occupied target is reported per file; existing target bytes are not
+overwritten. Shared seeded bytes are never rewritten in place.
 
 Use a disposable library to learn bulk operations. Read blockers and durable
-Maintenance/Intake history after uncertain outcomes rather than resubmitting
-blindly. Preview confirmations expire and changed files require fresh review.
+Intake history after uncertain download outcomes rather than resubmitting blindly.

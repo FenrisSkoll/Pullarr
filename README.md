@@ -22,13 +22,10 @@ database and comics before upgrades or filesystem operations.
   Release labels are claims, not verified image quality.
 - GetComics Discover: bounded recent observations, local browsing and opt-in
   polling. Discover polling never automatically grabs a release.
-- Reviewed Maintenance, including CBR → CBZ, CBZ integrity verification and
-  explicit deterministic repack. Page bytes and admitted metadata are preserved;
-  replacements are journaled and never mutate shared seed bytes in place.
 - Library Import discovers local archives independently of metadata availability,
-  lets you choose a provider publication and its exact issues on one page, and
-  saves review choices across sessions before a journalled, verified import.
-  Original CBR/CBZ formats are preserved until a separate maintenance review. See
+  lets you choose a provider publication and its exact issues on one page, then
+  registers in place or moves and renames without a draft or extra approval.
+  Original CBR/CBZ formats and embedded metadata are preserved. See
   [workflow details](docs/reliability-workflows.md).
 
 Use sources only for content you are entitled to obtain. Provider and indexer
@@ -109,15 +106,9 @@ Windows/Linux x64 reader binaries are separately licensed; see
 `unrar` command on PATH. Legacy RAR creation requires a separately installed,
 appropriately licensed `rar` command; it is not provided by UnRAR.
 
-Maintenance is explicit: select files, scan, review, then confirm. Healthy CBZs
-are not automatically rewritten. Supported page payloads are JPEG, PNG and WebP.
-Encrypted/multipart or unsafe archives require review. Batches are bounded;
-recovery protects interrupted operations, not unlimited undo after completion.
-Proven interrupted archive jobs resume at startup; ambiguous journals and orphan
-workspaces remain for inspection without blocking unrelated files. Archive page,
-member, expanded-size and image-dimension capacity ceilings are not imposed.
-Large or hostile archives can consume significant CPU, RAM, disk and time; stream
-buffers and worker concurrency remain bounded. See [workflow details](docs/reliability-workflows.md).
+Local Library Import does not convert or repack archives. Historic journal records
+remain for compatibility, but ordinary local imports use direct file registration
+and exclusive moves or verified copies. See [workflow details](docs/reliability-workflows.md).
 There is **no PDF conversion, page editor, arbitrary split/combine or image
 recompression**. qBittorrent is the only supported torrent client.
 

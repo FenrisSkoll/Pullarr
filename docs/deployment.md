@@ -15,12 +15,10 @@ permission change is reported on that file's import result. See the
 [Unraid permission acceptance steps](unraid.md#library-import-permission-check)
 for setgid, ACL and SMB verification with copied test media.
 
-Library Import review drafts use additive SQLite schema 73. They contain local
-path observations, provider-qualified issue choices, review explanations and
-journal receipt IDs, with no archive bytes or provider credentials. There is
-no inactivity timer that deletes unfinished reviews. Back up the database and
-its WAL/SHM files before upgrading. An older application does not understand
-schema 73; rollback requires restoring the matching pre-upgrade database backup.
+Historic Library Import drafts and organization journals remain in schema 73
+for compatibility. New local imports do not create drafts or organization jobs.
+Back up the database and its WAL/SHM files before upgrading. An older application
+does not understand schema 73; rollback requires the matching pre-upgrade backup.
 
 ## Shared download mounts
 

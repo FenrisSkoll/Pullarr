@@ -35,7 +35,7 @@ from backend.internals.db_models import FilesDB
 
 
 def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
-                        folder_limit: int = 500, folder_filter: str | None = None) -> dict:
+                        folder_limit: int = 50000, folder_filter: str | None = None) -> dict:
     """Deterministic filesystem discovery, independent of metadata providers.
 
     A pattern without a separator matches directory basenames. An absolute
@@ -44,7 +44,7 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
     """
     if (type(offset) is not int or offset < 0 or type(page_size) is not int
             or not 1 <= page_size <= 100 or type(folder_limit) is not int
-            or not 1 <= folder_limit <= 500 or folder_filter is not None
+            or not 1 <= folder_limit <= 50000 or folder_filter is not None
             and (not isinstance(folder_filter, str) or len(folder_filter) > 500  # type: ignore[redundant-expr]
                  or '..' in Path(folder_filter).parts)):
         raise ValueError('invalid_scan_parameters')
@@ -94,7 +94,7 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
     eligible_folders = [(path, files, root) for path, files, root in folders if selected(path)]
     chosen = eligible_folders[:folder_limit]
     available, already, skipped = [], 0, 0
-    extensions = {suffix.casefold() for suffix in FileConstants.CONTENT_EXTENSIONS}
+    extensions = {'.cbr', '.cbz'}
     with closing(sqlite3.connect(database)) as lookup:
         for folder, files, root in chosen:
             for name in files:

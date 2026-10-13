@@ -46,35 +46,33 @@ Do not use `chmod 777`.
 Library Import applies **Chmod Folder** and **Chown Group** when it creates a
 managed destination. With mode `775` under a setgid parent, the expected
 new-directory mode is usually `2775`, with effective `rwx` for the owning group.
-Imported regular archives normally receive non-executable `664`-style access.
+Newly copied regular archives receive non-executable `664`-style access when
+`775` is configured. A same-device hardlink is adjusted after the source link
+is retired, so shared source bytes are never changed in place.
 Pullarr checks the owning-group access ACL entry and mask; the parent's default
 ACL is kept. A failed chmod, chgrp or ACL update stops the import row. The
 preflight reports the *application worker's* UID/GID/groups and available umask;
 `docker exec ... id` describes the exec shell, not necessarily that worker.
 
 For manual acceptance, use only a copied synthetic archive in a disposable
-folder under the configured library root. Preview and import it to a new
+folder under the configured library root. Import it to a new
 publication, then verify the final archive and exact issue link in Pullarr.
 On the host, inspect the exact new directory and file with `stat` and
 `getfacl -cp`; confirm the owning group has effective write access and that
 the directory retained setgid. From the intended Windows SMB account, create
 and delete a small test file in that exact destination. This SMB check is
 separate from POSIX mode verification. If an empty canonical destination from
-a failed import has wrong access, use the single-folder reviewed repair shown
-in Library Import, then preview again. Do not run recursive chmod/chown over
-the collection.
+a failed import has wrong access, repair that exact folder's permissions after
+reviewing its ownership. Do not run recursive chmod/chown over the collection.
 
 Unraid user shares may reject Linux's exclusive `renameat2` flag even when
-both paths appear on the same device. Library Import then uses its journalled,
-exclusive verified-copy fallback. A previously interrupted import showing
-`unsupported_operation` should be opened in **Maintenance → History** for
-**Review Recovery**. Confirm the original archive still exists, the intended
-destination is absent, and the recorded publication and issue are correct
-before **Continue Recovery**. An occupied or partial destination needs separate
-inspection; do not manually overwrite it or start another import for the same
-file. The exact filesystem cause requires a disposable user-share syscall test
-or captured errno; the journal state alone cannot prove which FUSE operation
-was rejected.
+both paths appear on the same device. Library Import uses a no-clobber hardlink
+when supported, otherwise an exclusive verified copy. An occupied destination
+is reported on that file's row. Choose Keep in place or another filename; never
+overwrite the existing archive. Older unfinished journal records remain in the
+database and are not replayed automatically. The exact filesystem cause still
+requires a disposable user-share syscall test or captured errno; an old journal
+state alone cannot prove which FUSE operation was rejected.
 
 For a disposable acceptance run, copy one small CBR/CBZ into an isolated test
 root mounted into a separate Pullarr test instance with a copied database.
@@ -90,8 +88,8 @@ stat -c '%A %a %u:%g %n' /path/to/test-parent /path/to/test-destination
 getfacl -cp /path/to/test-parent /path/to/test-destination
 ```
 
-Use the saved Library Import draft to select the exact publication and issue,
-preview, then import the copied archive. Repeat `stat` and `getfacl -cp` for
+Select the exact publication and issue, choose Move and rename, then import the
+copied archive. Repeat `stat` and `getfacl -cp` for
 the final directory and archive. Confirm the final file bytes and issue link in
 Pullarr. From the intended Windows SMB account, create and delete a small file
 in the new destination. POSIX group write is necessary for the configured
@@ -209,11 +207,11 @@ settings and credentials. Back up the media separately.
 
 After making the backup, use the Unraid Docker UI to update Pullarr from the
 stable `latest` image, then start it with the same paths and PUID/PGID. Inspect
-startup logs, settings, Library Import drafts and a few existing library records
-before using Import. The migration does not scan or alter comics. Already
-authorised unfinished organisation or maintenance jobs can resume during normal
-startup, so inspect their recovery state before the upgrade if no continuation
-is desired. Do not run old and new instances against the same database.
+startup logs, settings and a few existing library records before using Import.
+The migration does not scan or alter comics. Historic local-import and archive
+maintenance jobs are retained but not automatically resumed at startup. Download
+intake and other retained background workflows keep their own recovery rules.
+Do not run old and new instances against the same database.
 
 Community Applications image updates will use deliberately maintained stable
 `latest` releases, with immutable version and commit tags available for

@@ -1064,7 +1064,7 @@ def api_library_import_files():
         return return_api(scan_library_import(DBConnection.default_file,
             offset=int(request.args.get('offset', '0')),
             page_size=int(request.args.get('page_size', '100')),
-            folder_limit=int(request.args.get('folder_limit', '500')),
+            folder_limit=int(request.args.get('folder_limit', '50000')),
             folder_filter=request.args.get('folder_filter') or None))
     except (ValueError, OSError) as error:
         code = str(error) if isinstance(error, ValueError) else 'scan_unavailable'
@@ -1377,6 +1377,20 @@ def api_library_import():
     elif request.method == 'POST':
         return return_api({'code':'legacy_import_requires_review',
             'stage':'POST /libraryimport/stage'}, 'LibraryImportDeprecated', 410)
+
+
+@api.route('/libraryimport/submit', methods=['POST'])
+@error_handler
+@auth
+def api_direct_library_import():
+    from backend.features.direct_library_import import (ImportFailure,
+                                                        import_selected)
+
+    data = request.get_json(silent=True)
+    try:
+        return return_api(import_selected(data.get('files') if isinstance(data, dict) else None))
+    except ImportFailure as error:
+        return return_api({'code': str(error)}, 'LibraryImportSelection', 400)
 
 
 # region Library + Volumes
@@ -1843,8 +1857,19 @@ def api_volume(id: int):
         return return_api(None)
 
     elif request.method == 'DELETE':
+        from backend.base.organization_job import OrganizationError
+
         delete_folder = extract_key(request, 'delete_folder')
-        volume.delete(delete_folder=delete_folder)
+        try:
+            volume.delete(delete_folder=delete_folder)
+        except ValueError as error:
+            code = str(error) if str(error) == 'shared_or_external_file_use_metadata_only_delete' else 'volume_delete_conflict'
+            return return_api({'code': code}, 'VolumeDeleteBlocked', 409)
+        except OrganizationError as error:
+            code = (error.detail if error.detail in {'deletion_active_job',
+                'deletion_recovery_ambiguous', 'deletion_deferred_organization_reservation'}
+                else error.code.value)
+            return return_api({'code': code}, 'VolumeDeleteBlocked', 409)
         return return_api({})
 
 

@@ -4,6 +4,8 @@
 The matching of files to issues in a volume
 """
 
+import os
+import stat
 from collections import Counter
 from os.path import basename, isdir
 from typing import Dict, List, Set, Tuple, Union
@@ -135,6 +137,24 @@ def _scan_files(
         (volume_id, True)
     ))
     manually_matched_files_found: Set[int] = set()
+    # Explicit keep-in-place associations may live elsewhere in the same
+    # configured root. Their source folder can mix publications, so scanning
+    # the canonical volume directory must not erase those exact links.
+    root_path = cursor.execute('SELECT folder FROM root_folders WHERE id=?',
+                               (volume_data.root_folder,)).fetchone()[0]
+    from backend.base.acquisition_intake import IntakeFailure
+    from backend.implementations.acquisition_paths import contained
+    for path, file_id in tuple(manually_matched_files.items()):
+        if folder_is_inside_folder(volume_data.folder, path):
+            continue
+        try:
+            contained(path, root_path)
+            info = os.stat(path, follow_symlinks=False)
+            if stat.S_ISREG(info.st_mode):
+                manually_matched_files_found.add(file_id)
+                manually_matched_files.pop(path)
+        except (IntakeFailure, OSError):
+            pass
     manually_matched_general_files: Dict[str, int] = dict(cursor.execute(
         """
         SELECT DISTINCT f.filepath, f.id

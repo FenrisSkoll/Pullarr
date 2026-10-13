@@ -126,6 +126,7 @@ function fillTable(issues, api_key) {
 
 		const entry = ViewEls.pre_build.issue_entry.cloneNode(true);
 		entry.dataset.id = obj.id;
+		entry.dataset.availability = obj.availability || (obj.files.length ? 'owned' : 'unknown');
 		ViewEls.issues_list.appendChild(entry);
 
 		const inst = new IssueEntry(obj.id, api_key, entry);
@@ -155,12 +156,23 @@ function fillTable(issues, api_key) {
 
 		// Download status
 		inst.setDownloaded(obj.files.length);
+		if (inst.status) inst.status.title = entry.dataset.availability;
 
 		// Actions
 		inst.auto_search.onclick = e => autosearchIssue(obj.id, api_key);
 		inst.manual_search.onclick = e => showManualSearch(api_key, obj.id);
-		inst.convert.onclick = e => showConvert(api_key, obj.id);
 	};
+	const counts = {owned:0, missing:0, upcoming:0, unknown:0, unmonitored:0};
+	for (const issue of issues) counts[issue.availability in counts ? issue.availability : 'unknown']++;
+	const summary = document.querySelector('#issue-availability-counts');
+	if (summary) summary.textContent = `Owned ${counts.owned} · Missing ${counts.missing} · Upcoming ${counts.upcoming} · Unknown / unconfirmed ${counts.unknown} · Unmonitored ${counts.unmonitored}`;
+	const filter = document.querySelector('#issue-availability-filter');
+	if (filter) {
+		filter.onchange = () => ViewEls.issues_list.querySelectorAll('tr').forEach(row => {
+			row.hidden = filter.value !== 'all' && row.dataset.availability !== filter.value;
+		});
+		filter.onchange();
+	}
 };
 
 function fillPage(data, api_key) {
@@ -838,23 +850,33 @@ function editVolume() {
 function deleteVolume() {
 	const downloading_error = document.querySelector('#volume-downloading-error'),
 		tasking_error = document.querySelector('#volume-tasking-error'),
+		delete_error = document.querySelector('#volume-delete-error'),
 		delete_folder = document.querySelector('#delete-folder-input').value;
 
-	hide([downloading_error, tasking_error]);
+	hide([downloading_error, tasking_error, delete_error]);
 	usingApiKey()
 	.then(api_key => {
 		sendAPI('DELETE', `/volumes/${volume_id}`, api_key, {delete_folder: delete_folder})
 		.then(response => {
 			window.location.href = `${url_base}/`;
 		})
-		.catch(e => e.json().then(j => {
-			if (j.error === "TaskForVolumeRunning")
+		.catch(async e => {
+			const j = await e?.json?.().catch(() => null);
+			if (j?.error === "TaskForVolumeRunning")
 				hide([downloading_error], [tasking_error]);
-			else if (j.error === "VolumeDownloadedFor")
+			else if (j?.error === "VolumeDownloadedFor")
 				hide([tasking_error], [downloading_error]);
-			else
-				console.log(j);
-		}));
+			else {
+				const code = j?.result?.code || j?.result?.reason || j?.error;
+				delete_error.textContent = ({
+					deletion_active_job:'A file operation is still active for this publication. Try again when it finishes.',
+					deletion_recovery_ambiguous:'An earlier file operation has an uncertain result. No files or publication records were removed.',
+					deletion_deferred_organization_reservation:'A file operation still owns one of these paths. No files or publication records were removed.',
+					shared_or_external_file_use_metadata_only_delete:'Some files are shared or outside the publication folder. Choose Delete folder = No to remove only the publication.'
+				})[code] || code || 'Deletion failed; files were kept.';
+				hide([], [delete_error]);
+			}
+		});
 	});
 };
 
@@ -946,15 +968,12 @@ usingApiKey()
 	ViewEls.tool_bar.auto_search.onclick = e => autosearchVolume(api_key);
 	ViewEls.tool_bar.manual_search.onclick = e => showManualSearch(api_key);
 	ViewEls.tool_bar.rename.onclick = e => showRename(api_key);
-	ViewEls.tool_bar.convert.onclick = e => showConvert(api_key);
 	ViewEls.tool_bar.manage.onclick = e => showManageIssues(api_key);
 	ViewEls.tool_bar.edit.onclick = e => showEdit(api_key);
 
 	document.querySelector('#submit-rename').onclick =
 	e => renameVolume(api_key, parseInt(e.target.dataset.issue_id) || null);
 
-	document.querySelector('#submit-convert').onclick =
-	e => convertVolume(api_key, parseInt(e.target.dataset.issue_id) || null);
 
 	document.querySelector('#issue-rename-selector').onclick =
 	e => showRename(api_key, parseInt(e.target.dataset.issue_id));
@@ -984,7 +1003,6 @@ ViewEls.tool_bar.delete.onclick = e => showWindow('delete-window');
 document.querySelector('#issue-info-selector').onclick = e => showInfoWindow('issue-info');
 document.querySelector('#issue-files-selector').onclick = e => showInfoWindow('issue-files');
 document.querySelector('#selectall-input').onchange = e => toggleAllRenames();
-document.querySelector('#selectall-convert-input').onchange = e => toggleAllConverts();
 document.querySelector('#selectall-manage-input').onchange = e => toggleAllManages();
 document.querySelector('#show-issue-match').onclick = e => showMatchIssue();
 document.querySelector('#selectall-match-input').onchange = e => handleIssueMatchCheckboxes(e);

@@ -72,28 +72,22 @@ def run(rename):
                         result=page.locator('.search-results tr').filter(has_text=titles[index])
                         result.locator('button').first.click()
                         expect(rows.nth(index).locator('.issue-column')).to_contain_text(str(index+1))
-                    expect(page.locator('#import-save-status')).to_contain_text('Saved import review',timeout=30000)
-                    page.goto(origin+'/')
-                    page.evaluate("localStorage.removeItem('pullarr.libraryImportDraft.v3')")
-                    page.goto(origin+'/library-import')
-                    expect(page.locator('#saved-import-drafts option')).to_have_count(1)
-                    page.locator('#open-import-draft').click()
-                    rows=page.locator('.proposal-list tr[data-rowid]')
-                    expect(rows).to_have_count(3)
-                    for index in (0,1,2):
-                        expect(rows.nth(index).locator('.issue-column')).to_contain_text(str(index+1))
-                    rows.nth(0).locator('.issue-column button').first.click()
-                    expect(rows.nth(0).locator('.issue-column')).to_contain_text('Shadows')
-                    with page.expect_request(lambda r:'/libraryimport/stage?' in r.url) as request:
-                        page.locator('#preview-import-rename-button' if rename else '#preview-import-button').click()
-                    payload=request.value.post_data_json
+                    for width in (1280,680,390):
+                        page.set_viewport_size({'width':width,'height':850})
+                        expect(page.locator('#import-button')).to_be_visible()
+                        dimensions=rows.nth(0).locator('.file-column').evaluate(
+                            '(cell) => ({width:cell.getBoundingClientRect().width,wordBreak:getComputedStyle(cell).wordBreak})')
+                        assert dimensions['width']>=150 and dimensions['wordBreak']!='break-all',dimensions
+                        rows.nth(0).locator('.issue-column button').first.scroll_into_view_if_needed()
+                        expect(rows.nth(0).locator('.issue-column button').first).to_be_visible()
+                    page.set_viewport_size({'width':1280,'height':850})
+                    page.locator('#import-mode').select_option('move' if rename else 'keep')
+                    with page.expect_request(lambda r:'/libraryimport/submit?' in r.url) as request:
+                        page.locator('#import-button').click()
+                    payload=request.value.post_data_json['files']
                     assert [r['provider_id'] for r in payload]==['110001','110002','110003'],payload
                     assert [r['issue_ids'] for r in payload]==[['210001'],['210002'],['210003']],payload
-                    panel=page.locator('#library-import-results')
-                    expect(panel).to_contain_text('3 ready')
-                    page.locator('#import-rename-button' if rename else '#import-button').click()
-                    expect(panel).to_contain_text('Imported 3 files into 3 publications.',timeout=60000)
-                    for title in titles:expect(panel).to_contain_text(title)
+                    expect(page.locator('.import-status').filter(has_text='Imported')).to_have_count(3,timeout=60000)
                     expect(rows).to_have_count(3)
                     with server.app.app_context():
                         db=get_db();volumes=db.execute('SELECT id,folder FROM volumes ORDER BY id').fetchall()
@@ -104,7 +98,8 @@ def run(rename):
                         assert {Path(r[0]).read_bytes() for r in files}==set(originals.values())
                         if not rename:assert {Path(r[0]).name for r in files}==set(originals)
                         else:assert {Path(r[0]).name for r in files}!=set(originals)
-                    assert not source.exists()
+                    if rename: assert not any(source.iterdir())
+                    else: assert len(list(source.iterdir()))==3
                     for vid,folder in volumes:
                         page.goto(origin+f'/volumes/{vid}');expect(page.locator('#loading-screen')).to_be_hidden()
                         expect(page.locator('main')).to_contain_text(folder)
@@ -117,7 +112,7 @@ def run(rename):
                     assert not errors and not dialogs,(errors,dialogs)
                     browser.close()
             finally:http.shutdown();_sessions.clear()
-    print('Split import Chromium PASS: '+('Import and Rename' if rename else 'Import')+'; exact edited identities, three usable volumes/folders, safe moves, cleanup, no dialogs/errors')
+    print('Split import Chromium PASS: '+('Move and rename' if rename else 'Keep in place')+'; exact edited identities, three usable volumes, no preview/draft/dialog/errors')
 
 
 if __name__=='__main__':

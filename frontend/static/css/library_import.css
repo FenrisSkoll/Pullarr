@@ -139,11 +139,13 @@ main {
 
 .table-container {
 	padding: 1rem;
+	overflow-x: auto;
 }
 
 .table-container > table {
-	min-width: 30rem;
+	min-width: 62rem;
 	width: 100%;
+	table-layout: fixed;
 }
 
 .table-container :where(td, th),
@@ -183,9 +185,16 @@ main {
 }
 
 .li-result td:last-child {
-	width: 5rem;
+	width: 11rem;
 	user-select: none;
 }
+
+.li-result .file-column { width: 19rem; overflow-wrap: normal; word-break: normal; }
+.li-result .file-column details { max-width: 18rem; overflow-wrap: anywhere; word-break: normal; }
+.li-result .import-match { display: block; max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li-result .issue-column { min-width: 18rem; overflow-wrap: normal; word-break: normal; }
+.li-result .import-status { overflow-wrap: break-word; word-break: normal; }
+#import-filter { width: min(100%, 28rem); margin: .5rem; }
 
 .li-result button img {
 	height: 1.5rem;
