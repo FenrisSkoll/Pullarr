@@ -1,5 +1,18 @@
 # Release notes
 
+## 1.5.7 — Library Import Search & Artwork
+
+- Restored configurable library folder scan limits.
+- Added independently configurable ComicVine matching budgets.
+- Fixed Choose publication opening the metadata search.
+- Restored ComicVine, Metron and GCD publication links.
+- Improved bulk publication and issue matching.
+- Added compact comic-cover thumbnails to search results.
+- Added clickable, enlarged cover previews with a lightbox.
+- Improved responsive layouts and keyboard accessibility.
+- Preserved the simplified Direct Import workflow.
+- Database schema remains 73; no migration required.
+
 ## 1.5.6 — Simplified Library Import
 
 - Replaced the complex import workflow with direct Keep in place
