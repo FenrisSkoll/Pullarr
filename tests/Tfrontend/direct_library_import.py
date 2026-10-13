@@ -53,6 +53,19 @@ class DirectLibraryImport(ImportAPIHarness, TestCase):
         states = {row['issue_number']: row['availability'] for row in volume.get_json()['result']['issues']}
         self.assertEqual(states, {'1':'owned', '2':'unknown'})
 
+    def test_permission_failure_reports_safe_code_and_diagnostic(self):
+        from backend.base.organization_job import (ExecutionCode,
+                                                   OrganizationError)
+
+        source = self.comic_file()
+        with patch('backend.features.direct_library_import.import_one',
+                   side_effect=OrganizationError(ExecutionCode.PERMISSION, 'OperationalError')), \
+                patch('backend.features.direct_library_import.LOGGER.warning') as warning:
+            result = self.submit(source, 'move').get_json()['result']['results'][0]
+        self.assertEqual(result['reason'], 'permission_denied')
+        self.assertIn('OperationalError', str(warning.call_args))
+        self.assertNotIn(source, str(warning.call_args))
+
     def test_future_issue_is_upcoming_and_not_automatically_wanted(self):
         from backend.internals.wanted import WantedStore
 

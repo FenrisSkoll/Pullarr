@@ -10,6 +10,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from backend.base.acquisition_intake import IntakeFailure
+from backend.base.logging import LOGGER
+from backend.base.organization_job import OrganizationError
 from backend.features.managed_permissions import (apply_managed_permissions,
                                                   create_managed_folder)
 from backend.implementations.acquisition_paths import contained
@@ -283,14 +285,15 @@ def import_one(choice):
         if target != source and os.path.lexists(target):
             raise ImportFailure('target_exists: ' + target)
         if target != source:
-            create_managed_folder(folder)
+            create_managed_folder(folder, database=cursor.connection)
         created = _exclusive_move(source, target, source_info)
         if created:
             target_info = _regular(target)
             if (target_info.st_dev, target_info.st_ino) != (source_info.st_dev, source_info.st_ino):
                 # Copy has its own inode; applying the configured file mode
                 # cannot mutate the still-retained source.
-                apply_managed_permissions(target, directory=False)
+                apply_managed_permissions(target, directory=False,
+                                          database=cursor.connection)
         row = cursor.execute('SELECT id FROM files WHERE filepath=?', (target,)).fetchone()
         if row is None and current_file is not None and target != source:
             cursor.execute('UPDATE files SET filepath=?,size=? WHERE id=?',
@@ -329,7 +332,8 @@ def import_one(choice):
                     os.unlink(source)
                     if os.stat(target, follow_symlinks=False).st_nlink == 1:
                         try:
-                            apply_managed_permissions(target, directory=False)
+                            apply_managed_permissions(target, directory=False,
+                                                      database=cursor.connection)
                         except Exception:
                             warning = 'file_permission_update_failed'
             except (OSError, ImportFailure):
@@ -357,9 +361,17 @@ def import_selected(choices):
         source = choice.get('source') if isinstance(choice, dict) else None
         try:
             results.append(import_one(choice))
+        except OrganizationError as error:
+            detail = error.detail if error.detail in (
+                'OperationalError', 'PermissionError', 'FileNotFoundError',
+                'OSError', 'ValueError', 'KeyError') else 'unspecified'
+            LOGGER.warning('Direct import permission/organization failure: %s (%s)',
+                           error.code.value, detail)
+            results.append(dict(source=source, status='failed', reason=error.code.value))
         except (ImportFailure, OSError, sqlite3.Error, ValueError) as error:
             code = str(error) if isinstance(error, ImportFailure) else type(error).__name__
             results.append(dict(source=source, status='failed', reason=code))
-        except Exception:
+        except Exception as error:
+            LOGGER.warning('Direct import unexpected failure: %s', type(error).__name__)
             results.append(dict(source=source, status='failed', reason='import_unavailable'))
     return dict(results=results)

@@ -199,7 +199,8 @@ def worker_permission_context() -> dict:
     return value
 
 
-def create_managed_folder(path: str, *, settings=None) -> None:
+def create_managed_folder(path: str, *, database: sqlite3.Connection | str | None = None,
+                          settings=None) -> None:
     """Create only missing components and apply policy to those exact inodes."""
     missing = []
     current = os.path.abspath(path)
@@ -222,7 +223,7 @@ def create_managed_folder(path: str, *, settings=None) -> None:
                 continue
             info = os.lstat(part)
             created.append((part, info.st_dev, info.st_ino))
-            apply_managed_permissions(part, directory=True, settings=settings)
+            apply_managed_permissions(part, directory=True, database=database, settings=settings)
     except BaseException:
         for part, device, inode in reversed(created):
             try:
