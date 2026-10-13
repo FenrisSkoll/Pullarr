@@ -73,5 +73,29 @@ harness.finished.then(async () => {
     await staleCatalogue;
     assert.equal(changed.catalogue,null);
     assert.deepEqual(changed.issueIds,[]);
-    console.log('Library Import bounded scan, matching stop, stale choice guard and 205 file proposals PASS');
+    const fields=new Map();
+    function field(selector) {
+        if (!fields.has(selector)) fields.set(selector,{textContent:'',checked:false,
+            classList:{remove(){},toggle(){}},setAttribute(){},removeAttribute(){},
+            replaceChildren(){},append(){}});
+        return fields.get(selector);
+    }
+    const selected=row(998);
+    selected.data.file_title='Book 998';
+    selected.identity=null;
+    selected.element={hidden:false,querySelector:field};
+    context.selected=selected;
+    vm.runInContext("importRows.clear(); importRows.set('selected',selected); " +
+        "choosePublication(selected,{provider:'comicvine',id:'101'},'Books','',false,'embedded');",context);
+    assert.match(field('.publication-meta').textContent,/From file metadata/);
+    assert.equal(selected.userChosen,false);
+    selected.issueIds=['manual-issue']; selected.manual=true;
+    vm.runInContext("choosePublication(selected,{provider:'comicvine',id:'101'},'Books','',false);",context);
+    assert.match(field('.publication-meta').textContent,/Selected manually/);
+    assert.deepEqual(selected.issueIds,['manual-issue']);
+    vm.runInContext("choosePublication(selected,{provider:'gcd',id:'303'},'New edition','',false);",context);
+    assert.deepEqual(Array.from(selected.issueIds),[]);
+    assert.equal(selected.manual,false);
+    assert.equal(field('.publication-title').textContent,'New edition');
+    console.log('Library Import bounds, stale choice, provenance and 205 file proposals PASS');
 }).catch(error=>{console.error(error);process.exitCode=1;});

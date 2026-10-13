@@ -1,6 +1,7 @@
 """Disposable Chromium checks for Library Import controls and metadata artwork."""
 import base64
 import json
+import os
 import sys
 from io import BytesIO
 from pathlib import Path
@@ -33,9 +34,17 @@ def main():
         file_title=f'Book {index:03}', folder='/fixture/30 Days of Night', size=100,
         embedded=None, metadata_source=None, parsed=dict(title='30 Days of Night', year=2002))
         for index in range(1, 216)]
+    files[0]['file_title'] = 'Abe Sapien v03 - Dark and Terrible and the New Race of Man - Book One'
+    embedded_files = [dict(row_id='embedded', filepath='/fixture/Embedded/Book 001.cbz',
+        file_title='Book 001', folder='/fixture/Embedded', size=100,
+        embedded=dict(series='Embedded Edition', number='1', title='Book One'),
+        metadata_source=dict(provider='metron', id='202'),
+        parsed=dict(title='Embedded Edition', year=2023))]
     large = jpeg(600, 900)
     small = 'data:image/jpeg;base64,' + base64.b64encode(jpeg(100, 150)).decode()
-    calls = dict(scans=[], suggestions=[], catalogues=[], searches=[], artwork=[], fail_suggestions=False)
+    calls = dict(scans=[], suggestions=[], catalogues=[], searches=[], artwork=[], imports=0,
+                 embedded_only=False,
+                 fail_suggestions=False)
     errors = []
     with TemporaryDirectory(prefix='pullarr-import-controls-') as temporary:
         set_db_location(str(Path(temporary) / 'db'))
@@ -61,7 +70,7 @@ def main():
                     offset = int(params.get('offset', ['0'])[0])
                     calls['scans'].append(dict(limit=limit, offset=offset,
                         filter=params.get('folder_filter', [''])[0]))
-                    selected = files if limit >= 20 else []
+                    selected = (embedded_files if calls['embedded_only'] else files) if limit >= 20 else []
                     chunk = selected[offset:offset+100]
                     counts = dict(scanned_folders=min(limit, 905), eligible_folders=905,
                         not_yet_scanned_folders=max(0, 905-limit), discovered=len(selected),
@@ -93,9 +102,9 @@ def main():
 
                 def search(route):
                     calls['searches'].append(route.request.url)
-                    def result(provider, identifier, cover, state, site):
+                    def result(provider, identifier, cover, state, site, title='30 Days of Night'):
                         return dict(metadata_source=dict(provider=provider,id=str(identifier)),
-                            result_key=f'{provider}:{identifier}', title='30 Days of Night',
+                            result_key=f'{provider}:{identifier}', title=title,
                             year=2002, publisher='Fixture', issue_count=3,
                             cover_link=cover, artwork_state=state, site_url=site)
                     groups = [dict(label='ComicVine', status='complete', result_count=1,
@@ -104,7 +113,8 @@ def main():
                         dict(label='Metron',status='complete',result_count=1,
                         results=[result('metron',202,None,'pending','https://metron.cloud/series/202/')]),
                         dict(label='GCD',status='complete',result_count=1,
-                        results=[result('gcd',303,None,'unavailable','https://www.comics.org/series/303/')]),
+                        results=[result('gcd',303,None,'unavailable','https://www.comics.org/series/303/',
+                            'Abe Sapien v03 - Dark and Terrible and the New Race of Man')]),
                         dict(label='Unsafe or missing',status='complete',result_count=2,
                         results=[result('comicvine',404,None,'unavailable','javascript:alert(1)'),
                             result('comicvine',405,None,'unavailable',None)])]
@@ -117,9 +127,14 @@ def main():
                     route.fulfill(json=dict(result=[dict(result_key=identity,
                         artwork_state='available',image=small) for identity in identities]))
 
+                def unexpected_import(route):
+                    calls['imports'] += 1
+                    route.fulfill(status=500, json=dict(error='UnexpectedImport'))
+
                 page.route('**/api/libraryimport/files?*', scan)
                 page.route('**/api/libraryimport/suggestions?*', suggestions)
                 page.route('**/api/libraryimport/catalog?*', catalogue)
+                page.route('**/api/libraryimport/submit?*', unexpected_import)
                 page.route('**/api/volumes/search/artwork?*', artwork)
                 page.route('**/api/volumes/search?*', search)
                 page.route('https://art.example/large.jpg', lambda route:
@@ -134,11 +149,17 @@ def main():
                 expect(rows).to_have_count(100)
                 assert calls['scans'][0]['limit'] == 1000
                 expect(page.locator('#scan-summary')).to_contain_text('More result pages available')
+                expect(page.locator('#loaded-count')).to_have_text('100 loaded of 215 discovered')
+                expect(page.locator('#import-selection-count')).to_have_text('100 selected for import')
+                assert page.locator('.table-container thead th').all_inner_texts() == \
+                    ['Import', 'File', 'Publication', 'Issue association', 'Status']
+                assert page.locator('.change-match').count() == 0
                 page.locator('#import-next-page').click()
                 expect(rows).to_have_count(200)
                 page.locator('#import-next-page').click()
                 expect(rows).to_have_count(215)
                 expect(page.locator('#scan-summary')).to_contain_text('All result pages shown')
+                expect(page.locator('#loaded-count')).to_have_text('215 loaded of 215 discovered')
                 assert len(set(row['filepath'] for row in files)) == 215
 
                 choice = rows.first.locator('.publication-choice')
@@ -146,6 +167,7 @@ def main():
                 page.keyboard.press('Enter')
                 expect(page.locator('#cv-window')).to_be_visible()
                 expect(page.locator('#search-input')).to_be_focused()
+                expect(page.locator('#match-context')).to_contain_text('Only this file will change')
                 page.locator('#search-input').fill('30 Days of Night')
                 page.locator('#search-input').press('Enter')
                 results = page.locator('.search-results tr.search-result')
@@ -196,7 +218,8 @@ def main():
                 assert cover.evaluate('(node) => node === document.activeElement')
                 expect(page.locator('#cv-window')).to_be_visible()
                 assert results.count() == 5
-                assert results.first.locator('.import-search-actions button').count() == 2
+                assert results.first.locator('.import-search-actions button').count() == 1
+                expect(results.first.locator('.import-search-actions button')).to_have_text('Select for this file')
                 assert all(size['width'] > 90 and size['height'] < 55 for size in
                     results.first.locator('.import-search-actions button').evaluate_all(
                         'nodes => nodes.map(node => ({width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height}))'))
@@ -209,33 +232,117 @@ def main():
                 viewer.click(position={'x':3, 'y':3})
                 expect(viewer).not_to_be_visible()
                 page.set_viewport_size({'width':1440,'height':900})
-                cv.get_by_role('button', name='Select', exact=True).click()
-                expect(rows.first.locator('.issue-column')).to_contain_text('1 · Book 1')
+                cv.get_by_role('button', name='Select for this file').click()
+                expect(rows.first.locator('.issue-column')).to_contain_text('#1 — Book 1')
+                expect(rows.first.locator('.publication-meta')).to_contain_text('Selected manually · comicvine · ID 101')
                 assert len(calls['catalogues']) == 1
-                rows.first.locator('.change-match').focus()
+                rows.first.locator('.publication-choice').focus()
                 page.keyboard.press('Space')
                 expect(page.locator('#cv-window')).to_be_visible()
                 expect(page.locator('#search-input')).to_be_focused()
                 page.locator('#cv-window .cancel-window').click()
+                expect(rows.first.locator('.publication-choice')).to_be_focused()
+                page.keyboard.press('Enter')
+                expect(page.locator('#search-input')).to_be_focused()
+                page.keyboard.press('Escape')
+                expect(rows.first.locator('.publication-choice')).to_be_focused()
 
                 # Import checkboxes start checked; bulk checkboxes require explicit choices.
                 assert page.locator('.proposal-list .import-file-select:checked').count() == 215, \
                     (page.locator('.proposal-list .import-file-select:checked').count(), rows.count())
                 assert page.locator('.proposal-list .bulk-match-select:checked').count() == 0
-                page.locator('.proposal-list .bulk-match-select').evaluate_all("nodes => nodes.slice(0,205).forEach(node => {node.checked=true;node.dispatchEvent(new Event('change',{bubbles:true}));})")
-                choice.click()
+                expect(page.locator('#open-bulk-match')).to_be_disabled()
+                three = rows.nth(1), rows.nth(2), rows.nth(3)
+                for target in three:
+                    target.locator('.import-file-select').uncheck()
+                    target.locator('.bulk-match-select').check()
+                expect(page.locator('#open-bulk-match')).to_have_text('Bulk match (3)')
+                page.locator('#clear-bulk-match').click()
+                expect(page.locator('#open-bulk-match')).to_be_disabled()
+                assert all(not target.locator('.import-file-select').is_checked() for target in three)
+                for target in three:
+                    target.locator('.bulk-match-select').check()
+                rows.nth(4).locator('.publication-choice').click()
+                expect(page.locator('#match-context')).to_contain_text('Only this file will change')
                 page.locator('#search-input').press('Enter')
-                expect(results.first.locator('.bulk-match')).to_have_text('Apply to 205 chosen files')
+                assert results.first.locator('.bulk-match').count() == 0
+                results.first.get_by_role('button', name='Select for this file').click()
+                expect(rows.nth(4).locator('.publication-meta')).to_contain_text('Selected manually')
+                assert page.locator('.proposal-list .bulk-match-select:checked').count() == 3
+                assert all(target.locator('.publication-choice').inner_text() == 'Choose publication'
+                    for target in three)
+                page.locator('#import-filter').fill('Book 001')
+                expect(page.locator('#bulk-selection-count')).to_contain_text('3 outside current filter')
+                page.locator('#open-bulk-match').click()
+                expect(page.locator('#match-context')).to_contain_text('including 3 outside the current filter')
+                page.locator('#search-input').press('Enter')
                 results.first.locator('.bulk-match').click()
-                expect(rows.nth(204).locator('.issue-column')).to_contain_text('205 · Book 205')
+                expect(page.locator('#bulk-match-review')).not_to_be_visible()
+                for number, target in enumerate(three, start=2):
+                    expect(target.locator('.issue-column')).to_contain_text(f'#{number} — Book {number}')
+                    assert not target.locator('.import-file-select').is_checked()
+                expect(page.locator('#bulk-result-status')).to_contain_text('3 issue suggestions found; 0 need review')
+                page.locator('#import-filter').fill('')
+                page.locator('.proposal-list .bulk-match-select').evaluate_all("nodes => nodes.slice(0,205).forEach(node => {node.checked=true;node.dispatchEvent(new Event('change',{bubbles:true}));})")
+                expect(page.locator('#open-bulk-match')).to_have_text('Bulk match (205)')
+                page.locator('#selectall-input').check()
+                page.locator('#selectall-input').uncheck()
+                assert page.locator('.proposal-list .import-file-select:checked').count() == 0
+                assert page.locator('.proposal-list .bulk-match-select:checked').count() == 205
+                page.locator('#open-bulk-match').click()
+                expect(page.locator('#match-context')).to_contain_text('Matching 205 explicitly chosen files')
+                page.locator('#search-input').press('Enter')
+                expect(results.first.locator('.bulk-match')).to_have_text('Apply to 205 selected files')
+                assert results.first.get_by_role('button', name='Select for this file').count() == 0
+                results.first.locator('.bulk-match').click()
+                expect(page.locator('#bulk-match-review')).to_be_visible()
+                expect(page.locator('#bulk-review-cancel')).to_be_focused()
+                page.locator('#bulk-review-cancel').click()
+                assert rows.nth(204).locator('.publication-choice').inner_text() == 'Choose publication'
+                expect(page.locator('#cv-window')).to_be_visible()
+                results.first.locator('.bulk-match').click()
+                page.locator('#bulk-review-apply').click()
+                expect(rows.nth(204).locator('.issue-column')).to_contain_text('#205 — Book 205')
+                expect(page.locator('#bulk-result-status')).to_contain_text('Publication assigned to 205 files')
                 assert rows.nth(214).locator('.publication-choice').inner_text() == 'Choose publication'
                 assert all(len(batch) <= 100 for batch in calls['catalogues'])
                 assert len({path for batch in calls['catalogues'] for path in batch}) == 205
                 assert page.locator('.proposal-list .bulk-match-select:checked').count() == 0
+                assert page.locator('.proposal-list .import-file-select:checked').count() == 0
                 rows.nth(214).locator('.publication-choice').click()
                 page.locator('#search-input').press('Enter')
-                results.nth(2).get_by_role('button', name='Select', exact=True).click()
-                expect(rows.nth(214).locator('.publication-choice')).to_contain_text('gcd:303')
+                results.nth(2).get_by_role('button', name='Select for this file').click()
+                expect(rows.nth(214).locator('.publication-meta')).to_contain_text('gcd · ID 303')
+                assert rows.nth(214).locator('.publication-title').evaluate(
+                    'node => node.scrollWidth <= node.clientWidth + 1')
+                rows.first.locator('.bulk-match-select').check()
+                page.locator('#open-bulk-match').click()
+                page.locator('#search-input').press('Enter')
+                results.nth(2).locator('.bulk-match').click()
+                expect(page.locator('#bulk-match-review')).to_be_visible()
+                expect(page.locator('#bulk-review-detail')).to_contain_text('1 existing manual matches will change')
+                page.keyboard.press('Escape')
+                expect(page.locator('#bulk-match-review')).not_to_be_visible()
+                expect(rows.first.locator('.publication-meta')).to_contain_text('comicvine · ID 101')
+                results.nth(2).locator('.bulk-match').click()
+                page.locator('#bulk-review-apply').click()
+                expect(rows.first.locator('.publication-meta')).to_contain_text('gcd · ID 303')
+                for width in (1440, 1024, 768, 390):
+                    page.set_viewport_size({'width':width,'height':900})
+                    screenshot_root = Path(os.environ.get('PULLARR_SCREENSHOT_DIR', temporary))
+                    screenshot_root.mkdir(parents=True, exist_ok=True)
+                    page.evaluate('window.scrollTo(0,0)')
+                    page.screenshot(path=str(screenshot_root / f'library-import-toolbar-{width}.png'))
+                    rows.nth(214).scroll_into_view_if_needed()
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), width
+                    assert rows.nth(214).locator('.publication-title').evaluate(
+                        'node => node.scrollWidth <= node.clientWidth + 1'), width
+                    page.screenshot(path=str(screenshot_root / f'library-import-{width}.png'))
+                page.evaluate("document.documentElement.classList.add('dark-mode')")
+                page.evaluate('window.scrollTo(0,0)')
+                page.screenshot(path=str(screenshot_root / 'library-import-dark-390.png'))
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+                page.set_viewport_size({'width':1440,'height':900})
 
                 # The optional matching budget uses the same scan scope and retains later-page proposals.
                 page.locator('#list-window .cancel-button').click()
@@ -248,7 +355,7 @@ def main():
                 assert all(len(batch) <= 10 for batch in calls['suggestions'])
                 page.locator('#import-next-page').click()
                 expect(page.locator('.proposal-list .li-result')).to_have_count(200)
-                expect(page.locator('.proposal-list .li-result').nth(150).locator('.publication-choice')).to_contain_text('comicvine:101')
+                expect(page.locator('.proposal-list .li-result').nth(150).locator('.publication-meta')).to_contain_text('Suggested by ComicVine · comicvine · ID 101')
                 page.locator('#list-window .cancel-button').click()
                 calls['fail_suggestions'] = True
                 page.locator('#run-import-button').click()
@@ -257,6 +364,17 @@ def main():
                 assert not errors, errors
                 assert all(len(batch) <= 4 for batch in calls['artwork'])
                 assert sum(map(len,calls['artwork'])) <= 12 * len(calls['searches'])
+                assert calls['imports'] == 0
+                calls['embedded_only'] = True
+                page.goto(origin + '/library-import')
+                page.locator('#auto-match-input').uncheck()
+                page.locator('#run-import-button').click()
+                embedded_row = page.locator('.proposal-list .li-result')
+                expect(embedded_row).to_have_count(1)
+                expect(embedded_row.locator('.publication-title')).to_have_text('Embedded Edition')
+                expect(embedded_row.locator('.publication-meta')).to_have_text(
+                    'From file metadata · metron · ID 202')
+                expect(embedded_row.locator('.publication-choice')).to_have_text('Change publication')
                 browser.close()
             print(json.dumps(dict(result='pass', scan_requests=len(calls['scans']),
                 suggestion_batches=len(calls['suggestions']),catalogue_batches=list(map(len,calls['catalogues'])),

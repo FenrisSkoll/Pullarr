@@ -15,18 +15,17 @@
 <tr class="li-result" data-rowid="">
 	<td>
 		<label>
-			<input type="checkbox" class="import-file-select" title="Whether to import the file" checked>
+			<input type="checkbox" class="import-file-select" checked>
 		</label>
 	</td>
 	<td class="file-column" title=""></td>
 	<td class="match-column">
-		<button type="button" class="publication-choice">Choose publication</button>
-		<a class="provider-link hidden" target="_blank" rel="noopener noreferrer">View on provider</a>
-	</td>
-	<td>
-		<button type="button" class="change-match" title="Change match" aria-label="Change publication">
-			<img src="{{ url_for('static', filename='img/edit.svg') }}" alt="">
-		</button>
+		<strong class="publication-title hidden"></strong>
+		<span class="publication-meta">No publication matched yet</span>
+		<div class="publication-actions">
+			<button type="button" class="publication-choice">Choose publication</button>
+			<a class="provider-link hidden" target="_blank" rel="noopener noreferrer">View on provider</a>
+		</div>
 		<label class="bulk-target"><input type="checkbox" class="bulk-match-select"> Match in bulk</label>
 	</td>
 	<td class="issue-column"></td>
@@ -36,6 +35,7 @@
 
 {% block windows %}
 	{% set edit_cv_content %}
+		<p id="match-context" aria-live="polite"></p>
 		<label for="import-metadata-provider">Metadata provider</label>
 		<select id="import-metadata-provider">
 			<option value="all">All metadata providers (uses each available provider's quota)</option>
@@ -50,7 +50,6 @@
 				<img src="{{url_base}}/static/img/search.svg" alt="">
 			</button>
 		</form>
-		<p id="bulk-match-count" aria-live="polite"></p>
 		<div class="search-results-container">
 			<table>
 				<thead><tr>
@@ -63,6 +62,14 @@
 	{% endset %}
 
 	{{ window(False, "cv-window", "Edit Metadata Match", edit_cv_content) }}
+	<dialog id="bulk-match-review" aria-labelledby="bulk-review-title" aria-describedby="bulk-review-detail">
+		<h2 id="bulk-review-title">Review bulk publication change</h2>
+		<p id="bulk-review-detail"></p>
+		<div class="bulk-review-actions">
+			<button id="bulk-review-cancel" type="button">Cancel</button>
+			<button id="bulk-review-apply" type="button">Apply publication</button>
+		</div>
+	</dialog>
 	<dialog id="import-cover-lightbox" aria-label="Publication cover preview">
 		<button id="import-cover-close" type="button" aria-label="Close cover preview">×</button>
 		<p id="import-cover-caption"></p>
@@ -126,26 +133,41 @@
 		<p id="matching-status" aria-live="polite"></p>
 		<button id="stop-matching" type="button" class="hidden">Stop matching</button>
 		<p id="import-error" role="alert"></p>
-		<div class="action-container">
-			<button class="cancel-button">Back</button>
-			<label>Import behaviour <select id="import-mode"><option value="keep">Keep in place</option><option value="move">Move and rename</option></select></label>
-			<button id="import-button" type="button">Import selected</button>
+		<div class="import-toolbar">
+			<div class="import-toolbar-summary" aria-live="polite">
+				<span id="import-selection-count"></span>
+				<span id="bulk-selection-count"></span>
+				<span id="loaded-count"></span>
+			</div>
+			<p class="import-selection-help">Import selection controls which loaded files are imported. It does not select files for bulk matching.</p>
+			<div class="import-toolbar-actions">
+				<div class="import-primary-actions">
+					<button class="cancel-button" type="button">Back</button>
+					<label>Import behaviour <select id="import-mode"><option value="keep">Keep in place</option><option value="move">Move and rename</option></select></label>
+					<button id="import-button" type="button">Import selected (0)</button>
+				</div>
+				<div class="import-bulk-actions">
+					<button id="open-bulk-match" type="button" disabled>Bulk match (0)</button>
+					<button id="clear-bulk-match" type="button" class="hidden">Clear bulk selection</button>
+				</div>
+			</div>
 		</div>
+		<p id="bulk-result-status" role="status" tabindex="-1"></p>
 		<label class="import-filter-label">Filter files <input id="import-filter" type="search" placeholder="Folder, filename, publication or status"></label>
 		<p id="rate-limit-banner" class="hidden">
 			Automatic ComicVine matching could not finish. Provider errors or rate limits do not hide local files; unmatched rows remain editable.
 		</p>
 		<div class="table-container icon-text-color">
 			<table aria-label="File list">
+				<colgroup><col class="import-col"><col class="file-col"><col class="publication-col"><col class="issue-col"><col class="status-col"></colgroup>
 				<thead><tr>
 					<th>
-						<label>
-							<input type="checkbox" id="selectall-input" aria-label="Select all entries for importing" checked>
+						<label class="import-header-select">Import
+							<input type="checkbox" id="selectall-input" aria-label="Select all loaded files for import" checked>
 						</label>
 					</th>
 					<th>File</th>
-					<th>Match</th>
-					<th>Action / bulk selection</th>
+					<th>Publication</th>
 					<th>Issue association</th>
 					<th>Status</th>
 				</tr></thead>

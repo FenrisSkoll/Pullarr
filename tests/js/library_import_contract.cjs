@@ -65,7 +65,7 @@ const finished = (async()=>{
     assert.ok(!fs.readFileSync('frontend/static/js/library_import.js','utf8').includes('/libraryimport/drafts'));
     const css=fs.readFileSync('frontend/static/css/library_import.css','utf8');
     assert.match(css,/overflow-x:\s*auto/);
-    assert.match(css,/min-width:\s*62rem/);
+    assert.match(css,/min-width:\s*47rem/);
     console.log('Direct Library Import choice, per-file result and narrow-table contract passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 module.exports={context,finished,first,second,submitted:()=>submitted};

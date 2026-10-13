@@ -12,6 +12,12 @@ Choose **Max folders scanned** before scanning: 20 through 1,000 or **All
 reports partial results if its independent traversal safety bound is reached.
 Optional ComicVine publication suggestions have a separate 20–500 eligible-folder
 budget and can be stopped without removing local results.
+Import checkboxes select only loaded files for **Import selected**. The separate
+**Match in bulk** checkboxes select files for **Bulk match** and start unchecked.
+Publication labels distinguish ComicVine suggestions, embedded file metadata and
+explicit manual choices. A bulk publication change asks for one review only when
+it replaces a different manual match, spans mixed current publications, or targets
+more than 25 files. Bulk matching never imports files or changes import selection.
 
 Choose the provider-qualified publication and exact issue or issues represented
 by each file. Suggested matches use local filename and ComicInfo evidence, but

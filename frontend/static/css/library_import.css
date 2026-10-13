@@ -92,7 +92,6 @@ main {
 
 #run-import-button,
 .cancel-button,
-.action-container button,
 #no-cv-window a {
 	min-width: 5rem;
 
@@ -110,7 +109,6 @@ main {
 
 #run-import-button:hover,
 .cancel-button:hover,
-.action-container button:hover,
 #no-cv-window h2:hover {
 	background-color: var(--hover-color);
 }
@@ -133,31 +131,48 @@ main {
 	text-align: center;
 }
 
-.action-container {
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	gap: 1rem;
-	flex-wrap: wrap;
-
-	padding: 1rem;
-}
+.import-toolbar { margin: .8rem 0; padding: .8rem 1rem; border: 1px solid var(--border-color);
+    border-radius: 6px; background: var(--foreground-color); }
+.import-toolbar-summary, .import-toolbar-actions, .import-primary-actions, .import-bulk-actions {
+    display: flex; align-items: center; gap: .55rem 1rem; flex-wrap: wrap; }
+.import-toolbar-summary { font-weight: 500; }
+.import-toolbar-summary span + span { border-left: 1px solid var(--border-color); padding-left: 1rem; }
+.import-selection-help { margin: .3rem 0 .7rem; font-size: .85rem; opacity: .85; }
+.import-toolbar-actions { justify-content: space-between; }
+.import-primary-actions label { white-space: nowrap; }
+.import-toolbar button, .publication-choice, #bulk-match-review button {
+    border: 1px solid var(--border-color); border-radius: 4px; padding: .35rem .65rem;
+    color: var(--text-color); background: var(--background-color); }
+.import-toolbar button:hover:not(:disabled), .publication-choice:hover, #bulk-match-review button:hover {
+    background: var(--hover-color); }
+.import-toolbar button:disabled { opacity: .65; cursor: not-allowed; }
+#import-button { border-color: var(--accent-color); }
+#bulk-result-status { margin: .4rem 0; }
+#bulk-result-status:empty { display: none; }
+#bulk-match-review { max-width: min(30rem, 92vw); border: 1px solid var(--border-color);
+    border-radius: 6px; background: var(--foreground-color); color: var(--text-color); }
+#bulk-match-review::backdrop { background: rgba(0, 0, 0, .7); }
+.bulk-review-actions { display: flex; justify-content: flex-end; gap: .6rem; }
+:where(.import-toolbar, .li-result, #bulk-match-review) :focus-visible {
+    outline: 2px solid var(--accent-color); outline-offset: 2px; }
 
 .table-container {
-	padding: 1rem;
+	padding: .3rem 0;
 	overflow-x: auto;
 }
 
 .table-container > table {
-	min-width: 62rem;
+	min-width: 47rem;
 	width: 100%;
 	table-layout: fixed;
 }
+.table-container col.import-col { width: 4.5rem; }
+.table-container col.file-col { width: 27%; }
+.table-container col.publication-col { width: 31%; }
+.table-container col.issue-col { width: 21%; }
 
-.table-container :where(td, th),
-.table-container label {
-	padding: .5rem 1rem;
-}
+.table-container :where(td, th) { padding: .5rem .6rem; vertical-align: top; }
+.table-container label { padding: .2rem; }
 
 .table-container th {
 	padding-left: 1rem;
@@ -175,44 +190,31 @@ main {
 	border-top: 1px solid var(--border-color);
 }
 
-.table-container :where(td, th):first-child {
-	width: 3rem;
-	padding: 0rem;
-}
-
-.li-result td:nth-child(2) {
-	cursor: pointer;
-	user-select: none;
-}
+.import-header-select { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; font-weight: 500; }
+.li-result td:first-child { text-align: center; }
 
 .li-result td a {
 	color: var(--accent-color);
 	user-select: none;
 }
 
-.li-result td:last-child {
-	width: 11rem;
-	user-select: none;
-}
-
-.li-result .file-column { width: 19rem; overflow-wrap: normal; word-break: normal; }
-.li-result .file-column details { max-width: 18rem; overflow-wrap: anywhere; word-break: normal; }
-.li-result .import-match { display: block; max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.li-result .publication-choice { display: block; max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-color); text-align: left; }
-.li-result .provider-link { display: block; margin-top: .3rem; }
-.li-result .bulk-target { display: block; white-space: nowrap; font-size: .8rem; }
-.li-result .issue-column { min-width: 18rem; overflow-wrap: normal; word-break: normal; }
-.li-result .import-status { overflow-wrap: break-word; word-break: normal; }
+.li-result .file-column, .li-result .match-column, .li-result .issue-column,
+.li-result .import-status { overflow-wrap: anywhere; }
+.li-result .file-column details { margin-top: .3rem; font-size: .8rem; }
+.li-result .file-column details p { margin: .3rem 0; }
+.publication-title { display: block; font-size: 1rem; font-weight: 500; line-height: 1.35; }
+.publication-meta { display: block; margin: .2rem 0; font-size: .82rem; opacity: .82; }
+.publication-actions { display: flex; align-items: center; gap: .35rem .65rem; flex-wrap: wrap; margin-top: .3rem; }
+.publication-choice { color: var(--accent-color); text-align: left; font-size: .85rem; }
+.provider-link { font-size: .85rem; }
+.bulk-target { display: inline-flex; align-items: center; gap: .35rem; margin-top: .4rem;
+    white-space: normal; font-size: .85rem; cursor: pointer; }
+.bulk-target input, .li-result .import-file-select { width: 1rem; height: 1rem; }
+.issue-column > span { display: block; line-height: 1.35; }
+.issue-column > button { margin: .35rem 0 0; }
+.li-result .import-status { font-size: .87rem; }
 .import-filter-label { display: block; max-width: 100%; }
 #import-filter { display: block; width: min(100%, 28rem); margin: .5rem 0; }
-
-.li-result button img {
-	height: 1.5rem;
-}
-
-.li-result.selected {
-	background-color: var(--border-color);
-}
 
 #cv-window .window-content {
 	justify-content: flex-start;
@@ -268,7 +270,7 @@ main {
 
 #cv-window[show-window] { width: min(92vw, 820px); max-height: 90dvh; }
 #cv-window .window-content { min-width: 0; }
-#bulk-match-count { font-size: .9rem; }
+#match-context { font-size: .9rem; margin: .2rem 0 .6rem; }
 
 .search-results-container th {
 	padding-left: 1rem;
@@ -334,8 +336,6 @@ main {
     #import-cover-image { max-width: calc(95vw - 2rem); max-height: calc(90dvh - 6rem); }
     #start-window table td { padding: .4rem; }
 }
-.issue-column { min-width: 18rem; vertical-align: top; }
-.issue-column > button { margin-left: .5rem; }
 .import-issue-editor { margin-top: .5rem; padding: .7rem; border: 1px solid currentColor; max-width: 32rem; }
 .import-issue-editor input[type="search"] { width: 100%; }
 .import-issue-list { max-height: 16rem; overflow: auto; margin: .5rem 0; }
@@ -343,3 +343,28 @@ main {
 .import-source-group th { text-align: left; padding: .7rem .4rem; font-weight: 600; }
 .import-plan-row { padding: .5rem; border-top: 1px solid currentColor; overflow-wrap: anywhere; }
 .import-publication-cover { width: 3rem; height: 4rem; object-fit: contain; vertical-align: middle; margin-right: .5rem; }
+@media (max-width: 600px) {
+    .import-toolbar-summary span + span { border-left: 0; padding-left: 0; }
+    .import-toolbar-summary { display: grid; gap: .15rem; }
+    .import-primary-actions, .import-bulk-actions { width: 100%; }
+    .table-container { overflow-x: visible; }
+    .table-container > table, .table-container tbody { display: block; min-width: 0; }
+    .table-container thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap; }
+    .li-result { display: grid; grid-template-columns: 3rem minmax(0, 1fr);
+        grid-template-areas: 'import file' 'publication publication' 'issue issue' 'status status';
+        margin: .6rem 0; border: 1px solid var(--border-color); border-radius: 6px; }
+    .li-result td { display: block; width: auto; border: 0; min-width: 0; }
+    .li-result td:first-child { grid-area: import; padding-top: .75rem; }
+    .li-result .file-column { grid-area: file; font-weight: 500; }
+    .li-result .match-column { grid-area: publication; border-top: 1px solid var(--border-color); }
+    .li-result .issue-column { grid-area: issue; border-top: 1px solid var(--border-color); }
+    .li-result .import-status { grid-area: status; border-top: 1px solid var(--border-color); }
+    .li-result .import-status:empty { display: none; }
+    .li-result .match-column::before, .li-result .issue-column::before,
+    .li-result .import-status::before { display: block; margin-bottom: .2rem; font-size: .78rem;
+        font-weight: 500; opacity: .8; }
+    .li-result .match-column::before { content: 'Publication'; }
+    .li-result .issue-column::before { content: 'Issue association'; }
+    .li-result .import-status::before { content: 'Status'; }
+}
