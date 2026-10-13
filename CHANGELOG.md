@@ -1,5 +1,16 @@
 # Release notes
 
+## 1.5.6 — Simplified Library Import
+
+- Replaced the complex import workflow with direct Keep in place
+  and Move and rename operations.
+- Added explicit publication and issue matching during import.
+- Removed the Maintenance interface and automatic archive recovery.
+- Improved volume deletion and legacy reservation handling.
+- Added Owned, Missing, Upcoming and Unknown issue tracking.
+- Simplified import UI and removed mandatory draft/review stages.
+- Database schema remains 73.
+
 ## 1.5.5 — Unraid Library Import relocation recovery
 
 - When an Unraid user share rejects the exclusive rename used by a reviewed
