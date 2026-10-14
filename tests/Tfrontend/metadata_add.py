@@ -65,6 +65,7 @@ class AddVolumeMetadata(LibraryAddHarness, unittest.TestCase):
             'folder': str(self.root / 'Example Hero' / 'Volume 02 (2021)'),
             'root_folder': 1, 'volume_folder': join('Example Hero', 'Volume 02 (2021)'),
             'issue_count': 1, 'issues_downloaded': 0, 'total_size': None,
+            'cover_source': 'provider', 'provider_cover_available': True,
             'issues': [dict(issue_result(), id=1, volume_id=1, monitored=True, files=[])],
             'general_files': []
         }})

@@ -41,7 +41,7 @@ class DownloadStore:
         self.db.execute('PRAGMA foreign_keys=ON')
         self.db.execute('PRAGMA synchronous=FULL')
         version = self.db.execute("SELECT value FROM config WHERE key='database_version'").fetchone()
-        if not version or int(version[0]) not in (56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73):
+        if not version or int(version[0]) not in (56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74):
             self.db.close()
             raise DownloadFailure(E.CONFIGURATION)
 

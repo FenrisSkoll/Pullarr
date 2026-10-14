@@ -39,6 +39,34 @@
 	width: clamp(8rem, 16vw, 13.5rem);
 }
 
+.volume-cover-actions {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: .35rem;
+	font-size: .9rem;
+	max-width: 24rem;
+}
+
+.volume-cover-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .5rem;
+}
+
+.volume-cover-buttons button {
+	min-height: 2.25rem;
+	padding: .35rem .65rem;
+}
+
+#volume-cover-source,
+.volume-cover-actions small {
+	color: var(--muted);
+}
+
+.volume-cover-actions small {line-height: 1.35;}
+#volume-cover-feedback {margin: 0; overflow-wrap: anywhere;}
+
 .volume-info-container {
 	display: flex;
 	flex-direction: column;
@@ -481,7 +509,6 @@ tbody .issue-title:hover {
 }
 
 @media (max-width: 440px) {
-	.volume-info > img {
-		display: none;
-	}
+	.volume-info {flex-direction: column;}
+	.volume-info > img {width: min(42vw, 9rem); height: auto;}
 }

@@ -63,9 +63,9 @@ class JobStore:
         version = self.db.execute("""SELECT value,EXISTS(SELECT 1 FROM sqlite_master
             WHERE type='table' AND name='quarantined_files')
             FROM config WHERE key='database_version'""").fetchone()
-        if version is None or int(version[0]) not in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73):
+        if version is None or int(version[0]) not in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74):
             self.db.close()
-            raise OrganizationError(ExecutionCode.UNSUPPORTED, 'Supported organizer schema required (54–73)')
+            raise OrganizationError(ExecutionCode.UNSUPPORTED, 'Supported organizer schema required (54–74)')
         self.has_quarantine_state = bool(version[1])
 
     def close(self) -> None:

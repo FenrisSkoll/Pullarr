@@ -7,8 +7,8 @@ from os import remove
 from os.path import basename, splitext
 from typing import Any, Dict, List, Tuple, Union
 
-from flask import (Blueprint, after_this_request,
-                   current_app, request, send_file)
+from flask import (Blueprint, after_this_request, current_app,
+                   redirect, request, send_file, url_for)
 
 from backend.base.custom_exceptions import (InvalidDatabaseFile,
                                             InvalidKeyValue, KeyNotFound)
@@ -1901,10 +1901,54 @@ def api_volume(id: int):
 @auth
 def api_volume_cover(id: int):
     cover = Library.get_volume(id).get_cover()
-    return send_file(
-        cover,
-        mimetype='image/jpeg'
-    ), 200
+    if cover is None:
+        return redirect(url_for('static', filename='img/cover-placeholder.svg')), 302
+    response = send_file(cover, mimetype='image/jpeg')
+    response.headers['Cache-Control'] = 'no-cache'
+    return response, 200
+
+
+@api.route('/volumes/<int:id>/manual-cover', methods=['POST', 'DELETE'])
+@error_handler
+@auth
+def api_manual_volume_cover(id: int):
+    from backend.features.manual_covers import (MAX_INPUT,
+                                                CoverValidationError,
+                                                normalize_cover,
+                                                remove_manual_cover,
+                                                save_manual_cover)
+
+    volume = Library.get_volume(id)
+    cursor = get_db()
+    if request.method == 'DELETE':
+        try:
+            remove_manual_cover(cursor, id)
+            cursor.connection.commit()
+        except BaseException:
+            cursor.connection.rollback()
+            raise
+        source, provider_available = volume.get_cover_status()
+        return return_api({'cover_source': source, 'provider_cover_available': provider_available})
+    if request.mimetype != 'multipart/form-data':
+        return return_api({'code': 'missing_cover_file'}, 'ManualCover', 400)
+    if request.content_length is None or request.content_length > MAX_INPUT + 65536:
+        return return_api({'code': 'cover_too_large'}, 'ManualCover', 413)
+    if 'file' not in request.files:
+        return return_api({'code': 'missing_cover_file'}, 'ManualCover', 400)
+    try:
+        raw = request.files['file'].stream.read(MAX_INPUT + 1)
+        cover = normalize_cover(raw)
+    except CoverValidationError as error:
+        status = 413 if str(error) in {'cover_too_large', 'cover_dimensions_exceeded'} else 400
+        return return_api({'code': str(error)}, 'ManualCover', status)
+    try:
+        digest = save_manual_cover(cursor, id, cover)
+        cursor.connection.commit()
+    except BaseException:
+        cursor.connection.rollback()
+        raise
+    return return_api({'cover_source': 'manual', 'cover_revision': digest,
+                       'provider_cover_available': volume.get_cover_status()[1]})
 
 
 @api.route('/issues/<int:id>', methods=['GET', 'PUT'])

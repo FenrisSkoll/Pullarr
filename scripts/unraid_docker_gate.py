@@ -94,7 +94,7 @@ def main(image, template=None, browser=False):
             if json.loads(docker('inspect',name))[0]['State']['Health']['Status']=='healthy': break
             time.sleep(.5)
         else: raise AssertionError('Healthcheck did not become healthy')
-        probe = "import sqlite3;from pathlib import Path;d=sqlite3.connect('/app/db/Kapowarr.db');assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==73;assert d.execute('SELECT folder FROM root_folders').fetchone()[0].startswith('/data/');assert all((p.stat().st_uid,p.stat().st_gid)==(99,100) for root in ('/app/db','/app/logs','/app/temp_downloads') for p in Path(root).rglob('*') if p.is_file());print('schema73 ownership integrity PASS')"
+        probe = "import sqlite3;from pathlib import Path;d=sqlite3.connect('/app/db/Kapowarr.db');assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==74;assert d.execute('SELECT folder FROM root_folders').fetchone()[0].startswith('/data/');assert all((p.stat().st_uid,p.stat().st_gid)==(99,100) for root in ('/app/db','/app/logs','/app/temp_downloads') for p in Path(root).rglob('*') if p.is_file());print('schema74 ownership integrity PASS')"
         docker('exec','--user','99:100',name,'python','-c',probe)
         docker('stop','--time','45',name)
         assert json.loads(docker('inspect',name))[0]['State']['ExitCode']==0
@@ -121,7 +121,7 @@ def main(image, template=None, browser=False):
         assert image_info['Architecture']=='amd64' and image_info['Os']=='linux'
         print(json.dumps(dict(image=image_info['Id'],architecture='linux/amd64',bytes=image_info['Size'],
             template_derived=True,uid=99,gid=100,bridge=True,privileged=False,fixtures=fixture,
-            restart=True,recreation=True,migration='71-to-73',health='healthy',browser_errors=errors,
+            restart=True,recreation=True,migration='71-to-74',health='healthy',browser_errors=errors,
             image_layer_files=audit_layers(image))))
     finally:
         subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

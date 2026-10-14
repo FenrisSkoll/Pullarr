@@ -413,6 +413,16 @@
 							<h2></h2>
 							<button id="volume-monitor"></button>
 						</div>
+						<div class="volume-cover-actions" aria-label="Cover artwork">
+							<span id="volume-cover-source">No cover available</span>
+							<div class="volume-cover-buttons">
+								<button id="upload-volume-cover" type="button">Upload cover</button>
+								<button id="remove-volume-cover" type="button" hidden>Remove manual cover</button>
+							</div>
+							<small id="volume-cover-note" hidden></small>
+							<input id="volume-cover-file" type="file" accept="image/jpeg,image/png,image/webp" hidden aria-label="Choose cover image">
+							<p id="volume-cover-feedback" role="status" aria-live="polite"></p>
+						</div>
 						<section id="volume-tags" aria-label="Tags"></section>
 						<p id="volume-path" aria-label="Volume folder path"></p>
 						<section id="volume-description" class="description" aria-label="Description"></section>

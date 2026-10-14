@@ -154,6 +154,17 @@ class SwitchApplyTests(TestCase):
                     finally:
                         fixture.doCleanups()
 
+    def test_manual_cover_stays_with_local_volume_on_switch(self):
+        self.source()
+        self.db.execute('''INSERT INTO manual_volume_covers(volume_id,cover,digest,updated_at)
+            VALUES(1,?,?,1)''', (b'user-artwork', 'fixture-digest'))
+        self.db.commit()
+        self.apply(self.review(remote('gcd')))
+        self.assertEqual(self.db.execute('SELECT metadata_provider FROM volumes WHERE id=1').fetchone()[0], 'gcd')
+        self.assertEqual(self.db.execute('SELECT cover FROM manual_volume_covers WHERE volume_id=1').fetchone()[0],
+                         b'user-artwork')
+        self.assert_integrity()
+
     def test_reverse_pairs_and_aba(self):
         for source, target in (('comicvine', 'metron'), ('comicvine', 'gcd'), ('metron', 'gcd')):
             with self.subTest(source=source, target=target):

@@ -15,10 +15,11 @@ permission change is reported on that file's import result. See the
 [Unraid permission acceptance steps](unraid.md#library-import-permission-check)
 for setgid, ACL and SMB verification with copied test media.
 
-Historic Library Import drafts and organization journals remain in schema 73
-for compatibility. New local imports do not create drafts or organization jobs.
-Back up the database and its WAL/SHM files before upgrading. An older application
-does not understand schema 73; rollback requires the matching pre-upgrade backup.
+Historic Library Import drafts and organization journals remain for compatibility.
+New local imports do not create drafts or organization jobs. Schema 74 adds a
+separate manual volume-cover table; provider artwork stays in its original table.
+Back up the database and its WAL/SHM files before upgrading. A schema-73 binary
+cannot open a schema-74 database; rollback requires the matching pre-upgrade backup.
 
 ## Shared download mounts
 

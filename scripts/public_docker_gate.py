@@ -105,7 +105,7 @@ def main(image, browser=False):
                 chromium.close()
             assert requests.get(origin+'/maintenance', timeout=5).status_code == 404
         assert not errors, errors
-        probe = "import sqlite3;d=sqlite3.connect('file:/app/db/Kapowarr.db?mode=ro',uri=True);assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==73;print('schema73 integrity/FKs PASS')"
+        probe = "import sqlite3;d=sqlite3.connect('file:/app/db/Kapowarr.db?mode=ro',uri=True);assert d.execute('PRAGMA integrity_check').fetchone()[0]=='ok';assert not d.execute('PRAGMA foreign_key_check').fetchall();assert int(d.execute(\"SELECT value FROM config WHERE key='database_version'\").fetchone()[0])==74;print('schema74 integrity/FKs PASS')"
         docker('exec',identifier,'python','-c',probe)
         # Immutable synthetic fixture input; no library mount or ownership writes.
         docker('cp',str(ROOT/'tests/fixtures/archives'),identifier+':/tmp/public-fixtures')
@@ -113,7 +113,7 @@ def main(image, browser=False):
         logs = docker('logs',identifier)
         assert key not in logs and 'Traceback' not in logs and ' ERROR' not in logs
         layers = audit_layers(image)
-        print(json.dumps(dict(image=image, schema=73, restart=True, recreation=True, browser_errors=len(errors),
+        print(json.dumps(dict(image=image, schema=74, restart=True, recreation=True, browser_errors=len(errors),
                               archive_smoke=archive, app_layer_files_checked=layers, clean_layers=True)))
     finally:
         subprocess.run(['docker','rm','-f',identifier],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

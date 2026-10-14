@@ -27,6 +27,9 @@ database and comics before upgrades or filesystem operations.
   registers in place or moves and renames without a draft or extra approval.
   Original CBR/CBZ formats and embedded metadata are preserved. See
   [workflow details](docs/reliability-workflows.md).
+- Existing publications can use a manually uploaded JPEG, PNG or WebP cover.
+  Pullarr keeps the provider cover separately so removing the override restores
+  the latest provider artwork when available.
 
 Use sources only for content you are entitled to obtain. Provider and indexer
 availability, terms and rate limits are outside Pullarr's control.
@@ -57,6 +60,10 @@ Regenerate is separate. Do not expose Pullarr directly to the Internet.
 Read [configuration and deployment](docs/deployment.md) for bind mounts,
 download visibility, permissions, backups and upgrades. Do not run two Pullarr
 processes against the same database.
+
+The manual-cover upgrade adds database schema 74. Back up the database before
+upgrading normally; an older schema-73 binary cannot open the upgraded database.
+No library reset or reimport is required.
 
 For Unraid storage, UID/GID and hardlink guidance, see [Unraid deployment](docs/unraid.md).
 Community Applications availability remains pending official Validate/Scan and review.

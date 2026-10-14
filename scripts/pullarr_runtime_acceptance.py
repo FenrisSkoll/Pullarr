@@ -62,7 +62,7 @@ def run(version):
                     else:raise AssertionError('Startup timeout')
                     with closing(sqlite3.connect(database)) as db:
                         db.execute('PRAGMA foreign_keys=ON')
-                        assert db.execute("SELECT value FROM config WHERE key='database_version'").fetchone()[0]==73
+                        assert db.execute("SELECT value FROM config WHERE key='database_version'").fetchone()[0]==74
                         assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
                         assert not db.execute('PRAGMA foreign_key_check').fetchall()
                         if attempt==0:
@@ -132,7 +132,7 @@ def run(version):
         with closing(sqlite3.connect(database)) as db:
             assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
             assert not db.execute('PRAGMA foreign_key_check').fetchall()
-        print(json.dumps(dict(start=version,schema=73,reopen=True,acquisition='missing/upgrade/false-HD',integrity='ok',errors=0)),flush=True)
+        print(json.dumps(dict(start=version,schema=74,reopen=True,acquisition='missing/upgrade/false-HD',integrity='ok',errors=0)),flush=True)
 
 
 if __name__=='__main__':

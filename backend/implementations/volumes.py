@@ -364,6 +364,8 @@ class Volume:
                                         if volume_info['folder'] else '')
         del volume_info['root_folder_path']
 
+        volume_info['cover_source'], volume_info['provider_cover_available'] = self.get_cover_status()
+
         if rich_issues:
             from backend.implementations.issue_transport import rich_issue_rows
             volume_info['issues'] = rich_issue_rows(self.id)
@@ -381,17 +383,27 @@ class Volume:
     def vd(self) -> VolumeData:
         return self.get_data()
 
-    def get_cover(self) -> BytesIO:
+    def get_cover_status(self) -> Tuple[str, bool]:
+        row = get_db().execute('''SELECT
+            EXISTS(SELECT 1 FROM manual_volume_covers WHERE volume_id=?),
+            EXISTS(SELECT 1 FROM volumes_covers WHERE volume_id=? AND length(cover)>0)''',
+            (self.id, self.id)).fetchone()
+        return ('manual' if row[0] else 'provider' if row[1] else 'missing', bool(row[1]))
+
+    def get_cover_source(self) -> str:
+        return self.get_cover_status()[0]
+
+    def get_cover(self) -> Union[BytesIO, None]:
         """Get the cover of the volume.
 
         Returns:
             BytesIO: The cover.
         """
-        cover = get_db().execute(
-            "SELECT cover FROM volumes_covers WHERE volume_id = ? LIMIT 1",
-            (self.id,)
-        ).fetchone()[0]
-        return BytesIO(cover)
+        cover = get_db().execute('''SELECT COALESCE(
+            (SELECT cover FROM manual_volume_covers WHERE volume_id=?),
+            (SELECT cover FROM volumes_covers WHERE volume_id=?))''',
+            (self.id, self.id)).fetchone()[0]
+        return BytesIO(cover) if cover else None
 
     def get_ending_year(self) -> Union[int, None]:
         """Get the year of the last issue that has a release date.

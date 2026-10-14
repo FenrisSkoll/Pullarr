@@ -4,7 +4,7 @@ import sqlite3
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.internals.db import DB_SCHEMA, SCHEMA_71
+from backend.internals.db import SCHEMA_71, SCHEMA_73
 from backend.internals.db_migration import _migrate_import_drafts
 from backend.internals.import_draft_schema import STATEMENTS
 from backend.internals.torrent_schema import SCHEMA as TORRENT_SCHEMA
@@ -24,7 +24,7 @@ class ImportDraftMigrationTests(TestCase):
         old = self.database()
         old.execute("INSERT INTO root_folders VALUES(1,'/synthetic/root')")
         old.commit()
-        fresh = self.database(DB_SCHEMA)
+        fresh = self.database(SCHEMA_73)
         with patch('backend.internals.db_migration.get_db', side_effect=old.cursor):
             _migrate_import_drafts()
         sql = "SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"

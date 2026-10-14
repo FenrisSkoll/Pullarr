@@ -22,6 +22,14 @@ const ViewEls = {
 		description: document.querySelector('#volume-description'),
 		mobile_description: document.querySelector('#volume-description-mobile')
 	},
+	cover: {
+		source: document.querySelector('#volume-cover-source'),
+		upload: document.querySelector('#upload-volume-cover'),
+		remove: document.querySelector('#remove-volume-cover'),
+		note: document.querySelector('#volume-cover-note'),
+		file: document.querySelector('#volume-cover-file'),
+		feedback: document.querySelector('#volume-cover-feedback')
+	},
 	vol_edit: {
 		monitor: document.querySelector('#monitored-input'),
 		monitor_new_issues: document.querySelector('#monitor-issues-input'),
@@ -175,6 +183,75 @@ function fillTable(issues, api_key) {
 	}
 };
 
+function setCoverSource(source, providerAvailable=false) {
+	ViewEls.cover.source.textContent = ({manual:'Manual cover',provider:'Provider cover',missing:'No cover available'})[source] || 'No cover available';
+	ViewEls.cover.upload.textContent = source === 'manual' ? 'Replace cover' : 'Upload cover';
+	ViewEls.cover.remove.hidden = source !== 'manual';
+	ViewEls.cover.note.hidden = source !== 'manual';
+	ViewEls.cover.note.textContent = source === 'manual' ? (providerAvailable
+		? 'Removing this cover restores provider artwork.'
+		: 'Removing this cover will show the no-cover placeholder.') : '';
+}
+
+function setupManualCover(api_key) {
+	const controls = ViewEls.cover;
+	const updateImage = revision => {
+		delete ViewEls.vol_data.cover.dataset.fallback;
+		ViewEls.vol_data.cover.src = `${url_base}/api/volumes/${volume_id}/cover?api_key=${api_key}&revision=${encodeURIComponent(revision)}`;
+	};
+	const busy = value => {
+		controls.upload.disabled = value;
+		controls.remove.disabled = value;
+	};
+	const message = async response => {
+		const code = (await response.json().catch(() => ({})))?.result?.code;
+		return ({empty_cover:'Choose an image file.',cover_too_large:'Cover exceeds 10 MiB.',
+			cover_dimensions_exceeded:'Cover dimensions are too large.',
+			cover_output_too_large:'The processed cover is too large.',
+			unsupported_cover_format:'Choose a single JPEG, PNG or WebP image.',
+			invalid_cover_image:'The image could not be read.',
+			missing_cover_file:'Choose an image file.'})[code] || 'Cover could not be updated.';
+	};
+	controls.upload.onclick = () => controls.file.click();
+	controls.file.onchange = async () => {
+		const file = controls.file.files?.[0];
+		if (!file) return;
+		busy(true);
+		controls.feedback.textContent = 'Uploading cover…';
+		try {
+			const body = new FormData();
+			body.append('file', file);
+			const response = await sendAPI('POST', `/volumes/${volume_id}/manual-cover`, api_key, {}, body);
+			const result = (await response.json()).result;
+			setCoverSource(result.cover_source, result.provider_cover_available);
+			updateImage(result.cover_revision);
+			controls.feedback.textContent = 'Cover updated.';
+		} catch (error) {
+			controls.feedback.textContent = error?.json ? await message(error) : 'Cover could not be updated.';
+		} finally {
+			controls.file.value = '';
+			busy(false);
+			controls.upload.focus();
+		}
+	};
+	controls.remove.onclick = async () => {
+		busy(true);
+		controls.feedback.textContent = 'Removing manual cover…';
+		try {
+			const response = await sendAPI('DELETE', `/volumes/${volume_id}/manual-cover`, api_key);
+			const result = (await response.json()).result;
+			setCoverSource(result.cover_source, result.provider_cover_available);
+			updateImage(Date.now());
+			controls.feedback.textContent = 'Manual cover removed.';
+		} catch (error) {
+			controls.feedback.textContent = 'Manual cover could not be removed.';
+		} finally {
+			busy(false);
+			(controls.remove.hidden ? controls.upload : controls.remove).focus();
+		}
+	};
+}
+
 function fillPage(data, api_key) {
 	const switchLink = document.getElementById('provider-switch-link');
 	if (switchLink) {
@@ -195,6 +272,7 @@ function fillPage(data, api_key) {
 
 	// Cover
 	ViewEls.vol_data.cover.src = `${url_base}/api/volumes/${data.id}/cover?api_key=${api_key}`;
+	setCoverSource(data.cover_source || 'missing', data.provider_cover_available);
 
 	// Monitored state
 	ViewEls.vol_edit.monitor_new_issues.value = data.monitor_new_issues;
@@ -954,6 +1032,7 @@ function showInfoWindow(window) {
 
 usingApiKey()
 .then(api_key => {
+	setupManualCover(api_key);
 	ClassificationDetails.setup(volume_id, api_key);
 	fetchAPI(`/volumes/${volume_id}`, api_key)
 	.then(json => fillPage(json.result, api_key))

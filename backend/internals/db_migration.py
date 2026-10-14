@@ -1881,3 +1881,20 @@ def _migrate_import_drafts() -> None:
         cursor.execute('ROLLBACK TO import_drafts_73')
         cursor.execute('RELEASE import_drafts_73')
         raise
+
+
+@DatabaseMigrationHandler.register_handler(73)
+def _migrate_manual_volume_covers() -> None:
+    """Add independent, cascade-owned manual artwork without touching provider bytes."""
+    from backend.internals.db import MANUAL_COVER_SCHEMA
+    cursor = get_db()
+    cursor.execute('SAVEPOINT manual_covers_74')
+    try:
+        cursor.execute(MANUAL_COVER_SCHEMA.strip())
+        if cursor.execute('PRAGMA foreign_key_check').fetchone() is not None:
+            raise RuntimeError('Manual cover foreign key violation')
+        cursor.execute('RELEASE manual_covers_74')
+    except BaseException:
+        cursor.execute('ROLLBACK TO manual_covers_74')
+        cursor.execute('RELEASE manual_covers_74')
+        raise
