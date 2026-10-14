@@ -1,5 +1,42 @@
 # Release notes
 
+## 1.5.11 — GCD Import Fixes & Manual Covers
+
+### GCD Library Import
+
+- Fixed GCD issue catalogues reporting zero loaded issues
+  despite the provider reporting available issues.
+- Use genuine provider-qualified issue identities from
+  GCD's snapshot architecture.
+- Preserve exact issue numbering, including unusual
+  issue labels and variant information.
+- Restore per-file issue selection and association for
+  GCD-managed publications.
+- Preserve safe handling of ambiguous volume numbering.
+- Keep existing ComicVine and Metron import behaviour.
+
+### Manual Cover Artwork
+
+- Added manual cover upload, replacement and removal
+  directly from the volume page.
+- Support JPEG, PNG and WebP uploads.
+- Validate and normalize uploaded artwork into bounded
+  JPEG cover images.
+- Display manually uploaded covers throughout Pullarr.
+- Preserve original provider artwork for later restoration.
+- Prevent metadata refreshes from overwriting manual covers.
+- Add a clear manual/provider cover source indicator.
+- Update the displayed cover immediately after changes.
+
+### Database & Compatibility
+
+- Added manual_volume_covers with cascade cleanup.
+- Database schema upgraded from 73 to 74.
+- Existing provider artwork and comic files are preserved.
+- Existing Direct Import, Keep in place and Move and
+  rename workflows remain unchanged.
+- Database backup required before upgrading.
+
 ## 1.5.10 — Continuous Library & Import Discovery
 
 - Removed visible pagination from the Library.
