@@ -1,5 +1,24 @@
 # Release notes
 
+## 1.5.10 — Continuous Library & Import Discovery
+
+- Removed visible pagination from the Library.
+- Added continuous loading of imported publications in bounded
+  100-item batches for Posters and Table views.
+- Preserved Library search, sorting, filtering and cover artwork.
+- Improved loading progress, partial-failure handling and retry.
+- Kept mass editing limited to explicitly checked publications.
+- Changed the Library Import scan limit to count unregistered
+  CBR/CBZ archives rather than folders.
+- Registered files no longer consume the import scan allowance.
+- Scanning continues across eligible folders until the requested
+  number of unregistered archives is found or the scope is exhausted.
+- Subsequent scans discover the next available unregistered files.
+- Preserved the existing legacy folder_limit API compatibility.
+- Preserved publication matching, issue associations, Keep in place,
+  Move and rename, and the existing Direct Import engine.
+- Database schema remains 73; no migration required.
+
 ## 1.5.9 — Context-Aware Publication Search
 
 - Automatically prefill publication searches from local comic
