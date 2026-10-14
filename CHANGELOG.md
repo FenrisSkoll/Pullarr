@@ -1,5 +1,21 @@
 # Release notes
 
+## 1.5.9 — Context-Aware Publication Search
+
+- Automatically prefill publication searches from local comic
+  filenames and metadata evidence.
+- Preserve meaningful title numbers and edition wording while
+  excluding issue numbering and unnecessary filename suffixes.
+- Display the publication year as additional matching context.
+- Support common-title prefill for bulk publication matching.
+- Leave searches blank when bulk selections contain mixed titles.
+- Clear stale search results when opening the metadata selector.
+- Focus and select the suggested search text for easy editing.
+- Keep provider searches manual to avoid unnecessary API requests.
+- Preserve existing metadata search, cover artwork and lightbox.
+- Keep Direct Import behaviour unchanged.
+- Database schema remains 73; no migration required.
+
 ## 1.5.8 — Library Import UX Refinements
 
 - Redesigned Library Import with a cleaner five-column layout.
