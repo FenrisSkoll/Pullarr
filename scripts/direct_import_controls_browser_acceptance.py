@@ -80,19 +80,22 @@ def main():
 
                 def scan(route):
                     params = parse_qs(urlsplit(route.request.url).query)
-                    limit = int(params['folder_limit'][0])
+                    limit = int(params['max_unregistered'][0])
                     offset = int(params.get('offset', ['0'])[0])
                     calls['scans'].append(dict(limit=limit, offset=offset,
                         filter=params.get('folder_filter', [''])[0]))
-                    selected = (search_files if calls['search_only'] else
-                        embedded_files if calls['embedded_only'] else files) if limit >= 20 else []
+                    available = search_files if calls['search_only'] else \
+                        embedded_files if calls['embedded_only'] else files
+                    selected = available[:limit]
                     chunk = selected[offset:offset+100]
-                    counts = dict(scanned_folders=min(limit, 905), eligible_folders=905,
-                        not_yet_scanned_folders=max(0, 905-limit), discovered=len(selected),
+                    counts = dict(scanned_folders=905, eligible_folders=905,
+                        not_yet_scanned_folders=0, discovered=len(selected),
+                        total_unregistered=len(available), more_unregistered=len(available)>limit,
                         already_managed=0, limited=False)
                     route.fulfill(json=dict(result=dict(items=chunk, counts=counts,
                         next_offset=offset+len(chunk) if offset+len(chunk)<len(selected) else None,
-                        enumeration_complete=limit>=905)))
+                        next_after=chunk[-1]['filepath'] if offset+len(chunk)<len(selected) else None,
+                        enumeration_complete=limit>=len(available))))
 
                 def suggestions(route):
                     paths = route.request.post_data_json['files']
@@ -158,12 +161,12 @@ def main():
                     route.fulfill(body='provider', content_type='text/plain'))
                 page.goto(origin + '/library-import')
                 page.locator('#auto-match-input').uncheck()
-                page.locator('#scan-folder-limit').select_option('1000')
+                page.locator('#scan-file-limit').select_option('1000')
                 page.locator('#run-import-button').click()
                 rows = page.locator('.proposal-list .li-result')
                 expect(rows).to_have_count(100)
                 assert calls['scans'][0]['limit'] == 1000
-                expect(page.locator('#scan-summary')).to_contain_text('More result pages available')
+                expect(page.locator('#scan-summary')).to_contain_text('More selected result pages available')
                 expect(page.locator('#loaded-count')).to_have_text('100 loaded of 215 discovered')
                 expect(page.locator('#import-selection-count')).to_have_text('100 selected for import')
                 assert page.locator('.table-container thead th').all_inner_texts() == \
@@ -173,7 +176,7 @@ def main():
                 expect(rows).to_have_count(200)
                 page.locator('#import-next-page').click()
                 expect(rows).to_have_count(215)
-                expect(page.locator('#scan-summary')).to_contain_text('All result pages shown')
+                expect(page.locator('#scan-summary')).to_contain_text('All selected result pages shown')
                 expect(page.locator('#loaded-count')).to_have_text('215 loaded of 215 discovered')
                 assert len(set(row['filepath'] for row in files)) == 215
 
@@ -378,7 +381,7 @@ def main():
                 page.locator('#match-folder-limit').select_option('20')
                 page.locator('#run-import-button').click()
                 expect(page.locator('#matching-status')).to_contain_text('Matching complete')
-                assert any(call['limit'] == 20 for call in calls['scans'])
+                assert all(call['limit'] == 1000 for call in calls['scans'])
                 assert all(len(batch) <= 10 for batch in calls['suggestions'])
                 page.locator('#import-next-page').click()
                 expect(page.locator('.proposal-list .li-result')).to_have_count(200)

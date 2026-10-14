@@ -151,12 +151,13 @@
                     <button data-action="search">Auto Search</button>
 				</div>
 			</section>
+			<p id="table-scroll-hint">Scroll the table sideways to see all columns.</p>
 
 			<table>
 				<thead>
 					<tr>
 						<th>
-							<input type="checkbox" id="selectall-input" aria-label="Select all volumes for mass edit">
+							<input type="checkbox" id="selectall-input" aria-label="Select all loaded publications for mass edit" disabled>
 						</th>
 						<th>Volume Title</th>
 						<th>Year</th>
@@ -211,13 +212,12 @@
 			</table>
 		</footer>
 	</div>
-	<nav class="page-turner" aria-label="Library pages">
-		<button id="library-previous" disabled>Previous</button>
-		<span id="library-page" role="status">Page 1 · up to 50 volumes</span>
-		<button id="library-next" disabled>Next</button>
-		<button id="library-retry">Refresh page</button>
-	</nav>
+	<div class="library-load-controls">
+		<span id="library-status" role="status">Loading publications…</span>
+		<button id="library-resume" type="button" hidden>Retry loading</button>
+		<button id="library-retry" type="button">Refresh</button>
+	</div>
 	<p id="library-error" role="alert"></p>
-	<p>Mass edit selects volumes on the current page only.</p>
+	<p id="massedit-selection" role="status">Mass edit is available when all matching publications finish loading.</p>
 </main>
 {% endblock main %}

@@ -1065,7 +1065,10 @@ def api_library_import_files():
             offset=int(request.args.get('offset', '0')),
             page_size=int(request.args.get('page_size', '100')),
             folder_limit=int(request.args.get('folder_limit', '50000')),
-            folder_filter=request.args.get('folder_filter') or None))
+            folder_filter=request.args.get('folder_filter') or None,
+            max_unregistered=int(request.args['max_unregistered'])
+                if 'max_unregistered' in request.args else None,
+            after=request.args.get('after') or None))
     except (ValueError, OSError) as error:
         code = str(error) if isinstance(error, ValueError) else 'scan_unavailable'
         if code not in {'invalid_scan_parameters', 'unsafe_folder_filter', 'scan_unavailable'}:

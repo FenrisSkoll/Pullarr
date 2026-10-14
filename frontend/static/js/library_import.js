@@ -2,7 +2,7 @@
 const importRows = new Map(), importCatalogues = new Map(), importProposals = new Map();
 const importEvidence = new Map(), importCatalogueQueue = new Map(), importSuggestions = new Map();
 const importRowsByPath = new Map();
-let importKey, importOffset, importSearchContext, importGeneration = 0, importMatchGeneration = 0;
+let importKey, importOffset, importAfter, importSearchContext, importGeneration = 0, importMatchGeneration = 0;
 let importSearchGeneration = 0, importArtwork, importCoverObserver, importScope, importPageLoading = false;
 let importDiscovered = 0, importBulkApplying = false;
 let importAutoCatalogueQueue = Promise.resolve();
@@ -264,13 +264,13 @@ async function scanImport(reset=true) {
     const generation = reset ? ++importGeneration : importGeneration;
     if (reset) {
         ++importMatchGeneration;
-        importRows.clear(); importRowsByPath.clear(); importOffset = 0;
+        importRows.clear(); importRowsByPath.clear(); importOffset = 0; importAfter = null;
         importSuggestions.clear(); importCatalogues.clear(); importProposals.clear();
         importEvidence.clear(); importCatalogueQueue.clear();
         importAutoCatalogueQueue = Promise.resolve();
         importSearchContext = null; importDiscovered = 0;
         const folder = imp('folder-filter-input').value.trim();
-        importScope = {folder_limit:Number(imp('scan-folder-limit').value)};
+        importScope = {max_unregistered:Number(imp('scan-file-limit').value)};
         if (imp('target-input').value === 'false' && folder)
             importScope.folder_filter = encodeURIComponent(folder);
         document.querySelector('.proposal-list').replaceChildren();
@@ -286,19 +286,24 @@ async function scanImport(reset=true) {
         imp('selectall-input').checked = true;
     }
     const params = {...importScope, offset:importOffset, page_size:100};
+    if (importAfter) params.after = encodeURIComponent(importAfter);
     imp('import-next-page').disabled = true;
     try {
         const page = (await fetchAPI('/libraryimport/files', importKey, params)).result;
         if (generation !== importGeneration) return;
-        importOffset = page.next_offset;
+        importOffset = page.next_offset; importAfter = page.next_after;
         const counts = page.counts;
-        importDiscovered = counts.discovered;
-        const reason = counts.limited ? 'Traversal safety bound reached' :
-            counts.not_yet_scanned_folders ? `${counts.not_yet_scanned_folders} eligible folders outside selected limit` :
-            'Folder scan complete';
-        imp('scan-summary').textContent = `${counts.scanned_folders} of ${counts.eligible_folders} eligible folders scanned · ` +
-            `${counts.discovered} unregistered archives · ${counts.already_managed} already in library · ` +
-            `${reason} · ${importOffset === null ? 'All result pages shown' : 'More result pages available'}`;
+        importDiscovered = Math.max(importRows.size, counts.discovered);
+        const partial = counts.limited || counts.not_yet_scanned_folders;
+        const total = partial ? 'at least ' + counts.total_unregistered : counts.total_unregistered;
+        const reason = counts.limited ? 'Traversal safety bound reached; results are partial' :
+            counts.not_yet_scanned_folders ? 'Folder traversal is partial' :
+            counts.more_unregistered ? 'More unregistered archives available — rescan after importing or increase the limit' :
+            'Selected scope checked completely';
+        imp('scan-summary').textContent = `${counts.scanned_folders} folders checked · ` +
+            `${counts.discovered} of ${total} unregistered archives selected · ` +
+            `${counts.already_managed} registered files skipped · ${reason} · ` +
+            `${importOffset === null ? 'All selected result pages shown' : 'More selected result pages available'}`;
         const body = document.querySelector('.proposal-list');
         for (const item of page.items)
             if (!importRowsByPath.has(item.filepath))
@@ -317,20 +322,26 @@ async function scanImport(reset=true) {
 }
 async function suggestImportPublications(run) {
     const current = () => run === importMatchGeneration;
-    const budget = Math.min(importScope.folder_limit, Number(imp('match-folder-limit').value));
-    const scope = {...importScope, folder_limit:budget, page_size:100};
+    const budget = Number(imp('match-folder-limit').value);
+    const scope = {...importScope, page_size:100};
     const all = [];
-    let offset = 0;
+    const folders = new Set();
+    let offset = 0, after = null, exhausted = false;
     imp('stop-matching').classList.remove('hidden');
     try {
         do {
-            const page = (await fetchAPI('/libraryimport/files', importKey, {...scope, offset})).result;
+            const params = {...scope, offset};
+            if (after) params.after = encodeURIComponent(after);
+            const page = (await fetchAPI('/libraryimport/files', importKey, params)).result;
             if (!current()) return;
-            all.push(...page.items);
-            offset = page.next_offset;
-            imp('matching-status').textContent = `Preparing suggestions for ${all.length} of ${page.counts.discovered} files in ` +
-                `${page.counts.scanned_folders} eligible folders (limit ${budget}).`;
-        } while (offset !== null && current());
+            for (const item of page.items) {
+                if (!folders.has(item.folder) && folders.size >= budget) { exhausted = true; break; }
+                folders.add(item.folder); all.push(item);
+            }
+            offset = page.next_offset; after = page.next_after;
+            imp('matching-status').textContent = `Preparing suggestions for ${all.length} selected files in ` +
+                `${folders.size} eligible folders (limit ${budget}).`;
+        } while (offset !== null && !exhausted && current());
         const groups = new Map();
         for (const item of all) {
             const title = item.parsed?.title?.trim().toLowerCase();
@@ -339,7 +350,9 @@ async function suggestImportPublications(run) {
             if (!groups.has(key)) groups.set(key, {representative:item.filepath, paths:[]});
             groups.get(key).paths.push(item.filepath);
         }
-        const entries = [...groups.values()];
+        // A mixed folder can contain many series; the folder budget must not
+        // become an unbounded provider-query budget.
+        const entries = [...groups.values()].slice(0, budget);
         for (let start = 0; start < entries.length && current(); start += 10) {
             if (start) {
                 await new Promise(resolve => setTimeout(resolve, 10000));
@@ -365,7 +378,9 @@ async function suggestImportPublications(run) {
             imp('matching-status').textContent = `Publication suggestions checked for ` +
                 `${Math.min(start + 10, entries.length)} of ${entries.length} series groups in up to ${budget} folders.`;
         }
-        if (current()) imp('matching-status').textContent += ' Matching complete; unmatched files remain editable.';
+        if (current()) imp('matching-status').textContent += groups.size > budget
+            ? ' Series-group budget reached; remaining files stay editable.'
+            : ' Matching complete; unmatched files remain editable.';
     } catch (_) {
         if (current()) {
             imp('rate-limit-banner').classList.remove('hidden');

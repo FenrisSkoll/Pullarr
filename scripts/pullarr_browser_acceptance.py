@@ -30,6 +30,7 @@ ROUTES = ('/', '/add', '/library-import', '/collections',
           '/system/status', '/system/tasks', '/system/backups',
           '/settings/mediamanagement', '/settings/indexers', '/settings/download',
           '/settings/downloadclients', '/settings/metadata', '/settings/general')
+VOLUME_COUNT = 905
 
 
 def capture(origin, output):
@@ -37,6 +38,10 @@ def capture(origin, output):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context()
+        # The large fixture needs no cover bytes from the local server.
+        context.route(re.compile(re.escape(origin) + r'/api/volumes/\d+/cover\?'),
+            lambda route: route.fulfill(content_type='image/svg+xml',
+                body='<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>'))
         def route(request):
             if request.request.url.startswith(origin):
                 request.continue_()
@@ -56,6 +61,11 @@ def capture(origin, output):
                 start = time.perf_counter()
                 response = page.goto(origin + path)
                 page.wait_for_timeout(700)
+                if path == '/':
+                    page.wait_for_function(f"document.querySelector('#library-status').textContent === 'Showing {VOLUME_COUNT} publications'")
+                    assert page.locator('#list-library .list-entry').count() == VOLUME_COUNT
+                    assert page.locator('#table-library .table-entry').count() == VOLUME_COUNT
+                    assert page.locator(f'#list-library .vol-{VOLUME_COUNT}').count() == 1
                 diagnostics = page.evaluate("""() => ({
                     nodes: document.querySelectorAll('*').length,
                     overflow: document.documentElement.scrollWidth > innerWidth + 1,
@@ -72,7 +82,19 @@ def capture(origin, output):
                 results.append(dict(path=path, width=width, status=response.status,
                                     elapsed_ms=round((time.perf_counter()-start)*1000), **diagnostics))
                 if width in (1440, 390):
-                    page.screenshot(path=str(output / f'{width}-{path.strip("/").replace("/", "-") or "library"}.png'), full_page=True)
+                    page.screenshot(path=str(output / f'{width}-{path.strip("/").replace("/", "-") or "library"}.png'),
+                                    full_page=path != '/')
+                if path == '/':
+                    page.locator('#view-button').select_option('table')
+                    assert page.locator('#table-library .table-entry').count() == VOLUME_COUNT
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+                    if width in (1440, 390):
+                        page.screenshot(path=str(output / f'{width}-library-table.png'))
+                    page.locator('#view-button').select_option('posters')
+                    if width == 390:
+                        page.locator('#library-status').scroll_into_view_if_needed()
+                        page.screenshot(path=str(output / '390-library-footer.png'))
+                        page.evaluate('window.scrollTo(0,0)')
                 if width == 390:
                     page.locator('#toggle-nav').click()
                     assert page.locator('#toggle-nav').get_attribute('aria-expanded') == 'true'
@@ -86,7 +108,8 @@ def capture(origin, output):
             page.wait_for_timeout(500)
             assert page.locator('html').evaluate("e => e.classList.contains('dark-mode')")
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), path
-            page.screenshot(path=str(output / f'dark-390-{path.strip("/").replace("/", "-") or "library"}.png'), full_page=True)
+            page.screenshot(path=str(output / f'dark-390-{path.strip("/").replace("/", "-") or "library"}.png'),
+                            full_page=path != '/')
         # Keyboard-only legacy and native dialog families; cancel is non-mutating.
         page.goto(origin + '/volumes/1')
         page.locator('#edit-button').wait_for()
@@ -130,10 +153,10 @@ def main():
                 'INSERT INTO volumes(id,comicvine_id,title,year,volume_number,root_folder,folder,monitored) '
                 'VALUES(?,?,?,2020,1,1,?,1)',
                 [(i, 10000+i, f'Demo publication {i:04}', str(base / 'library' / str(i)))
-                 for i in range(2, 1001)]
+                 for i in range(2, VOLUME_COUNT + 1)]
             )
             get_db().executemany('INSERT INTO volumes_covers(volume_id,cover) VALUES(?,NULL)',
-                                 [(i,) for i in range(2, 1001)])
+                                 [(i,) for i in range(2, VOLUME_COUNT + 1)])
             RootFolders()._RootFolders__get_folder_mapping.cache_clear()
             get_db().connection.commit()
         server.app.extensions['discover'].transport = source
@@ -167,12 +190,36 @@ def standalone(origin, output):
         page.keyboard.press('Enter')
         page.wait_for_url(origin + '/')
         page.locator('main h1').wait_for()
-        page.locator('#library-next').click()
-        page.wait_for_function("document.querySelector('#library-page').textContent.startsWith('Page 2')")
-        assert page.locator('#list-library .list-entry').count() == 50
-        page.locator('#library-previous').focus()
+        page.wait_for_function(f"document.querySelector('#library-status').textContent === 'Showing {VOLUME_COUNT} publications'")
+        assert page.locator('#list-library .list-entry').count() == VOLUME_COUNT
+        page.locator(f'#list-library .vol-{VOLUME_COUNT}').scroll_into_view_if_needed()
+        assert page.locator(f'#list-library .vol-{VOLUME_COUNT}').count() == 1
+        page.locator('#view-button').select_option('table')
+        assert page.locator('#table-library .table-entry').count() == VOLUME_COUNT
+        page.locator('#massedit-button').click()
+        page.wait_for_function("document.querySelector('#massedit-toggle').hasAttribute('checked')")
+        page.locator('#table-library .table-entry').first.locator('input[type="checkbox"]').check()
+        assert f'1 of {VOLUME_COUNT}' in page.locator('#massedit-selection').inner_text()
+        page.locator('#search-input').fill('Demo publication 0904')
+        page.locator('#search-input').press('Enter')
+        page.wait_for_function("document.querySelector('#library-status').textContent === 'Showing 1 publications'")
+        assert page.locator('#table-library .table-entry').count() == 1
+        assert '0 of 1' in page.locator('#massedit-selection').inner_text()
+        assert not page.locator('#massedit-toggle').is_checked()
+        page.locator('#clear-search').click()
+        page.wait_for_function(f"document.querySelector('#library-status').textContent === 'Showing {VOLUME_COUNT} publications'")
+        page.locator('#sort-button').select_option('recently_added')
+        page.wait_for_function(f"document.querySelector('#library-status').textContent === 'Showing {VOLUME_COUNT} publications'")
+        page.locator('#filter-button').select_option('monitored')
+        page.wait_for_function("document.querySelector('#library-status').textContent.startsWith('Showing ')")
+        assert page.locator('#table-library .table-entry').count() == int(
+            page.locator('#library-status').inner_text().split()[1])
+        page.locator('#filter-button').select_option('')
+        page.locator('#sort-button').select_option('title')
+        page.wait_for_function(f"document.querySelector('#library-status').textContent === 'Showing {VOLUME_COUNT} publications'")
+        page.locator('#library-retry').focus()
         page.keyboard.press('Enter')
-        page.wait_for_function("document.querySelector('#library-page').textContent.startsWith('Page 1')")
+        page.wait_for_function(f"document.querySelector('#library-status').textContent === 'Showing {VOLUME_COUNT} publications'")
         page.goto(origin + '/settings')
         assert page.url.endswith('/settings/mediamanagement')
         manifest = page.request.get(origin + '/manifest.json').json()

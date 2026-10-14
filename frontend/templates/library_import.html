@@ -91,12 +91,12 @@
 					<td><input type="checkbox" id="auto-match-input" checked><p>Optional publication suggestions after local discovery. Provider failure never removes local file rows.</p>
 						<details id="advanced-matching"><summary>Advanced matching options</summary>
 							<label for="match-folder-limit">Automatically suggest publications for up to</label>
-							<select id="match-folder-limit"><option>20</option><option>50</option><option>100</option><option>200</option><option>500</option></select> eligible folders
+							<select id="match-folder-limit"><option>20</option><option>50</option><option>100</option><option>200</option><option>500</option></select> eligible folders and at most that many series groups
 						</details></td>
 				</tr>
-				<tr><td><label for="scan-folder-limit">Max folders scanned</label></td>
-					<td><select id="scan-folder-limit"><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option value="1000">1,000</option><option value="50000">All (bounded)</option></select>
-						<p>File results show 100 per page; this limit controls local folder discovery.</p></td></tr>
+				<tr><td><label for="scan-file-limit">Unregistered comics to show</label></td>
+					<td><select id="scan-file-limit"><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option value="1000">1,000</option><option value="50000">All (bounded)</option></select>
+						<p>Search the selected folders for up to this many CBR/CBZ files not yet imported. Registered files do not count. Results display 100 per page.</p></td></tr>
 				<tr>
 					<td><label for="target-input">Folder(s) to scan</label></td>
 					<td>

@@ -35,16 +35,22 @@ from backend.internals.db_models import FilesDB
 
 
 def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
-                        folder_limit: int = 50000, folder_filter: str | None = None) -> dict:
+                        folder_limit: int = 50000, folder_filter: str | None = None,
+                        max_unregistered: int | None = None, after: str | None = None) -> dict:
     """Deterministic filesystem discovery, independent of metadata providers.
 
     A pattern without a separator matches directory basenames. An absolute
     pattern matches complete directory paths. Traversal never follows links.
     The bound is explicit in the response; no truncated page claims completion.
+    The path cursor avoids shifting later pages when earlier files are imported.
     """
     if (type(offset) is not int or offset < 0 or type(page_size) is not int
             or not 1 <= page_size <= 100 or type(folder_limit) is not int
-            or not 1 <= folder_limit <= 50000 or folder_filter is not None
+            or not 1 <= folder_limit <= 50000
+            or max_unregistered is not None and (type(max_unregistered) is not int
+                or max_unregistered not in (20, 50, 100, 200, 500, 1000, 50000))
+            or after is not None and len(after) > 4096
+            or folder_filter is not None
             and (not isinstance(folder_filter, str) or len(folder_filter) > 500  # type: ignore[redundant-expr]
                  or '..' in Path(folder_filter).parts)):
         raise ValueError('invalid_scan_parameters')
@@ -75,8 +81,9 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
                                    key=str.casefold)
             invalid += len(dirs) - len(admitted_dirs)
             dirs[:] = admitted_dirs
-            invalid += len(files) - len([f for f in files if not (Path(current) / f).is_symlink()])
-            folders.append((str(Path(current)), tuple(sorted(files, key=str.casefold)), str(root)))
+            safe_files = [f for f in files if not (Path(current) / f).is_symlink()]
+            invalid += len(files) - len(safe_files)
+            folders.append((str(Path(current)), tuple(sorted(safe_files, key=str.casefold)), str(root)))
         if bounded:
             break
     def selected(path):
@@ -96,31 +103,47 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
     available, already, skipped = [], 0, 0
     extensions = {'.cbr', '.cbz'}
     with closing(sqlite3.connect(database)) as lookup:
+        registered = {row[0] for row in lookup.execute('SELECT filepath FROM files')}
         for folder, files, root in chosen:
             for name in files:
                 path = str(Path(folder) / name)
                 if Path(name).suffix.casefold() not in extensions:
                     skipped += 1
                     continue
+                if path in registered:
+                    already += 1
+                    continue
                 try:
                     from backend.implementations.acquisition_paths import \
                         contained
                     contained(path, root)
+                    if Path(path).is_symlink():
+                        invalid += 1
+                        continue
                     info = os.stat(path, follow_symlinks=False)
-                    if not os.path.isfile(path):
+                    if not os.path.isfile(path) or not os.access(path, os.R_OK):
                         invalid += 1
                         continue
                 except (OSError, ValueError, IntakeFailure):
                     invalid += 1
                     continue
-                if lookup.execute('SELECT 1 FROM files WHERE filepath=? LIMIT 1', (path,)).fetchone():
-                    already += 1
-                    continue
                 stamp = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
                 available.append((path, root, stamp))
-    available.sort(key=lambda row: row[0].casefold())
+    available.sort(key=lambda row: (row[0].casefold(), row[0]))
+    total_unregistered = len(available)
+    selected_count = min(total_unregistered, max_unregistered or total_unregistered)
+    if after is not None:
+        remaining = max(0, (max_unregistered or total_unregistered) - offset)
+        page_paths = [row for row in available if (row[0].casefold(), row[0]) >
+                      (after.casefold(), after)][:min(page_size, remaining)]
+        has_next = remaining > len(page_paths) and bool(page_paths) and bool(available) and (
+            available[-1][0].casefold(), available[-1][0]) > (
+                page_paths[-1][0].casefold(), page_paths[-1][0])
+    else:
+        page_paths = available[:selected_count][offset:offset + page_size]
+        has_next = offset + len(page_paths) < selected_count
     items = []
-    for path, root, stamp in available[offset:offset + page_size]:
+    for path, root, stamp in page_paths:
         try:
             parsed = extract_filename_data(path, prefer_folder_year=True)
             evidence = dict(year=parsed.get('year'), issue_number=parsed.get('issue_number'),
@@ -165,11 +188,15 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
                           cv=dict(id=None, title=None, issue_count=None, link=None)))
     return dict(version=2, items=items, counts=dict(scanned_folders=len(chosen),
         eligible_folders=len(eligible_folders), not_yet_scanned_folders=max(0, len(eligible_folders)-len(chosen)),
-        discovered=len(available), already_managed=already, matched=0,
-        unmatched=len(available),
+        discovered=selected_count, total_unregistered=total_unregistered,
+        more_unregistered=total_unregistered > selected_count,
+        already_managed=already, matched=0,
+        unmatched=total_unregistered,
         invalid=invalid, skipped=skipped, limited=bounded),
-        next_offset=offset + len(items) if offset + len(items) < len(available) else None,
-        enumeration_complete=not bounded and len(chosen) == len(eligible_folders))
+        next_offset=offset + len(items) if has_next else None,
+        next_after=items[-1]['filepath'] if has_next else None,
+        enumeration_complete=not bounded and len(chosen) == len(eligible_folders)
+            and total_unregistered <= (max_unregistered or total_unregistered))
 
 
 def suggest_scanned_import_files(database: str, paths: list[str]) -> list[dict]:

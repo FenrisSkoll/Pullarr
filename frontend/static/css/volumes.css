@@ -178,9 +178,20 @@ main:has(#massedit-toggle:checked) #table-container {
 }
 
 #table-container > table {
-	width: max(100%, 25rem);
+	width: 100%;
+	min-width: 46rem;
 	border-collapse: collapse;
 }
+
+#table-scroll-hint { display: none; }
+
+#table-container .table-link {
+	display: inline-block;
+	min-width: 12rem;
+	overflow-wrap: break-word;
+}
+
+.table-year { min-width: 4rem; white-space: nowrap; }
 
 .table-volume {
     min-width: 6.2rem;
@@ -317,11 +328,25 @@ main:has(#massedit-toggle:checked) .action-bar {
 	border-color: var(--error-color);
 }
 
+.library-load-controls {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: .75rem;
+	margin: 1rem 0 .5rem;
+}
+
 main:has(#massedit-toggle:checked) #lib-stats {
 	display: none;
 }
 
 @media (max-width: 860px) {
+	#table-scroll-hint {
+		display: block;
+		margin: 0 0 .5rem;
+		color: var(--dimmed-text-color);
+		font-size: .85rem;
+	}
 	.action-bar {
         flex-direction: column;
 		justify-content: center;

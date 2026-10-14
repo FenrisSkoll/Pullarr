@@ -57,29 +57,46 @@ harness.finished.then(async () => {
     const scans=[];
     context.fetchAPI = async (path,key,params) => {
         scans.push({path,params});
-        return {result:{items:[],next_offset:null,counts:{scanned_folders:params.folder_limit,
-            eligible_folders:905,discovered:0,already_managed:0,not_yet_scanned_folders:0,limited:false}}};
+        return {result:{items:[],next_offset:null,next_after:null,counts:{scanned_folders:905,
+            eligible_folders:905,discovered:0,total_unregistered:0,more_unregistered:false,
+            already_managed:0,not_yet_scanned_folders:0,limited:false}}};
     };
     context.document.getElementById('auto-match-input').checked=false;
     context.document.getElementById('target-input').value='true';
     for (const limit of [20,50,100,200,500,1000,50000]) {
-        context.document.getElementById('scan-folder-limit').value=String(limit);
+        context.document.getElementById('scan-file-limit').value=String(limit);
         await vm.runInContext('scanImport()',context);
-        assert.equal(scans.at(-1).params.folder_limit,limit);
+        assert.equal(scans.at(-1).params.max_unregistered,limit);
         assert.equal(scans.at(-1).params.page_size,100);
     }
-    assert.equal(vm.runInContext('importScope.folder_limit',context),50000);
+    assert.equal(vm.runInContext('importScope.max_unregistered',context),50000);
     context.document.getElementById('match-folder-limit').value='20';
     vm.runInContext("importScope.folder_filter='30%20Days';",context);
     await vm.runInContext('suggestImportPublications(++importMatchGeneration)',context);
-    assert.equal(scans.at(-1).params.folder_limit,20);
+    assert.equal(scans.at(-1).params.max_unregistered,50000);
     assert.equal(scans.at(-1).params.folder_filter,'30%20Days');
+    vm.runInContext('importSuggestions.clear()',context);
+    context.fetchAPI = async () => ({result:{items:Array.from({length:25},(_,index)=>({
+        filepath:`/fixture/Folder ${index}/Book.cbz`,folder:`/fixture/Folder ${index}`,
+        parsed:{title:'Shared Series',year:2023}})),next_offset:null,next_after:null,
+        counts:{discovered:25,scanned_folders:25}}});
+    let providerPaths=[];
+    context.sendAPI = async (method,path,key,params,body) => {
+        providerPaths=body.files;
+        return {ok:true,json:async()=>({result:body.files.map(filepath=>({filepath,
+            cv:{id:101,title:'Shared Series'}}))})};
+    };
+    await vm.runInContext('suggestImportPublications(++importMatchGeneration)',context);
+    assert.equal(providerPaths.length,1);
+    assert.equal(vm.runInContext('importSuggestions.size',context),20);
+    assert.equal(vm.runInContext("importSuggestions.has('/fixture/Folder 20/Book.cbz')",context),false);
+    vm.runInContext('importSuggestions.clear()',context);
     let release;
     context.fetchAPI = () => new Promise(resolve => { release=resolve; });
     const pending = vm.runInContext('suggestImportPublications(++importMatchGeneration)',context);
     context.document.getElementById('stop-matching').onclick();
     release({result:{items:[{filepath:'/synthetic/Book 1.cbz',parsed:{title:'Books',year:2002}}],
-        next_offset:null,counts:{discovered:1,scanned_folders:20}}});
+        next_offset:null,next_after:null,counts:{discovered:1,scanned_folders:905}}});
     await pending;
     assert.equal(vm.runInContext('importSuggestions.size',context),0);
     const changed = row(999);

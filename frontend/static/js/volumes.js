@@ -121,10 +121,6 @@ class LibraryEntry {
 };
 
 function populateLibrary(volumes, api_key) {
-	library_els.views.list.querySelectorAll('.list-entry').forEach(
-		e => e.remove()
-	);
-	library_els.views.table.innerHTML = '';
 	const space_taker = document.querySelector('.space-taker');
 
 	const list_fragment = document.createDocumentFragment(),
@@ -151,6 +147,7 @@ function populateLibrary(volumes, api_key) {
 		// Cover
 		list_entry.querySelector('.list-img').src =
 			`${url_base}/api/volumes/${volume.id}/cover?api_key=${api_key}`;
+		list_entry.querySelector('.list-img').decoding = 'async';
 
 		// Title
 		const list_title = list_entry.querySelector('.list-title');
@@ -189,7 +186,9 @@ function populateLibrary(volumes, api_key) {
 			volume.issue_count_monitored
 		);
 
-		// Add to view
+		// Add to view without changing any earlier batch or its selection.
+		table_entry.querySelector('input[type="checkbox"]').setAttribute('aria-label',
+			`Select ${volume.title} for mass edit`);
 		list_fragment.appendChild(list_entry)
 		table_fragment.appendChild(table_entry);
 	});
@@ -198,43 +197,72 @@ function populateLibrary(volumes, api_key) {
 	library_els.views.table.appendChild(table_fragment);
 };
 
-let libraryOffset = 0, libraryGeneration = 0;
-function fetchLibrary(api_key, keepPage = false) {
-	if (!keepPage) libraryOffset = 0;
+let libraryOffset = 0, libraryGeneration = 0, libraryLoading = false, libraryComplete = false, libraryParams;
+let librarySeen = new Set();
+function updateMassSelection() {
+	const selected = library_els.views.table.querySelectorAll('input[type="checkbox"]:checked').length;
+	document.querySelector('#massedit-selection').textContent = !libraryComplete
+		? 'Mass edit is available when all matching publications finish loading.'
+		: `${selected} of ${librarySeen.size} loaded publications selected for mass edit.`;
+}
+async function fetchLibrary(api_key, resume = false) {
 	const generation = ++libraryGeneration;
-	library_els.mass_edit.progress.innerText = '';
-	showLibraryPage(library_els.pages.loading);
-
-	const params = {
-		sort: library_els.view_options.sort.value,
-		filter: library_els.view_options.filter.value,
-		limit: 50,
-		offset: libraryOffset
-	};
-	const query = library_els.search.input.value;
-	if (query !== '')
-		params.query = query;
-
-	fetchAPI('/volumes', api_key, params)
-	.then(json => {
-		if (generation !== libraryGeneration) return;
-		document.querySelector('#library-previous').disabled = libraryOffset === 0;
-		document.querySelector('#library-next').disabled = json.result.length < 50;
-		document.querySelector('#library-page').textContent = `Page ${Math.floor(libraryOffset / 50) + 1} · up to 50 volumes`;
-		document.querySelector('#library-error').textContent = '';
+	if (!resume) {
+		libraryOffset = 0; librarySeen = new Set();
+		libraryParams = {sort:library_els.view_options.sort.value,
+			filter:library_els.view_options.filter.value, limit:100};
+		if (library_els.search.input.value) libraryParams.query = library_els.search.input.value;
+		library_els.views.list.querySelectorAll('.list-entry').forEach(entry => entry.remove());
+		library_els.views.table.replaceChildren();
 		library_els.mass_edit.select_all.checked = false;
-		if (json.result.length === 0) {
-			showLibraryPage(library_els.pages.empty);
-		} else {
-			populateLibrary(json.result, api_key);
-			showLibraryPage(library_els.pages.view);
-		};
-	}).catch(() => {
+		library_els.mass_edit.toggle.checked = false;
+		library_els.mass_edit.toggle.removeAttribute('checked');
+		library_els.mass_edit.progress.innerText = '';
+		showLibraryPage(library_els.pages.loading);
+	}
+	libraryLoading = true;
+	libraryComplete = false;
+	library_els.mass_edit.button.disabled = true;
+	library_els.mass_edit.select_all.disabled = true;
+	document.querySelector('#library-resume').hidden = true;
+	document.querySelector('#library-error').textContent = '';
+	document.querySelector('#library-status').textContent = `Loading publications… ${librarySeen.size} displayed`;
+	updateMassSelection();
+	try {
+		while (generation === libraryGeneration) {
+			const json = await fetchAPI('/volumes', api_key, {...libraryParams, offset:libraryOffset});
+			if (generation !== libraryGeneration) return;
+			const batch = json.result.filter(volume => !librarySeen.has(volume.id));
+			batch.forEach(volume => librarySeen.add(volume.id));
+			if (batch.length) {
+				populateLibrary(batch, api_key);
+				showLibraryPage(library_els.pages.view);
+			}
+			libraryOffset += json.result.length;
+			document.querySelector('#library-status').textContent = `Loading publications… ${librarySeen.size} displayed`;
+			if (json.result.length < 100) break;
+			// Let the first batch paint before requesting the next one.
+			await new Promise(resolve => setTimeout(resolve, 0));
+		}
 		if (generation !== libraryGeneration) return;
-		showLibraryPage(library_els.pages.empty);
-		document.querySelector('#library-error').textContent = 'Unable to load this library page. Retry or change the filters.';
-	});
-};
+		libraryLoading = false;
+		libraryComplete = true;
+		library_els.mass_edit.button.disabled = !librarySeen.size;
+		library_els.mass_edit.select_all.disabled = !librarySeen.size;
+		if (!librarySeen.size) showLibraryPage(library_els.pages.empty);
+		document.querySelector('#library-status').textContent = `Showing ${librarySeen.size} publications`;
+		updateMassSelection();
+	} catch (_) {
+		if (generation !== libraryGeneration) return;
+		libraryLoading = false;
+		libraryComplete = false;
+		showLibraryPage(library_els.pages.view);
+		document.querySelector('#library-status').textContent = `${librarySeen.size} publications displayed; loading paused`;
+		document.querySelector('#library-error').textContent = 'Unable to load the remaining publications. Retry loading or refresh.';
+		document.querySelector('#library-resume').hidden = false;
+		updateMassSelection();
+	}
+}
 
 function searchLibrary() {
 	usingApiKey().then(api_key => fetchLibrary(api_key));
@@ -265,12 +293,12 @@ function fetchStats(api_key) {
 // Mass Edit
 //
 function runAction(api_key, action, args={}) {
-
+	if (!libraryComplete) return;
 	const volume_ids = [...library_els.views.table.querySelectorAll(
 		'input[type="checkbox"]:checked'
 	)].map(v => parseInt(v.parentNode.parentNode.dataset.id))
 	if (!volume_ids.length) return;
-	if (action === 'delete' && !window.confirm(`Delete ${volume_ids.length} selected volumes from this page? ${args.delete_folder ? 'Their folders and files will also be deleted.' : 'Their folders and files will be kept.'}`)) return;
+	if (action === 'delete' && !window.confirm(`Delete ${volume_ids.length} explicitly selected volumes? ${args.delete_folder ? 'Their volume folders and files will also be deleted.' : 'Their files and folders will be kept.'}`)) return;
 	showLibraryPage(library_els.pages.loading);
 
 	sendAPI('POST', '/masseditor', api_key, {}, {
@@ -287,6 +315,7 @@ function runAction(api_key, action, args={}) {
 // code run on load
 
 const lib_options = getLocalStorage('lib_sorting', 'lib_view', 'lib_filter');
+library_els.mass_edit.button.disabled = true;
 library_els.view_options.sort.value = lib_options.lib_sorting;
 library_els.view_options.view.value = lib_options.lib_view;
 library_els.view_options.filter.value = lib_options.lib_filter;
@@ -295,13 +324,8 @@ usingApiKey()
 .then(api_key => {
 	fetchLibrary(api_key);
 	fetchStats(api_key);
-	document.querySelector('#library-previous').onclick = () => {
-		libraryOffset = Math.max(0, libraryOffset - 50); fetchLibrary(api_key, true);
-	};
-	document.querySelector('#library-next').onclick = () => {
-		libraryOffset += 50; fetchLibrary(api_key, true);
-	};
-	document.querySelector('#library-retry').onclick = () => fetchLibrary(api_key, true);
+	document.querySelector('#library-retry').onclick = () => fetchLibrary(api_key);
+	document.querySelector('#library-resume').onclick = () => fetchLibrary(api_key, true);
 
 	library_els.search.clear.onclick =
 		e => clearSearch(api_key);
@@ -327,9 +351,15 @@ usingApiKey()
     library_els.mass_edit.cancel.onclick =
         e => {
             const toggle = library_els.mass_edit.toggle;
-            if (toggle.hasAttribute('checked'))
+            if (toggle.hasAttribute('checked')) {
                 toggle.removeAttribute('checked');
-            else {
+                toggle.checked = false;
+            } else if (libraryComplete && librarySeen.size) {
+                const generation = libraryGeneration;
+                const open = () => {
+					if (generation !== libraryGeneration || !libraryComplete) return;
+                    toggle.setAttribute('checked', ''); toggle.checked = true;
+                };
                 const select = document.querySelector('select[name="root_folder_id"]');
                 if (select.querySelector('option') === null) {
                     fetchAPI('/rootfolder', api_key)
@@ -340,10 +370,9 @@ usingApiKey()
                             entry.innerText = rf.folder;
                             select.appendChild(entry);
                         });
-                        toggle.setAttribute('checked', '');
+                        open();
                     });
-                } else
-                    toggle.setAttribute('checked', '');
+                } else open();
             }
         };
 	library_els.mass_edit.bar.querySelectorAll('.action-divider > button[data-action]').forEach(
@@ -400,5 +429,12 @@ usingApiKey()
 });
 library_els.search.container.action = 'javascript:searchLibrary();';
 library_els.mass_edit.select_all.onchange =
-	e => library_els.views.table.querySelectorAll('input[type="checkbox"]')
+	e => {
+		if (!libraryComplete) return;
+		library_els.views.table.querySelectorAll('input[type="checkbox"]')
 			.forEach(c => c.checked = library_els.mass_edit.select_all.checked);
+		updateMassSelection();
+	};
+library_els.views.table.addEventListener('change', event => {
+	if (event.target.matches('input[type="checkbox"]')) updateMassSelection();
+});

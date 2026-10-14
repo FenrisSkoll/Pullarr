@@ -34,6 +34,25 @@ class DirectLibraryImport(ImportAPIHarness, TestCase):
         return self.client.post('/api/libraryimport/submit',
                                 json={'files': [choice]}, query_string={'api_key': FAKE_APP_KEY})
 
+    def test_authenticated_archive_cap_scan_excludes_registered_path(self):
+        first = self.comic_file(name='First.cbz')
+        second = self.comic_file(name='Second.CBZ')
+        database = self.root / 'archive-cap.db'
+        with closing(sqlite3.connect(database)) as disk:
+            self.db.backup(disk)
+            disk.execute('INSERT INTO files(filepath,size) VALUES(?,?)', (first, 1))
+            disk.commit()
+        with patch('backend.internals.db.DBConnection.default_file', str(database)):
+            response = self.client.get('/api/libraryimport/files', query_string={
+                'api_key':FAKE_APP_KEY, 'max_unregistered':100})
+            self.assertEqual(response.status_code, 200, response.get_json())
+            result = response.get_json()['result']
+            self.assertEqual([item['filepath'] for item in result['items']], [second])
+            self.assertEqual(result['counts']['already_managed'], 1)
+            rejected = self.client.get('/api/libraryimport/files', query_string={
+                'api_key':FAKE_APP_KEY, 'max_unregistered':21})
+            self.assertEqual(rejected.status_code, 400)
+
     def test_keep_in_place_registers_exact_issue_and_is_idempotent(self):
         path = self.comic_file(name='Brother Lono - The Deluxe Edition.cbz')
         first = self.submit(path)
@@ -366,6 +385,70 @@ class DirectLibraryImport(ImportAPIHarness, TestCase):
 
 
 class LargeLocalDiscovery(TestCase):
+    def test_unregistered_archive_cap_searches_past_registered_folders(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'Comics'
+            root.mkdir()
+            database = str(Path(temporary) / 'library.db')
+            with closing(sqlite3.connect(database)) as db:
+                db.executescript('''CREATE TABLE root_folders(id INTEGER PRIMARY KEY,folder TEXT);
+                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);''')
+                db.execute('INSERT INTO root_folders VALUES(1,?)', (str(root),))
+                for index in range(905):
+                    folder = root / f'Folder {index:04d}'
+                    folder.mkdir()
+                    if index < 350:
+                        path = folder / f'Issue {index:04d}.cbz'
+                        path.write_bytes(b'')
+                        if index < 100 and index != 3:
+                            db.execute('INSERT INTO files(filepath) VALUES(?)', (str(path),))
+                db.commit()
+            first = scan_library_import(database, max_unregistered=100)
+            paths = [item['filepath'] for item in first['items']]
+            self.assertEqual(len(paths), 100)
+            self.assertEqual(first['counts']['total_unregistered'], 251)
+            self.assertEqual(first['counts']['already_managed'], 99)
+            self.assertEqual(first['counts']['scanned_folders'], 906)
+            self.assertTrue(first['counts']['more_unregistered'])
+            scoped = scan_library_import(database, max_unregistered=20,
+                                         folder_filter='Folder 01*')
+            self.assertEqual(len(scoped['items']), 20)
+            self.assertEqual(scoped['counts']['scanned_folders'], 100)
+            self.assertTrue(all('Folder 01' in item['filepath'] for item in scoped['items']))
+            self.assertTrue(paths[0].endswith('Folder 0003/Issue 0003.cbz') or
+                            paths[0].endswith('Folder 0003\\Issue 0003.cbz'))
+            self.assertTrue(any('Folder 0198' in path for path in paths))
+            with closing(sqlite3.connect(database)) as db:
+                registered = {row[0] for row in db.execute('SELECT filepath FROM files')}
+                self.assertFalse(registered.intersection(paths))
+                db.executemany('INSERT INTO files(filepath) VALUES(?)',
+                               ((path,) for path in paths[1:]))
+                db.commit()
+            next_scan = scan_library_import(database, max_unregistered=100)
+            next_paths = [item['filepath'] for item in next_scan['items']]
+            self.assertEqual(next_paths[0], paths[0])
+            self.assertEqual(len(next_paths), 100)
+            self.assertEqual(len(set(paths[1:]).intersection(next_paths)), 0)
+            self.assertTrue(any('Folder 0297' in path for path in next_paths))
+            for cap in (20, 50, 100, 200, 500, 1000, 50000):
+                result = scan_library_import(database, max_unregistered=cap)
+                self.assertEqual(result['counts']['discovered'], min(cap, 152))
+                self.assertEqual(len(result['items']), min(100, cap, 152))
+            page = scan_library_import(database, max_unregistered=200)
+            following = scan_library_import(database, max_unregistered=200, offset=100,
+                                            after=page['next_after'])
+            self.assertEqual(len(following['items']), 52)
+            self.assertFalse(set(item['filepath'] for item in page['items']).intersection(
+                item['filepath'] for item in following['items']))
+            with closing(sqlite3.connect(database)) as db:
+                db.executemany('INSERT INTO files(filepath) VALUES(?)',
+                               ((item['filepath'],) for item in page['items']))
+                db.commit()
+            continued = scan_library_import(database, max_unregistered=200, offset=100,
+                                            after=page['next_after'])
+            self.assertEqual([item['filepath'] for item in continued['items']],
+                             [item['filepath'] for item in following['items']])
+
     def test_all_904_folders_and_2924_archives_are_paged(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary) / 'Comics'
