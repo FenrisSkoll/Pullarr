@@ -18,6 +18,7 @@ from backend.implementations.acquisition_paths import (contained,
 from backend.implementations.comicinfo_candidate import enrich_comicinfo
 from backend.implementations.import_candidates import observe_import_candidate
 from backend.implementations.metadata.enrichment import fetch_volume_result
+from backend.implementations.metadata.persistence import fetch_input
 from backend.implementations.metadata.registry import get_volume_provider
 
 _cache = {}
@@ -176,18 +177,20 @@ def issue_catalog(database: str, provider: str, provider_id: str, files: list[st
                     raise ValueError('publication_identity_mismatch')
                 title, year, publisher, volume_number, count = (fetched.title, fetched.year,
                     fetched.publisher, fetched.volume_number, fetched.issue_count)
+                fetched_issues = fetch_input(fetched_result, provider)['issues'] or []
                 from backend.implementations import volumes as volume_module
                 from backend.implementations.classification import (
                     ClassificationIssue, evaluate_special_version)
                 special_version = evaluate_special_version(title=title, description=fetched.description,
-                    issues=tuple(ClassificationIssue(i.title, i.date) for i in fetched.issues or ()),
+                    issues=tuple(ClassificationIssue(i['title'], i['date']) for i in fetched_issues),
                     stored_value=SpecialVersion.NORMAL, locked=False,
                     evaluated_at=volume_module.datetime.now(),
                     format_evidence=fetched_result.format_evidence,
                     publication_evidence=fetched_result.publication_evidence).value.value
-                issues = [dict(id=i.provider_id, local_id=None, number=i.issue_number,
-                               title=i.title, date=i.date, owned=False)
-                          for i in fetched.issues or () if i.provider == provider and i.volume_provider_id == provider_id]
+                issues = [dict(id=i['provider_id'], local_id=None, number=i['issue_number'],
+                               title=i['title'], date=i['date'], owned=False)
+                          for i in fetched_issues if i['provider'] == provider
+                          and i['volume_provider_id'] == provider_id]
                 if len({i['id'] for i in issues}) != len(issues):
                     raise ValueError('duplicate_provider_issue')
                 with _lock:
