@@ -161,18 +161,64 @@ function updateSelectionSummary() {
     all.checked = !!rows.length && importing === rows.length;
     all.indeterminate = importing > 0 && importing < rows.length;
 }
+function cleanImportSearchTitle(value) {
+    let title = String(value || '').trim().replace(/\.(?:cbz|cbr)$/i, '');
+    let previous;
+    do {
+        previous = title;
+        title = title.replace(/\s*[[(](?:digital|web|retail|scan|c2c)[\])]\s*$/i, '')
+            .replace(/\s+-\s+(?:hard[- ]cover|v\d{1,4}|#\d{1,4}|0\d{1,3}|(?:book|issue|vol(?:ume)?)\s+(?:\d{1,4}|one|two|three|four|five|six|seven|eight|nine|ten))\s*$/i, '')
+            .replace(/\s*\((?:19|20)\d{2}\)\s*$/, '').trim();
+    } while (title !== previous);
+    return title;
+}
+function usefulImportSearchTitle(value) {
+    return !!value && !/^(?:book|issue|vol(?:ume)?|v)\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)?$/i.test(value) &&
+        !/^(?:unknown|untitled|misc|unsorted|comics|fixture|library|imports?|incoming|downloads?|search|mixed[- ]series)$/i.test(value);
+}
+function importSearchSuggestion(row, selectedFallback=false, allowFolder=true) {
+    const data = row.data;
+    const parsed = cleanImportSearchTitle(data.parsed?.title);
+    const embedded = cleanImportSearchTitle(data.embedded?.series);
+    const filename = cleanImportSearchTitle(data.file_title);
+    const folder = cleanImportSearchTitle(String(data.folder || '').split(/[\\/]/).pop());
+    const normalized = value => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    // Keep the filename's edition punctuation when it agrees with the scanner's title.
+    if (usefulImportSearchTitle(parsed)) {
+        if (usefulImportSearchTitle(filename) && normalized(filename) === normalized(parsed)) return filename;
+        if (!usefulImportSearchTitle(filename) || normalized(data.file_title || '').includes(normalized(parsed))) return parsed;
+    }
+    if (usefulImportSearchTitle(embedded)) return embedded;
+    if (usefulImportSearchTitle(filename)) return filename;
+    if (allowFolder && usefulImportSearchTitle(folder)) return folder;
+    const selected = selectedFallback ? row.element.querySelector('.publication-title')?.textContent : '';
+    return usefulImportSearchTitle(selected) ? selected : '';
+}
 function openPublicationSearch(row=null) {
     const targets = row ? [row] : [...importRows.values()].filter(item =>
         item.element.querySelector('.bulk-match-select').checked);
     if (!targets.length) return;
+    resetImportSearch();
+    document.querySelector('.search-results').replaceChildren();
+    document.querySelector('.search-results-container').classList.add('hidden');
+    imp('match-error').textContent = '';
+    const suggestions = targets.map(item => importSearchSuggestion(item, !!row, !!row));
+    const common = suggestions[0];
+    imp('search-input').value = row || (common && suggestions.every(title =>
+        title && title.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '') ===
+            common.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''))) ? common : '';
     importSearchContext = {mode:row ? 'single' : 'bulk', ids:targets.map(item => item.data.row_id),
         generation:importGeneration, trigger:row ? row.element.querySelector('.publication-choice') : imp('open-bulk-match')};
-    imp('match-context').textContent = row ? `Selecting a publication for ${row.data.file_title}. Only this file will change.` :
+    const year = row && (row.data.parsed?.year || row.data.embedded?.year);
+    imp('match-context').textContent = row ? `Selecting a publication for ${row.data.file_title}${year ? ` (local year ${year})` : ''}. Only this file will change.` :
         `Matching ${targets.length} explicitly chosen ${targets.length === 1 ? 'file' : 'files'}${targets.filter(item => item.element.hidden).length ?
             `, including ${targets.filter(item => item.element.hidden).length} outside the current filter` : ''}. Import selection is unchanged.`;
     showWindow('cv-window');
     requestAnimationFrame(() => {
-        if (imp('cv-window').hasAttribute('show-window')) imp('search-input').focus();
+        if (imp('cv-window').hasAttribute('show-window')) {
+            imp('search-input').focus();
+            imp('search-input').select();
+        }
     });
 }
 function applyAutoSuggestion(row) {

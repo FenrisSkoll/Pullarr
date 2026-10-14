@@ -40,10 +40,24 @@ def main():
         embedded=dict(series='Embedded Edition', number='1', title='Book One'),
         metadata_source=dict(provider='metron', id='202'),
         parsed=dict(title='Embedded Edition', year=2023))]
+    search_files = [dict(row_id=f'search-{index}', filepath=f'/fixture/Search/{name}',
+        file_title=name.removesuffix('.cbz'), folder='/fixture/Search', size=100,
+        embedded=None, metadata_source=None, parsed=dict(title=parsed, year=year))
+        for index, (name, parsed, year) in enumerate([
+            ('Astro City - Honor Guard (2016) - v001.cbz', 'Astro City Honor Guard', 2016),
+            ('Astro City - Honor Guard (2016) - v002.cbz', 'Astro City Honor Guard', 2016),
+            ('Astro City - Family Album (1998) - v001.cbz', 'Astro City Family Album', 1998),
+            ('30 Days of Night Deluxe Edition (2023) - 002 - Book Two.cbz',
+                '30 Days of Night Deluxe Edition', 2023),
+            ('100 Bullets - Brother Lono - The Deluxe Edition (2024) - Hard-Cover.cbz',
+                '100 Bullets Brother Lono The Deluxe Edition', 2024),
+            ('2000 AD - 001.cbz', '2000 AD', None),
+            ('52 - 001.cbz', 'Search', None),
+        ])]
     large = jpeg(600, 900)
     small = 'data:image/jpeg;base64,' + base64.b64encode(jpeg(100, 150)).decode()
     calls = dict(scans=[], suggestions=[], catalogues=[], searches=[], artwork=[], imports=0,
-                 embedded_only=False,
+                 embedded_only=False, search_only=False,
                  fail_suggestions=False)
     errors = []
     with TemporaryDirectory(prefix='pullarr-import-controls-') as temporary:
@@ -70,7 +84,8 @@ def main():
                     offset = int(params.get('offset', ['0'])[0])
                     calls['scans'].append(dict(limit=limit, offset=offset,
                         filter=params.get('folder_filter', [''])[0]))
-                    selected = (embedded_files if calls['embedded_only'] else files) if limit >= 20 else []
+                    selected = (search_files if calls['search_only'] else
+                        embedded_files if calls['embedded_only'] else files) if limit >= 20 else []
                     chunk = selected[offset:offset+100]
                     counts = dict(scanned_folders=min(limit, 905), eligible_folders=905,
                         not_yet_scanned_folders=max(0, 905-limit), discovered=len(selected),
@@ -168,6 +183,11 @@ def main():
                 expect(page.locator('#cv-window')).to_be_visible()
                 expect(page.locator('#search-input')).to_be_focused()
                 expect(page.locator('#match-context')).to_contain_text('Only this file will change')
+                expect(page.locator('#search-input')).to_have_value(
+                    'Abe Sapien v03 - Dark and Terrible and the New Race of Man')
+                assert page.locator('#search-input').evaluate(
+                    'node => node.selectionStart === 0 && node.selectionEnd === node.value.length')
+                assert len(calls['searches']) == 0
                 page.locator('#search-input').fill('30 Days of Night')
                 page.locator('#search-input').press('Enter')
                 results = page.locator('.search-results tr.search-result')
@@ -240,6 +260,11 @@ def main():
                 page.keyboard.press('Space')
                 expect(page.locator('#cv-window')).to_be_visible()
                 expect(page.locator('#search-input')).to_be_focused()
+                expect(page.locator('#search-input')).to_have_value(
+                    'Abe Sapien v03 - Dark and Terrible and the New Race of Man')
+                assert len(calls['searches']) == 1
+                expect(rows.first.locator('.issue-column')).to_contain_text('#1 — Book 1')
+                expect(results).to_have_count(0)
                 page.locator('#cv-window .cancel-window').click()
                 expect(rows.first.locator('.publication-choice')).to_be_focused()
                 page.keyboard.press('Enter')
@@ -291,6 +316,8 @@ def main():
                 assert page.locator('.proposal-list .bulk-match-select:checked').count() == 205
                 page.locator('#open-bulk-match').click()
                 expect(page.locator('#match-context')).to_contain_text('Matching 205 explicitly chosen files')
+                expect(page.locator('#search-input')).to_have_value('')
+                page.locator('#search-input').fill('30 Days of Night')
                 page.locator('#search-input').press('Enter')
                 expect(results.first.locator('.bulk-match')).to_have_text('Apply to 205 selected files')
                 assert results.first.get_by_role('button', name='Select for this file').count() == 0
@@ -375,6 +402,79 @@ def main():
                 expect(embedded_row.locator('.publication-meta')).to_have_text(
                     'From file metadata · metron · ID 202')
                 expect(embedded_row.locator('.publication-choice')).to_have_text('Change publication')
+                calls['search_only'] = True
+                page.goto(origin + '/library-import')
+                page.locator('#auto-match-input').uncheck()
+                page.locator('#run-import-button').click()
+                search_rows = page.locator('.proposal-list .li-result')
+                expect(search_rows).to_have_count(len(search_files))
+                expected = ['Astro City - Honor Guard', 'Astro City - Honor Guard',
+                    'Astro City - Family Album', '30 Days of Night Deluxe Edition',
+                    '100 Bullets - Brother Lono - The Deluxe Edition', '2000 AD', '52']
+                searches_before = len(calls['searches'])
+                for index, title in enumerate(expected):
+                    search_rows.nth(index).locator('.publication-choice').click()
+                    expect(page.locator('#search-input')).to_have_value(title)
+                    expect(page.locator('#search-input')).to_be_focused()
+                    assert page.locator('#search-input').evaluate(
+                        'node => node.selectionStart === 0 && node.selectionEnd === node.value.length')
+                    if index == 0:
+                        expect(page.locator('#match-context')).to_contain_text('local year 2016')
+                        page.locator('#search-input').press('Enter')
+                        expect(page.locator('.search-results tr.search-result')).to_have_count(5)
+                        searches_before += 1
+                    else:
+                        expect(page.locator('.search-results tr.search-result')).to_have_count(0)
+                    assert len(calls['searches']) == searches_before
+                    page.locator('#cv-window .cancel-window').click()
+                for index in (0, 1):
+                    search_rows.nth(index).locator('.bulk-match-select').check()
+                page.locator('#open-bulk-match').click()
+                expect(page.locator('#search-input')).to_have_value('Astro City - Honor Guard')
+                assert len(calls['searches']) == searches_before
+                page.locator('#cv-window .cancel-window').click()
+                search_rows.nth(2).locator('.bulk-match-select').check()
+                page.locator('#open-bulk-match').click()
+                expect(page.locator('#search-input')).to_have_value('')
+                expect(page.locator('#match-context')).to_contain_text('Matching 3 explicitly chosen files')
+                assert len(calls['searches']) == searches_before
+                page.locator('#cv-window .cancel-window').click()
+                assert all(row.locator('.publication-choice').inner_text() == 'Choose publication'
+                    for row in [search_rows.nth(0), search_rows.nth(1), search_rows.nth(2)])
+                for width in (1440, 1024, 768, 390):
+                    page.set_viewport_size({'width':width, 'height':900})
+                    search_rows.nth(5).locator('.publication-choice').click()
+                    expect(page.locator('#search-input')).to_have_value('2000 AD')
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), width
+                    page.locator('#cv-window .cancel-window').click()
+                search_rows.nth(5).locator('.publication-choice').click()
+                page.get_by_role('button', name='Search publications').click()
+                expect(page.locator('.search-results tr.search-result')).to_have_count(5)
+                searches_before += 1
+                assert len(calls['searches']) == searches_before
+                page.locator('#cv-window .cancel-window').click()
+                page.evaluate("""() => {
+                    const original = window.fetch.bind(window);
+                    window.fetch = (...args) => String(args[0]).includes('/api/volumes/search?')
+                        ? new Promise(resolve => {
+                            window.releaseDelayedSearch = () => {
+                                window.releaseDelayedSearch = null;
+                                original(...args).then(resolve);
+                            };
+                        }) : original(...args);
+                }""")
+                search_rows.nth(0).locator('.publication-choice').click()
+                page.locator('#search-input').press('Enter')
+                page.wait_for_function('!!window.releaseDelayedSearch')
+                page.locator('#cv-window .cancel-window').click()
+                search_rows.nth(2).locator('.publication-choice').click()
+                expect(page.locator('#search-input')).to_have_value('Astro City - Family Album')
+                page.evaluate('window.releaseDelayedSearch()')
+                page.wait_for_timeout(100)
+                expect(page.locator('.search-results tr.search-result')).to_have_count(0)
+                expect(page.locator('#match-error')).to_have_text('')
+                page.locator('#cv-window .cancel-window').click()
+                assert calls['imports'] == 0
                 browser.close()
             print(json.dumps(dict(result='pass', scan_requests=len(calls['scans']),
                 suggestion_batches=len(calls['suggestions']),catalogue_batches=list(map(len,calls['catalogues'])),

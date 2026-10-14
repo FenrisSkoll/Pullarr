@@ -12,6 +12,29 @@ function row(number) {
 }
 
 harness.finished.then(async () => {
+    const suggestions = [
+        ['Astro City - Honor Guard (2016) - v001.cbz', 'Astro City Honor Guard', 'Astro City - Honor Guard'],
+        ['Astro City - Family Album (1998) - v001.cbz', 'Astro City Family Album', 'Astro City - Family Album'],
+        ['30 Days of Night Deluxe Edition (2023) - 002 - Book Two.cbz', '30 Days of Night Deluxe Edition', '30 Days of Night Deluxe Edition'],
+        ['100 Bullets - Brother Lono - The Deluxe Edition (2024) - Hard-Cover.cbz',
+            '100 Bullets Brother Lono The Deluxe Edition', '100 Bullets - Brother Lono - The Deluxe Edition'],
+        ['2000 AD - 001.cbz', '2000 AD', '2000 AD'],
+        ['52 - 001.cbz', 'fixture', '52'],
+        ['DC - 52.cbz', 'DC 52', 'DC - 52'],
+        ['Book 001.cbz', '', '30 Days of Night']
+    ];
+    for (const [file_title, title, expected] of suggestions) {
+        context.suggestionRow = {data:{file_title, parsed:{title}, folder:'/fixture/30 Days of Night'}};
+        assert.equal(vm.runInContext('importSearchSuggestion(suggestionRow)', context), expected);
+    }
+    context.suggestionRow = {data:{file_title:'Book 001', parsed:{title:''},
+        embedded:{series:'Astro City - Honor Guard'}, folder:'/fixture/Unsorted'}};
+    assert.equal(vm.runInContext('importSearchSuggestion(suggestionRow)', context), 'Astro City - Honor Guard');
+    context.suggestionRow = {data:{file_title:'Book 001', parsed:{title:''}, folder:'/fixture/Unsorted'},
+        element:{querySelector:()=>({textContent:'Selected Edition'})}};
+    assert.equal(vm.runInContext('importSearchSuggestion(suggestionRow, true)', context), 'Selected Edition');
+    context.suggestionRow = {data:{file_title:'Book 001', parsed:{title:''}, folder:'/fixture/Mixed Series'}};
+    assert.equal(vm.runInContext('importSearchSuggestion(suggestionRow, false, false)', context), '');
     const records = [];
     context.sendAPI = async (method, path, key, params, body) => {
         records.push({path, body});
@@ -97,5 +120,5 @@ harness.finished.then(async () => {
     assert.deepEqual(Array.from(selected.issueIds),[]);
     assert.equal(selected.manual,false);
     assert.equal(field('.publication-title').textContent,'New edition');
-    console.log('Library Import bounds, stale choice, provenance and 205 file proposals PASS');
+    console.log('Library Import search suggestions, bounds, stale choice, provenance and 205 file proposals PASS');
 }).catch(error=>{console.error(error);process.exitCode=1;});
