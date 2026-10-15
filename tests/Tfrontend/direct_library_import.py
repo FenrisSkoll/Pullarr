@@ -392,7 +392,8 @@ class LargeLocalDiscovery(TestCase):
             database = str(Path(temporary) / 'library.db')
             with closing(sqlite3.connect(database)) as db:
                 db.executescript('''CREATE TABLE root_folders(id INTEGER PRIMARY KEY,folder TEXT);
-                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);''')
+                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);
+                    CREATE TABLE ignored_import_files(filepath TEXT PRIMARY KEY,size INTEGER,mtime_ns INTEGER,ctime_ns INTEGER);''')
                 db.execute('INSERT INTO root_folders VALUES(1,?)', (str(root),))
                 for index in range(905):
                     folder = root / f'Folder {index:04d}'
@@ -456,7 +457,8 @@ class LargeLocalDiscovery(TestCase):
             database = str(Path(temporary) / 'library.db')
             with closing(sqlite3.connect(database)) as db:
                 db.executescript('''CREATE TABLE root_folders(id INTEGER PRIMARY KEY,folder TEXT);
-                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);''')
+                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);
+                    CREATE TABLE ignored_import_files(filepath TEXT PRIMARY KEY,size INTEGER,mtime_ns INTEGER,ctime_ns INTEGER);''')
                 db.execute('INSERT INTO root_folders VALUES(1,?)', (str(root),))
                 db.commit()
             for index in range(2924):
@@ -487,7 +489,8 @@ class LargeLocalDiscovery(TestCase):
             database = str(Path(temporary) / 'library.db')
             with closing(sqlite3.connect(database)) as db:
                 db.executescript('''CREATE TABLE root_folders(id INTEGER PRIMARY KEY,folder TEXT);
-                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);''')
+                    CREATE TABLE files(id INTEGER PRIMARY KEY,filepath TEXT);
+                    CREATE TABLE ignored_import_files(filepath TEXT PRIMARY KEY,size INTEGER,mtime_ns INTEGER,ctime_ns INTEGER);''')
                 db.execute('INSERT INTO root_folders VALUES(1,?)', (str(root),))
                 db.commit()
             current = root

@@ -33,7 +33,7 @@ class CalendarStore:
         publications = self.publications()
         local = rows(self.c, '''SELECT v.id,v.metadata_provider,v.authority_generation,x.provider_id
             FROM volumes v JOIN volume_external_ids x ON x.volume_id=v.id AND x.provider=v.metadata_provider
-            WHERE v.monitored=1 ORDER BY v.id LIMIT ?''', (MAX_SCOPE + 1,))
+            WHERE v.monitored=1 AND v.metadata_provider!='local' ORDER BY v.id LIMIT ?''', (MAX_SCOPE + 1,))
         if len(local) > MAX_SCOPE:
             raise CalendarError('bounded')
         result = {}

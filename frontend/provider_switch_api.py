@@ -155,6 +155,9 @@ def register(api, auth, error_handler, return_api):
     def switch_create():
         body = _object(_body(), ('volume_id', 'provider', 'provider_id'))
         volume = _integer(body['volume_id'], maximum=2**63 - 1)
+        selected = get_db().execute('SELECT metadata_provider FROM volumes WHERE id=?', (volume,)).fetchone()
+        if selected and selected[0] == 'local':
+            raise SwitchReviewError('local_publication_manually_managed')
         target = _reference(body['provider'], body['provider_id'])
         owner = service()
         return _review(owner, run(owner.create(get_db(), volume, target.provider, target.provider_id)))

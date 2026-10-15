@@ -154,7 +154,10 @@ def _destination(cursor, volume, selected, source, filename):
     data = volume.get_data()
     root = cursor.execute('SELECT folder FROM root_folders WHERE id=?',
                           (data.root_folder,)).fetchone()[0]
-    folder = contained(generate_volume_folder_path(root, data), root)
+    provider = cursor.execute('SELECT metadata_provider FROM volumes WHERE id=?',
+                              (data.id,)).fetchone()[0]
+    folder = data.folder if provider == 'local' and data.folder else generate_volume_folder_path(root, data)
+    folder = contained(folder, root)
     values = [value for _, value in selected]
     number = values[0] if len(values) == 1 else (min(values), max(values))
     name = filename if filename is not None else generate_issue_name(data, number) + Path(source).suffix
@@ -196,8 +199,10 @@ def import_one(choice):
     provider_id = choice.get('provider_id')
     mode = choice.get('mode')
     if (not isinstance(source, str) or not os.path.isabs(source) or '\x00' in source
-            or '..' in Path(source).parts or provider not in ('comicvine', 'metron', 'gcd')
-            or not isinstance(provider_id, str) or not provider_id.isdecimal()
+            or '..' in Path(source).parts or provider not in ('comicvine', 'metron', 'gcd', 'local')
+            or not isinstance(provider_id, str)
+            or (not provider_id.isdecimal() if provider != 'local' else
+                len(provider_id) != 32 or any(c not in '0123456789abcdef' for c in provider_id))
             or mode not in ('keep', 'move') or Path(source).suffix.lower() not in
             {'.cbr', '.cbz'}):
         raise ImportFailure('invalid_selection')
@@ -235,6 +240,8 @@ def import_one(choice):
     if existing:
         volume_id = existing[0]
     else:
+        if provider == 'local':
+            raise ImportFailure('local_publication_not_found')
         # Existing metadata import creates the provider-qualified volume and
         # issue catalogue, without scanning or creating a destination folder.
         from backend.features.import_issue_catalog import \
@@ -259,6 +266,11 @@ def import_one(choice):
     cursor.execute('BEGIN IMMEDIATE')
     try:
         _admit_claims(cursor, source, target, volume_id)
+        ignored = cursor.execute('''SELECT size,mtime_ns,ctime_ns FROM ignored_import_files WHERE filepath=?''',
+                                 (source,)).fetchone()
+        if ignored and tuple(ignored) == (source_info.st_size, source_info.st_mtime_ns,
+                                          source_info.st_ctime_ns):
+            raise ImportFailure('source_is_ignored')
         contained(source, root)
         contained(target, destination_root)
         latest_source = _regular(source)
@@ -315,6 +327,7 @@ def import_one(choice):
             (SELECT id FROM issues WHERE volume_id=?)''', (file_id, volume_id))
         cursor.executemany('INSERT INTO issues_files(file_id,issue_id,forced) VALUES(?,?,1)',
                            ((file_id, issue_id) for issue_id, _ in selected))
+        cursor.execute('DELETE FROM ignored_import_files WHERE filepath=?', (source,))
         if not volume_data.folder:
             from backend.implementations.naming import \
                 generate_volume_folder_path

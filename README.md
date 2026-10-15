@@ -23,8 +23,13 @@ database and comics before upgrades or filesystem operations.
 - GetComics Discover: bounded recent observations, local browsing and opt-in
   polling. Discover polling never automatically grabs a release.
 - Library Import discovers local archives independently of metadata availability,
-  lets you choose a provider publication and its exact issues on one page, then
+  lets you choose a provider or create a manually managed local publication with
+  exact issue slots on one page, then
   registers in place or moves and renames without a draft or extra approval.
+  Explicitly action-selected files can also be ignored and later restored from
+  Ignored Files. Ignores use exact path, size, modification time and change time; a moved or
+  changed archive is offered again. Local publications do not receive provider
+  refreshes or automatic acquisition.
   Original CBR/CBZ formats and embedded metadata are preserved. See
   [workflow details](docs/reliability-workflows.md).
 - Existing publications can use a manually uploaded JPEG, PNG or WebP cover.
@@ -61,8 +66,9 @@ Read [configuration and deployment](docs/deployment.md) for bind mounts,
 download visibility, permissions, backups and upgrades. Do not run two Pullarr
 processes against the same database.
 
-The manual-cover upgrade adds database schema 74. Back up the database before
-upgrading normally; an older schema-73 binary cannot open the upgraded database.
+Custom publications and persistent Library Import ignores add database schema 75.
+Back up the database before upgrading normally; a schema-74 or older binary cannot
+open the upgraded database without restoring its matching pre-upgrade backup.
 No library reset or reimport is required.
 
 For Unraid storage, UID/GID and hardlink guidance, see [Unraid deployment](docs/unraid.md).

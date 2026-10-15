@@ -122,8 +122,9 @@ def _suggest(candidate, issues, provider, provider_id):
 
 def issue_catalog(database: str, provider: str, provider_id: str, files: list[str]) -> dict:
     """Fetch once per selected publication; never register or associate here."""
-    if (provider not in ('comicvine', 'metron', 'gcd') or not isinstance(provider_id, str)  # type: ignore[redundant-expr]
-            or not re.fullmatch(r'[1-9][0-9]{0,18}', provider_id)
+    if (provider not in ('comicvine', 'metron', 'gcd', 'local') or not isinstance(provider_id, str)  # type: ignore[redundant-expr]
+            or not re.fullmatch(r'[0-9a-f]{32}' if provider == 'local' else
+                                r'[1-9][0-9]{0,18}', provider_id)
             or not isinstance(files, list) or len(files) > 100  # type: ignore[redundant-expr]
             or any(not isinstance(path, str) for path in files)):
         raise ValueError('invalid_catalog_request')
@@ -152,16 +153,22 @@ def issue_catalog(database: str, provider: str, provider_id: str, files: list[st
                         EXISTS(SELECT 1 FROM issues_files f WHERE f.issue_id=i.id)
                         FROM issues i JOIN issue_external_ids e ON e.issue_id=i.id AND e.provider=?
                         WHERE i.volume_id=? ORDER BY i.calculated_issue_number,i.id''', (provider, volume_id))]
-            snapshot = db.execute('SELECT value FROM config WHERE key=?',
-                                  ('provider_snapshot:' + str(volume_id),)).fetchone()
-            try:
-                expected = json.loads(snapshot[0]).get('expected_count') if snapshot else None
-                count = expected if isinstance(expected, int) and expected >= 0 else None
-            except (ValueError, TypeError, KeyError):
-                count = None
-            completeness = ('unknown' if count is None else
-                            'complete' if count == len(issues) else 'partial')
+            if provider == 'local':
+                count = len(issues)
+                completeness = 'complete'
+            else:
+                snapshot = db.execute('SELECT value FROM config WHERE key=?',
+                                      ('provider_snapshot:' + str(volume_id),)).fetchone()
+                try:
+                    expected = json.loads(snapshot[0]).get('expected_count') if snapshot else None
+                    count = expected if isinstance(expected, int) and expected >= 0 else None
+                except (ValueError, TypeError, KeyError):
+                    count = None
+                completeness = ('unknown' if count is None else
+                                'complete' if count == len(issues) else 'partial')
         else:
+            if provider == 'local':
+                raise ValueError('local_publication_not_found')
             volume_id = None
             key = (os.path.abspath(database), provider, provider_id)
             with _lock:

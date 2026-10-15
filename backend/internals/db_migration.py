@@ -1898,3 +1898,22 @@ def _migrate_manual_volume_covers() -> None:
         cursor.execute('ROLLBACK TO manual_covers_74')
         cursor.execute('RELEASE manual_covers_74')
         raise
+
+
+@DatabaseMigrationHandler.register_handler(74)
+def _migrate_import_ignores() -> None:
+    """Add path exclusions without changing registered ownership or artwork."""
+    from backend.internals.db import IMPORT_IGNORE_SCHEMA
+    cursor = get_db()
+    cursor.execute('SAVEPOINT import_ignores_75')
+    try:
+        for statement in IMPORT_IGNORE_SCHEMA.split(';'):
+            if statement.strip():
+                cursor.execute(statement.strip())
+        if cursor.execute('PRAGMA foreign_key_check').fetchone() is not None:
+            raise RuntimeError('Import ignore foreign key violation')
+        cursor.execute('RELEASE import_ignores_75')
+    except BaseException:
+        cursor.execute('ROLLBACK TO import_ignores_75')
+        cursor.execute('RELEASE import_ignores_75')
+        raise

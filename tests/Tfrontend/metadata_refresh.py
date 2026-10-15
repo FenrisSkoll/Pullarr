@@ -1,6 +1,7 @@
 """The existing task submission API remains asynchronous and unchanged."""
 
 import unittest
+from unittest.mock import patch
 
 from fixtures.comicvine_search import FAKE_APP_KEY
 from fixtures.metadata_refresh import RefreshHarness
@@ -14,6 +15,7 @@ class RefreshTaskAPI(RefreshHarness, unittest.TestCase):
         super().setUp()
         self.start_patch(
             'frontend.api.Settings').return_value.sv = self.settings
+        self.start_patch('frontend.api.get_db', side_effect=self.db.cursor)
         self.start_patch('frontend.api.StartTypeHandlers.diffuse_timer')
         self.start_patch('backend.internals.server.WebSocket')
         self.start_patch('backend.internals.server.SimpleQueue')
@@ -38,6 +40,15 @@ class RefreshTaskAPI(RefreshHarness, unittest.TestCase):
         self.assertIsInstance(task, RefreshAndScanVolume)
         self.assertEqual(task.volume_id, self.volume_id)
         self.session.get.assert_not_awaited()
+
+    def test_manually_managed_publication_cannot_queue_provider_refresh(self):
+        with patch('frontend.api.get_db') as database:
+            database.return_value.execute.return_value.fetchone.return_value = ('local',)
+            response = self.post(cmd='refresh_and_scan', volume_id=self.volume_id)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['result']['code'],
+                         'local_publication_manually_managed')
+        self.queued.assert_not_called()
 
     def test_update_all_defaults_to_skipping_but_accepts_ui_forced_flag(self):
         self.assertEqual(self.post(cmd='update_all').status_code, 201)

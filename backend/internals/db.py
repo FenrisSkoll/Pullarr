@@ -639,4 +639,20 @@ CREATE TABLE IF NOT EXISTS manual_volume_covers(
     updated_at INTEGER NOT NULL
 );
 """
-DB_SCHEMA = SCHEMA_73 + MANUAL_COVER_SCHEMA
+SCHEMA_74 = SCHEMA_73 + MANUAL_COVER_SCHEMA
+IMPORT_IGNORE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ignored_import_files(
+    filepath TEXT PRIMARY KEY CHECK(length(filepath) BETWEEN 1 AND 4096),
+    root_folder_id INTEGER NOT NULL REFERENCES root_folders(id) ON DELETE CASCADE,
+    size INTEGER NOT NULL CHECK(size >= 0),
+    mtime_ns INTEGER NOT NULL,
+    ctime_ns INTEGER NOT NULL,
+    ignored_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ignored_import_files_root ON ignored_import_files(root_folder_id);
+CREATE UNIQUE INDEX IF NOT EXISTS local_volume_identity_unique
+    ON volume_external_ids(provider_id) WHERE provider='local';
+CREATE UNIQUE INDEX IF NOT EXISTS local_issue_identity_unique
+    ON issue_external_ids(provider_id) WHERE provider='local';
+"""
+DB_SCHEMA = SCHEMA_74 + IMPORT_IGNORE_SCHEMA

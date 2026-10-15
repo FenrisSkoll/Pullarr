@@ -26,10 +26,10 @@
 			<button type="button" class="publication-choice">Choose publication</button>
 			<a class="provider-link hidden" target="_blank" rel="noopener noreferrer">View on provider</a>
 		</div>
-		<label class="bulk-target"><input type="checkbox" class="bulk-match-select"> Match in bulk</label>
+		<label class="bulk-target"><input type="checkbox" class="bulk-match-select"> Select for actions</label>
 	</td>
 	<td class="issue-column"></td>
-	<td class="import-status" aria-live="polite"></td>
+	<td class="import-status" aria-live="polite"><span class="import-status-text"></span><button type="button" class="ignore-one">Ignore file</button></td>
 </tr>
 {% endblock pre_build_rows %}
 
@@ -59,6 +59,11 @@
 				<tbody class="search-results"></tbody>
 			</table>
 		</div>
+		<div class="local-publication-search">
+			<button id="search-my-publications" type="button">My publications</button>
+			<button id="create-custom-from-search" type="button">Create custom publication instead</button>
+			<div id="my-publications-results" aria-live="polite"></div>
+		</div>
 	{% endset %}
 
 	{{ window(False, "cv-window", "Edit Metadata Match", edit_cv_content) }}
@@ -76,6 +81,27 @@
 		<p id="import-cover-feedback" role="status">Loading cover…</p>
 		<img id="import-cover-image" alt="" hidden>
 		<p id="import-cover-resolution" class="hidden">Preview resolution only</p>
+	</dialog>
+	<dialog id="custom-publication-dialog" aria-labelledby="custom-publication-heading">
+		<form id="custom-publication-form">
+			<h2 id="custom-publication-heading">Create custom publication</h2>
+			<p id="custom-target-summary"></p>
+			<label>Title <input id="custom-title" required maxlength="200"></label>
+			<label>Year <input id="custom-year" type="number" min="1000" max="2200"></label>
+			<label>Publisher <input id="custom-publisher" maxlength="200"></label>
+			<label>Description <textarea id="custom-description" maxlength="4000"></textarea></label>
+			<label>Issue count <input id="custom-issue-count" type="number" min="1" max="500" value="1" required></label>
+			<details><summary>Edit issue labels and titles</summary><div id="custom-issues"></div></details>
+			<label>Cover (optional; JPEG, PNG or WebP) <input id="custom-cover" type="file" accept="image/jpeg,image/png,image/webp"></label>
+			<img id="custom-cover-preview" alt="Selected cover preview" hidden>
+			<p id="custom-proposal-preview"></p>
+			<p id="custom-error" role="alert"></p>
+			<div class="custom-dialog-actions"><button id="custom-cancel" type="button">Cancel</button><button id="custom-create" type="submit">Create publication</button></div>
+		</form>
+	</dialog>
+	<dialog id="ignore-confirm" aria-labelledby="ignore-confirm-heading">
+		<h2 id="ignore-confirm-heading">Ignore selected archives?</h2><p id="ignore-confirm-detail"></p>
+		<div class="custom-dialog-actions"><button id="ignore-cancel" type="button">Cancel</button><button id="ignore-accept" type="button">Ignore files</button></div>
 	</dialog>
 {% endblock windows %}
 
@@ -115,6 +141,8 @@
 			</tbody>
 		</table>
 		<button id="run-import-button">Scan</button>
+		<button id="show-ignored-files" type="button">Ignored Files</button>
+		<section id="ignored-files-panel" class="hidden" aria-label="Ignored Files"><h2>Ignored Files</h2><p id="ignored-files-count"></p><button id="restore-ignored-selected" type="button" disabled>Restore selected</button><div id="ignored-files-list"></div><button id="ignored-next" type="button" class="hidden">Show next 100</button></section>
 	</div>
 	<div id="loading-window" class="hidden">
 		<h2>Loading...</h2>
@@ -139,7 +167,7 @@
 				<span id="bulk-selection-count"></span>
 				<span id="loaded-count"></span>
 			</div>
-			<p class="import-selection-help">Import selection controls which loaded files are imported. It does not select files for bulk matching.</p>
+			<p class="import-selection-help">Import selection controls which loaded files are imported. Select for actions separately for bulk matching, custom creation or ignoring.</p>
 			<div class="import-toolbar-actions">
 				<div class="import-primary-actions">
 					<button class="cancel-button" type="button">Back</button>
@@ -148,7 +176,9 @@
 				</div>
 				<div class="import-bulk-actions">
 					<button id="open-bulk-match" type="button" disabled>Bulk match (0)</button>
-					<button id="clear-bulk-match" type="button" class="hidden">Clear bulk selection</button>
+					<button id="create-custom-selected" type="button" disabled>Create custom publication (0)</button>
+					<button id="ignore-selected" type="button" disabled>Ignore selected (0)</button>
+					<button id="clear-bulk-match" type="button" class="hidden">Clear action selection</button>
 				</div>
 			</div>
 		</div>

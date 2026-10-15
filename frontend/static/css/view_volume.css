@@ -512,3 +512,22 @@ tbody .issue-title:hover {
 	.volume-info {flex-direction: column;}
 	.volume-info > img {width: min(42vw, 9rem); height: auto;}
 }
+/* Manually managed publication metadata uses the existing cover and issue layout. */
+.local-publication :where(#refresh-button,#autosearch-button,#manualsearch-button,#manage-button,
+    #volume-monitor,.issue-monitored button,.issue-entry .action-column,#classification-details) { display: none !important; }
+.local-publication .issues-table-container { flex-direction: column; min-width: 0; padding: .5rem; }
+.local-publication .issues-table-container > :where(p,label) { display: block; margin: .25rem 0; width: 100%; }
+.local-publication .issues-table { min-width: 0; width: 100%; margin: .5rem 0; }
+.local-publication .issues-table :where(.issue-monitored,.issue-date,.action-column) { display: none !important; }
+#local-publication-note { line-height: 1.4; max-width: 36rem; }
+#local-publication-edit { width: min(40rem, 94vw); max-height: 88dvh; overflow: auto;
+    color: var(--text-color); background: var(--foreground-color); border: 1px solid var(--border-color); border-radius: 6px; }
+#local-publication-edit::backdrop { background: rgba(0,0,0,.7); }
+#local-publication-edit-form { display: grid; gap: .65rem; }
+#local-publication-edit-form > label { display: grid; gap: .2rem; }
+#local-publication-edit-form :where(input,textarea) { min-width: 0; width: 100%; padding: .4rem;
+    color: var(--text-color); background: var(--background-color); border: 1px solid var(--border-color); border-radius: 4px; }
+.local-edit-issue { display: grid; grid-template-columns: 5rem 6rem minmax(0,1fr) auto; gap: .4rem;
+    align-items: center; margin: .4rem 0; }
+.local-edit-actions { display: flex; gap: .6rem; justify-content: flex-end; }
+@media (max-width: 500px) { .local-edit-issue { grid-template-columns: 1fr 1fr; } }

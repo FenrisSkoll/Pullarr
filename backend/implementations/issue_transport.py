@@ -26,6 +26,8 @@ def snapshot_status(volume_id: int):
 
 def rich_issue_rows(volume_id: int) -> List[Dict[str, Any]]:
     cursor = get_db()
+    local = cursor.execute("SELECT metadata_provider='local' FROM volumes WHERE id=?",
+                           (volume_id,)).fetchone()[0]
     library_root = cursor.execute('''SELECT r.folder FROM volumes v
         JOIN root_folders r ON r.id=v.root_folder WHERE v.id=?''', (volume_id,)).fetchone()[0]
     records = load_records(cursor, volume_id=volume_id)
@@ -72,6 +74,8 @@ def rich_issue_rows(volume_id: int) -> List[Dict[str, Any]]:
                     row['date_display'] = selected.raw_value
         if row['files']:
             row['availability'] = 'owned'
+        elif local:
+            row['availability'] = 'missing'
         elif not row['monitored']:
             row['availability'] = 'unmonitored'
         else:

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import sqlite3
 from asyncio import run
 from datetime import datetime
 from io import BytesIO
@@ -351,6 +352,12 @@ def api_tasks():
             volume_id = data.get('volume_id')
             if not volume_id or not isinstance(volume_id, int):
                 raise InvalidKeyValue('volume_id', volume_id)
+            if TaskClass.action in ('refresh_and_scan', 'auto_search', 'auto_search_issue'):
+                selected = get_db().execute('SELECT metadata_provider FROM volumes WHERE id=?',
+                                            (volume_id,)).fetchone()
+                if selected and selected[0] == 'local':
+                    return return_api({'code': 'local_publication_manually_managed'},
+                                      'UnsupportedLocalAutomation', 409)
             kwargs['volume_id'] = volume_id
 
         if TaskClass.action in (
@@ -1416,6 +1423,87 @@ def api_direct_library_import():
         return return_api({'code': str(error)}, 'LibraryImportSelection', 400)
 
 
+@api.route('/local-publications', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_local_publications():
+    from backend.features.custom_publications import (CustomPublicationError,
+                                                      create_publication,
+                                                      list_publications)
+    try:
+        if request.method == 'GET':
+            return return_api(list_publications(request.args.get('query', '')))
+        if request.content_length is not None and request.content_length > 1024 * 1024:
+            return return_api({'code': 'publication_too_large'}, 'LocalPublication', 413)
+        return return_api(create_publication(request.get_json(silent=True)), code=201)
+    except CustomPublicationError as error:
+        return return_api({'code': str(error)}, 'LocalPublication', 400)
+    except sqlite3.Error as error:
+        LOGGER.warning('Local publication database operation failed: %s', type(error).__name__)
+        return return_api({'code': 'local_publication_unavailable'}, 'LocalPublication', 503)
+
+
+@api.route('/local-publications/<int:volume_id>', methods=['GET', 'PUT'])
+@error_handler
+@auth
+def api_local_publication(volume_id):
+    from backend.features.custom_publications import (CustomPublicationError,
+                                                      edit_publication,
+                                                      publication)
+    try:
+        if request.method == 'GET':
+            return return_api(publication(volume_id))
+        if request.content_length is not None and request.content_length > 1024 * 1024:
+            return return_api({'code': 'publication_too_large'}, 'LocalPublication', 413)
+        return return_api(edit_publication(volume_id, request.get_json(silent=True)))
+    except CustomPublicationError as error:
+        code = str(error)
+        return return_api({'code': code}, 'LocalPublication', 404 if code ==
+                          'local_publication_not_found' else 409)
+    except sqlite3.Error as error:
+        LOGGER.warning('Local publication database operation failed: %s', type(error).__name__)
+        return return_api({'code': 'local_publication_unavailable'}, 'LocalPublication', 503)
+
+
+@api.route('/libraryimport/ignored', methods=['GET'])
+@error_handler
+@auth
+def api_ignored_import_files():
+    from backend.features.ignored_import_files import (IgnoreFailure,
+                                                       list_ignored)
+    try:
+        return return_api(list_ignored(int(request.args.get('offset', '0')),
+                                       int(request.args.get('limit', '100'))))
+    except (IgnoreFailure, ValueError):
+        return return_api({'code': 'invalid_pagination'}, 'IgnoredImportFiles', 400)
+    except sqlite3.Error as error:
+        LOGGER.warning('Ignored file listing failed: %s', type(error).__name__)
+        return return_api({'code': 'ignore_unavailable'}, 'IgnoredImportFiles', 503)
+
+
+@api.route('/libraryimport/ignore', methods=['POST'])
+@api.route('/libraryimport/restore', methods=['POST'])
+@error_handler
+@auth
+def api_change_ignored_import_files():
+    from backend.features.ignored_import_files import (IgnoreFailure,
+                                                       ignore_files,
+                                                       restore_files)
+    if request.content_length is not None and request.content_length > 512 * 1024:
+        return return_api({'code': 'selection_too_large'}, 'IgnoredImportFiles', 413)
+    data = request.get_json(silent=True)
+    try:
+        if not isinstance(data, dict) or set(data) != {'files'}:
+            raise IgnoreFailure('invalid_file_selection')
+        operation = ignore_files if request.path.endswith('/ignore') else restore_files
+        return return_api(operation(data['files']))
+    except IgnoreFailure as error:
+        return return_api({'code': str(error)}, 'IgnoredImportFiles', 400)
+    except sqlite3.Error as error:
+        LOGGER.warning('Library Import ignore operation failed: %s', type(error).__name__)
+        return return_api({'code': 'ignore_unavailable'}, 'IgnoredImportFiles', 503)
+
+
 # region Library + Volumes
 @api.route('/settings/metron/test', methods=['POST'])
 @error_handler
@@ -2106,6 +2194,11 @@ def _unified_search(volume_id, issue_id=None):
 
     service = WantedAutomation(DBConnection.default_file)
     try:
+        selected = service.store.db.execute('SELECT metadata_provider FROM volumes WHERE id=?',
+                                            (volume_id,)).fetchone()
+        if selected and selected[0] == 'local':
+            return return_api({'code': 'local_publication_manually_managed'},
+                              'UnsupportedLocalAutomation', 409)
         with execution_gate(service.store.path + '.wanted'):
             return return_api(service.search_manual(volume_id, issue_id))
     except (DDLError, DownloadFailure, SourceFailure, WantedConflict, OrganizationError):

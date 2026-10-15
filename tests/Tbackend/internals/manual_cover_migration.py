@@ -1,4 +1,4 @@
-"""Schema 73 artwork/ownership survives the additive schema 74 migration."""
+"""Schema 73 artwork/ownership survives both additive artwork and ignore migrations."""
 
 from contextlib import closing
 from pathlib import Path
@@ -46,8 +46,8 @@ class ManualCoverMigration(TestCase):
                 "UPDATE config SET value=? WHERE key='database_version'",
                 (changes['database_version'],))
             DatabaseMigrationHandler.migrate()
-            settings.return_value.update.assert_called_once_with({'database_version': 74})
-        self.assertEqual(self.db.execute("SELECT value FROM config WHERE key='database_version'").fetchone()[0], 74)
+            self.assertEqual(settings.return_value.update.call_count, 2)
+        self.assertEqual(self.db.execute("SELECT value FROM config WHERE key='database_version'").fetchone()[0], 75)
         for table in before:
             if table == 'config':
                 self.assertEqual(self.db.execute("SELECT value FROM config WHERE key='fixture_setting'").fetchone()[0],
@@ -62,15 +62,17 @@ class ManualCoverMigration(TestCase):
         self.db.execute('DELETE FROM volumes WHERE id=1')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM manual_volume_covers').fetchone()[0], 0)
 
-    def test_fresh_schema_74_has_independent_cover_table(self):
+    def test_fresh_schema_75_has_independent_cover_and_ignore_tables(self):
         self.db.executescript(DB_SCHEMA)
-        self.db.execute("INSERT INTO config(key,value) VALUES('database_version',74)")
+        self.db.execute("INSERT INTO config(key,value) VALUES('database_version',75)")
         self.db.commit()
         self.assertIn(73, DatabaseMigrationHandler.handlers)
-        self.assertEqual(DatabaseMigrationHandler.latest_db_version(), 74)
+        self.assertEqual(DatabaseMigrationHandler.latest_db_version(), 75)
         self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(), [])
         self.assertIsNotNone(self.db.execute('''SELECT name FROM sqlite_master
             WHERE type='table' AND name='manual_volume_covers' ''').fetchone())
+        self.assertIsNotNone(self.db.execute('''SELECT name FROM sqlite_master
+            WHERE type='table' AND name='ignored_import_files' ''').fetchone())
         with closing(DownloadStore(self.db.db_file)), closing(JobStore(self.db.db_file)):
             pass
 

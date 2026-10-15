@@ -126,7 +126,7 @@ class IssueEntry {
 	};
 };
 
-function fillTable(issues, api_key) {
+function fillTable(issues, api_key, localPublication=false) {
 	ViewEls.issues_list.innerHTML = '';
 
 	for (i = issues.length - 1; i >= 0; i--) {
@@ -169,6 +169,10 @@ function fillTable(issues, api_key) {
 		// Actions
 		inst.auto_search.onclick = e => autosearchIssue(obj.id, api_key);
 		inst.manual_search.onclick = e => showManualSearch(api_key, obj.id);
+		if (localPublication) {
+			inst.monitored.hidden = true;
+			inst.entry.querySelector('.action-column').hidden = true;
+		}
 	};
 	const counts = {owned:0, missing:0, upcoming:0, unknown:0, unmonitored:0};
 	for (const issue of issues) counts[issue.availability in counts ? issue.availability : 'unknown']++;
@@ -253,8 +257,12 @@ function setupManualCover(api_key) {
 }
 
 function fillPage(data, api_key) {
+	const localPublication = data.metadata_source?.provider === 'local';
+	document.body.classList.toggle('local-publication', localPublication);
+	document.querySelector('#local-publication-note').hidden = !localPublication;
 	const switchLink = document.getElementById('provider-switch-link');
 	if (switchLink) {
+		switchLink.parentElement.hidden = localPublication;
 		switchLink.href = `${url_base}/volumes/${data.id}/provider-switch`;
 		switchLink.textContent = `Switch metadata provider / history (current: ${data.metadata_source?.provider || 'comicvine'})`;
 	}
@@ -277,6 +285,7 @@ function fillPage(data, api_key) {
 	// Monitored state
 	ViewEls.vol_edit.monitor_new_issues.value = data.monitor_new_issues;
 	const monitor = ViewEls.vol_data.monitor;
+	monitor.hidden = localPublication;
 	monitor.dataset.monitored = data.monitored;
 	monitor.onclick = e => toggleMonitored(api_key);
 	if (data.monitored)
@@ -293,6 +302,15 @@ function fillPage(data, api_key) {
 
 	// Tags
 	const tags = ViewEls.vol_data.tags;
+	tags.replaceChildren();
+	if (localPublication) {
+		for (const button of [ViewEls.tool_bar.refresh, ViewEls.tool_bar.auto_search,
+			ViewEls.tool_bar.manual_search, ViewEls.tool_bar.manage]) button.hidden = true;
+		const qualityLink = document.querySelector('a[href*="/settings/quality?volume="]');
+		if (qualityLink) qualityLink.parentElement.hidden = true;
+		ViewEls.tool_bar.edit.title = 'Edit custom publication';
+		ViewEls.tool_bar.edit.onclick = () => showLocalPublicationEdit(api_key);
+	}
 	if (data.metadata_snapshot?.retained_missing_issue_ids?.length) {
 		const warning = document.createElement('p');
 		warning.textContent = `${data.metadata_snapshot.retained_missing_issue_ids.length} local issue(s) absent from the latest provider snapshot. Retained for review.`;
@@ -330,7 +348,7 @@ function fillPage(data, api_key) {
 	ViewEls.vol_data.mobile_description.textContent = data.description_text || '';
 
 	// fill issue lists
-	fillTable(data.issues, api_key);
+	fillTable(data.issues, api_key, localPublication);
 	refreshIssueOwnership(api_key);
 	fillIssueMatchTable(data.issues);
 
@@ -896,6 +914,69 @@ function showEdit(api_key) {
 	ViewEls.vol_edit.volume_folder.value = volume_folder;
 };
 
+async function showLocalPublicationEdit(api_key) {
+	const dialog = document.querySelector('#local-publication-edit');
+	const feedback = document.querySelector('#local-edit-feedback');
+	feedback.textContent = '';
+	try {
+		const data = (await fetchAPI(`/local-publications/${volume_id}`, api_key)).result;
+		dialog._original = data;
+		document.querySelector('#local-edit-title').value = data.title;
+		document.querySelector('#local-edit-year').value = data.year || '';
+		document.querySelector('#local-edit-publisher').value = data.publisher || '';
+		document.querySelector('#local-edit-description').value = data.description || '';
+		const host = document.querySelector('#local-edit-issues'); host.replaceChildren();
+		for (const issue of data.issues) addLocalEditIssue(issue);
+		dialog.showModal(); document.querySelector('#local-edit-title').focus();
+	} catch (_) { feedback.textContent = 'Could not load custom publication.'; }
+}
+
+function addLocalEditIssue(issue={}) {
+	const host = document.querySelector('#local-edit-issues');
+	const row = document.createElement('div'); row.className = 'local-edit-issue';
+	row.dataset.id = issue.id || '';
+	const label = document.createElement('span'); label.textContent = issue.id ? `Issue ${issue.number}` : 'New issue';
+	const number = document.createElement('input'); number.value = issue.number || '';
+	number.required = true; number.maxLength = 20; number.setAttribute('aria-label', 'Issue label');
+	const title = document.createElement('input'); title.value = issue.title || '';
+	title.maxLength = 200; title.setAttribute('aria-label', 'Issue title');
+	const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+	remove.disabled = !!issue.owned;
+	remove.title = issue.owned ? 'An owned issue cannot be removed' : 'Remove this issue slot';
+	remove.onclick = () => row.remove();
+	row.append(label, number, title, remove); host.append(row);
+}
+
+async function saveLocalPublicationEdit(event, api_key) {
+	event.preventDefault();
+	const dialog = document.querySelector('#local-publication-edit');
+	const rows = [...document.querySelector('#local-edit-issues').children];
+	const issues = rows.map(row => ({id:row.dataset.id ? Number(row.dataset.id) : null,
+		number:row.querySelectorAll('input')[0].value.trim(),
+		title:row.querySelectorAll('input')[1].value.trim()}));
+	const removed = dialog._original.issues.some(issue => !issues.some(item => item.id === issue.id));
+	if (removed && !window.confirm('Remove unowned issue slots? Comic files and linked issues will be kept.')) return;
+	try {
+		await sendAPI('PUT', `/local-publications/${volume_id}`, api_key, {}, {
+			title:document.querySelector('#local-edit-title').value.trim(),
+			year:document.querySelector('#local-edit-year').value ? Number(document.querySelector('#local-edit-year').value) : null,
+			publisher:document.querySelector('#local-edit-publisher').value.trim(),
+			description:document.querySelector('#local-edit-description').value.trim(),
+			issues, allow_remove:removed
+		});
+		dialog.close();
+		const result = (await fetchAPI(`/volumes/${volume_id}`, api_key)).result;
+		fillPage(result, api_key);
+	} catch (error) {
+		const details = await error?.json?.().catch(() => null);
+		document.querySelector('#local-edit-feedback').textContent =
+			({issue_in_use:'An issue is linked to a file or reading order and cannot be removed.',
+			duplicate_issue_number:'Each issue needs a distinct label.',
+			issue_removal_needs_confirmation:'Confirm issue removal and retry.'})[details?.result?.code] ||
+			'Could not save custom publication. Check the issue labels and retry.';
+	}
+}
+
 function editVolume() {
 	showLoadWindow('edit-window');
 
@@ -1032,6 +1113,15 @@ function showInfoWindow(window) {
 
 usingApiKey()
 .then(api_key => {
+	document.querySelectorAll('.window > dialog').forEach(dialog => document.body.append(dialog));
+	document.querySelector('#local-publication-edit-form').onsubmit = event => saveLocalPublicationEdit(event, api_key);
+	document.querySelector('#local-edit-cancel').onclick = () => document.querySelector('#local-publication-edit').close();
+	document.querySelector('#local-add-issue').onclick = () => {
+		const used = new Set([...document.querySelector('#local-edit-issues').children].map(
+			row => row.querySelector('input').value));
+		let next = 1; while (used.has(String(next))) next++;
+		addLocalEditIssue({number:String(next)});
+	};
 	setupManualCover(api_key);
 	ClassificationDetails.setup(volume_id, api_key);
 	fetchAPI(`/volumes/${volume_id}`, api_key)

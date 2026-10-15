@@ -116,7 +116,7 @@ def _identity_context(
             raise MetadataIdentityError('Naming context belongs to another volume')
         return context
     return ProviderIdentityDB.naming_identities(
-        volume_data.id, PROVIDERS.keys(), 'issue_provider_id' in keys)
+        volume_data.id, tuple(PROVIDERS.keys()) + ('local',), 'issue_provider_id' in keys)
 
 
 def _fill_format(

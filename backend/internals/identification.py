@@ -44,7 +44,10 @@ def load_matching_records(registered_providers: Collection[str], cursor: Any = N
     for iid, provider, pid in issue_refs:
         ir.setdefault(iid, []).append(ProviderReference(provider, ResourceKind.ISSUE, pid))
     result = []
+    local_ids = {vid for vid, _, _, _, _, _, provider, _, _ in volumes if provider == 'local'}
     for vid, title, year, number, publisher, special, provider, cv_id, cv_fetch in volumes:
+        if provider == 'local':
+            continue
         selected = [(ref, fetched) for ref, fetched in vr.get(vid, ()) if ref.provider == provider]
         if provider not in registered_providers or len(selected) != 1:
             raise MetadataIdentityError('Missing or unregistered selected volume identity')
@@ -55,4 +58,5 @@ def load_matching_records(registered_providers: Collection[str], cursor: Any = N
                                       SpecialVersion(special), tuple(ref for ref, _ in vr[vid])))
     return tuple(result), tuple(LocalMatchIssue(iid, vid, (label or '') if provenance is not None else raw, calculated, tuple(ir.get(iid, ())),
         None if provenance is None else IssueNumberFacts(label, provenance, field, NumberKind(kind), numeric, policy), title)
-        for iid, vid, raw, calculated, label, provenance, field, kind, numeric, policy, title in issues)
+        for iid, vid, raw, calculated, label, provenance, field, kind, numeric, policy, title in issues
+        if vid not in local_ids)

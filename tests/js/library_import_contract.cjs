@@ -39,7 +39,7 @@ function row(path, provider, id, issue) {
     const select = {checked:true}, status = element(), link = element(), issueCell = element();
     const entry = {hidden:false, querySelector(selector) {
         if (selector === '.import-file-select') return select;
-        if (selector === '.import-status') return status;
+        if (selector === '.import-status' || selector === '.import-status-text') return status;
         if (selector === '.issue-column') return issueCell;
         if (selector === 'a') return link;
         return element();

@@ -100,10 +100,12 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
             current = current.parent
     eligible_folders = [(path, files, root) for path, files, root in folders if selected(path)]
     chosen = eligible_folders[:folder_limit]
-    available, already, skipped = [], 0, 0
+    available, already, ignored_count, skipped = [], 0, 0, 0
     extensions = {'.cbr', '.cbz'}
     with closing(sqlite3.connect(database)) as lookup:
         registered = {row[0] for row in lookup.execute('SELECT filepath FROM files')}
+        ignored = {row[0]: (row[1], row[2], row[3]) for row in lookup.execute(
+            'SELECT filepath,size,mtime_ns,ctime_ns FROM ignored_import_files')}
         for folder, files, root in chosen:
             for name in files:
                 path = str(Path(folder) / name)
@@ -126,6 +128,9 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
                         continue
                 except (OSError, ValueError, IntakeFailure):
                     invalid += 1
+                    continue
+                if ignored.get(path) == (info.st_size, info.st_mtime_ns, info.st_ctime_ns):
+                    ignored_count += 1
                     continue
                 stamp = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
                 available.append((path, root, stamp))
@@ -190,7 +195,7 @@ def scan_library_import(database: str, *, offset: int = 0, page_size: int = 100,
         eligible_folders=len(eligible_folders), not_yet_scanned_folders=max(0, len(eligible_folders)-len(chosen)),
         discovered=selected_count, total_unregistered=total_unregistered,
         more_unregistered=total_unregistered > selected_count,
-        already_managed=already, matched=0,
+        already_managed=already, ignored=ignored_count, matched=0,
         unmatched=total_unregistered,
         invalid=invalid, skipped=skipped, limited=bounded),
         next_offset=offset + len(items) if has_next else None,
@@ -221,6 +226,11 @@ def suggest_scanned_import_files(database: str, paths: list[str]) -> list[dict]:
             except IntakeFailure:
                 raise ValueError('invalid_suggestion_file') from None
             if db.execute('SELECT 1 FROM files WHERE filepath=? LIMIT 1', (path,)).fetchone():
+                continue
+            info = os.stat(path, follow_symlinks=False)
+            if db.execute('''SELECT 1 FROM ignored_import_files WHERE filepath=? AND size=?
+                AND mtime_ns=? AND ctime_ns=?''', (path, info.st_size, info.st_mtime_ns,
+                                                info.st_ctime_ns)).fetchone():
                 continue
             parsed = extract_filename_data(path, prefer_folder_year=True)
             candidates[path] = observe_import_candidate(path,

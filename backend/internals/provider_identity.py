@@ -103,6 +103,10 @@ class ProviderIdentityDB:
             ORDER BY e.last_fetch ASC,v.id ASC
         ''', (volume_id, volume_id))
         for local_id, provider, provider_id, fetched, legacy_id, legacy_fetch in rows:
+            if provider == 'local' and 'local' not in registered_providers:
+                if volume_id is None:
+                    continue
+                raise ValueError('local_publication_has_no_provider_refresh')
             if provider not in registered_providers:
                 raise KeyError(f'Unregistered metadata provider: {provider}')
             if not isinstance(provider_id, str) or not provider_id:
@@ -302,5 +306,5 @@ class ProviderIdentityDB:
         """)]
         result.extend(('volume', row[0], 'unregistered selected provider')
                       for row in get_db().execute('SELECT id,metadata_provider FROM volumes')
-                      if row[1] not in registered_providers)
+                      if row[1] not in registered_providers and row[1] != 'local')
         return result

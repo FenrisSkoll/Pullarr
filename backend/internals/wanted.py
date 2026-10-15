@@ -80,7 +80,7 @@ class WantedStore:
             v.title,COALESCE(s.next_search,0) next_search,s.last_search,COALESCE(s.requested,0) requested
             FROM issues i JOIN volumes v ON v.id=i.volume_id
             LEFT JOIN wanted_schedule s ON s.issue_id=i.id
-            WHERE i.monitored=1 AND v.monitored=1
+            WHERE i.monitored=1 AND v.monitored=1 AND v.metadata_provider!='local'
             AND (NOT EXISTS(SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id) {upgrade})
             {future}
             AND NOT EXISTS(SELECT 1 FROM wanted_reservations r WHERE r.issue_id=i.id AND r.active=1)
@@ -97,7 +97,8 @@ class WantedStore:
         slots = ','.join('?' for _ in ids)
         upgrade = 'OR i.id IN (SELECT issue_id FROM quality_upgrade_issues)' if self.has_quality else ''
         rows = self.db.execute(f'''SELECT i.id FROM issues i JOIN volumes v ON v.id=i.volume_id
-            WHERE i.id IN ({slots}) AND (?=0 OR (i.monitored=1 AND v.monitored=1))
+            WHERE i.id IN ({slots}) AND v.metadata_provider!='local'
+            AND (?=0 OR (i.monitored=1 AND v.monitored=1))
             AND (? OR NOT EXISTS(SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id) {upgrade})
             {EXTERNAL_HOLD}
             AND NOT EXISTS(SELECT 1 FROM wanted_reservations r WHERE r.issue_id=i.id AND r.active=1)''',
@@ -110,7 +111,7 @@ class WantedStore:
             (EXISTS(SELECT 1 FROM wanted_reservations r WHERE r.issue_id=i.id AND r.active=1)
              OR NOT(1 {EXTERNAL_HOLD})) held
             FROM issues i JOIN volumes v ON v.id=i.volume_id
-            WHERE v.id=? AND i.monitored=1 AND v.monitored=1
+            WHERE v.id=? AND i.monitored=1 AND v.monitored=1 AND v.metadata_provider!='local'
             AND NOT EXISTS(SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id)
             {future}
             ORDER BY i.id LIMIT 1001''', (volume_id,)).fetchall()
@@ -168,6 +169,7 @@ class WantedStore:
             upgrade = 'OR i.id IN (SELECT issue_id FROM quality_upgrade_issues)' if self.has_quality else ''
             rows = self.db.execute(f'''SELECT i.id FROM issues i JOIN volumes v ON v.id=i.volume_id
                 WHERE v.id=? AND (? IS NULL OR i.id=?) AND i.monitored=1 AND v.monitored=1
+                AND v.metadata_provider!='local'
                 AND (NOT EXISTS(SELECT 1 FROM canonical_issue_files f WHERE f.issue_id=i.id) {upgrade})
                 AND NOT EXISTS(SELECT 1 FROM wanted_reservations r WHERE r.issue_id=i.id AND r.active=1)
                 ORDER BY i.id LIMIT 1001''', (volume_id, issue_id, issue_id)).fetchall()

@@ -213,12 +213,40 @@ main {
 .issue-column > span { display: block; line-height: 1.35; }
 .issue-column > button { margin: .35rem 0 0; }
 .li-result .import-status { font-size: .87rem; }
+.ignore-one { display: block; margin-top: .45rem; font-size: .78rem; color: var(--accent-color);
+    border: 0; background: transparent; cursor: pointer; text-align: left; }
+.import-status-text:empty { display: none; }
 .import-filter-label { display: block; max-width: 100%; }
 #import-filter { display: block; width: min(100%, 28rem); margin: .5rem 0; }
 
 #cv-window .window-content {
 	justify-content: flex-start;
 }
+.local-publication-search { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .65rem; }
+#my-publications-results { display: flex; flex-wrap: wrap; gap: .5rem; width: 100%; }
+#my-publications-results button { text-align: left; }
+#custom-publication-dialog, #ignore-confirm { width: min(38rem, 94vw); max-height: 88dvh;
+    overflow: auto; border: 1px solid var(--border-color); border-radius: 6px;
+    background: var(--foreground-color); color: var(--text-color); }
+#custom-publication-dialog::backdrop, #ignore-confirm::backdrop { background: rgba(0,0,0,.7); }
+#custom-publication-form { display: grid; gap: .65rem; }
+#custom-publication-form > label { display: grid; gap: .2rem; }
+#custom-publication-form :where(input, textarea) { min-width: 0; width: 100%; padding: .4rem;
+    color: var(--text-color); background: var(--background-color); border: 1px solid var(--border-color); border-radius: 4px; }
+#custom-issues { max-height: 16rem; overflow: auto; }
+#custom-cover-preview { width: 96px; height: 144px; object-fit: contain;
+    border: 1px solid var(--border-color); border-radius: 4px; }
+.custom-issue-row { display: grid; grid-template-columns: 4rem 5rem minmax(0,1fr); align-items: center; gap: .45rem; margin: .35rem 0; }
+.custom-dialog-actions { display: flex; justify-content: flex-end; gap: .6rem; margin-top: .7rem; }
+.custom-dialog-actions button, .local-publication-search button, .ignored-file-row button, #show-ignored-files, #restore-ignored-selected {
+    border: 1px solid var(--border-color); border-radius: 4px; padding: .35rem .6rem;
+    color: var(--text-color); background: var(--background-color); }
+.ignored-file-row { display: flex; gap: .6rem; justify-content: space-between; align-items: center;
+    padding: .45rem 0; border-top: 1px solid var(--border-color); overflow-wrap: anywhere; }
+#ignored-files-panel { width: min(100%, 50rem); }
+#ignored-files-panel h2 { font-size: 1.1rem; }
+:where(#custom-publication-dialog, #ignore-confirm, .local-publication-search, #ignored-files-panel) :focus-visible {
+    outline: 2px solid var(--accent-color); outline-offset: 2px; }
 
 .search-bar {
 	width: 100%;

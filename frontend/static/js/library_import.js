@@ -32,7 +32,9 @@ function filterImport() {
 }
 function setImportStatus(row, status) {
     row.status = status;
-    row.element.querySelector('.import-status').textContent = status;
+    row.element.querySelector('.import-status-text').textContent = status;
+    const ignore = row.element.querySelector('.ignore-one');
+    if (ignore) ignore.hidden = status.startsWith('Imported') || status === 'Already in library';
     filterImport();
 }
 function showIssueChoice(row) {
@@ -131,7 +133,9 @@ function choosePublication(row, identity, title, url, load=true, provenance='man
     const name = row.element.querySelector('.publication-title');
     name.textContent = title; name.classList.remove('hidden');
     const source = {manual:'Selected manually', suggestion:'Suggested by ComicVine', embedded:'From file metadata'}[provenance];
-    row.element.querySelector('.publication-meta').textContent = `${source} · ${identity.provider} · ID ${identity.id}`;
+    row.element.querySelector('.publication-meta').textContent = identity.provider === 'local'
+        ? `${source || 'Selected manually'} · Custom publication`
+        : `${source || 'Selected manually'} · ${identity.provider} · ID ${identity.id}`;
     const button = row.element.querySelector('.publication-choice');
     button.textContent = 'Change publication';
     button.setAttribute('aria-label', `Change publication for ${row.data.file_title}`);
@@ -151,11 +155,15 @@ function updateSelectionSummary() {
     const bulkRows = rows.filter(row => row.element.querySelector('.bulk-match-select').checked);
     const outside = bulkRows.filter(row => row.element.hidden).length;
     imp('import-selection-count').textContent = `${importing} selected for import`;
-    imp('bulk-selection-count').textContent = `${bulkRows.length} selected for bulk matching${outside ? ` (${outside} outside current filter)` : ''}`;
+    imp('bulk-selection-count').textContent = `${bulkRows.length} selected for actions${outside ? ` (${outside} outside current filter)` : ''}`;
     imp('loaded-count').textContent = `${rows.length} loaded of ${importDiscovered} discovered`;
     imp('import-button').textContent = `Import selected (${importing})`;
     imp('open-bulk-match').textContent = `Bulk match (${bulkRows.length})`;
     imp('open-bulk-match').disabled = !bulkRows.length;
+    imp('create-custom-selected').textContent = `Create custom publication (${bulkRows.length})`;
+    imp('create-custom-selected').disabled = !bulkRows.length;
+    imp('ignore-selected').textContent = `Ignore selected (${bulkRows.length})`;
+    imp('ignore-selected').disabled = !bulkRows.length;
     imp('clear-bulk-match').classList.toggle('hidden', !bulkRows.length);
     const all = imp('selectall-input');
     all.checked = !!rows.length && importing === rows.length;
@@ -201,6 +209,7 @@ function openPublicationSearch(row=null) {
     resetImportSearch();
     document.querySelector('.search-results').replaceChildren();
     document.querySelector('.search-results-container').classList.add('hidden');
+    imp('my-publications-results').replaceChildren();
     imp('match-error').textContent = '';
     const suggestions = targets.map(item => importSearchSuggestion(item, !!row, !!row));
     const common = suggestions[0];
@@ -243,7 +252,7 @@ function addImportRow(data) {
     element.dataset.rowid = data.row_id;
     const file = element.querySelector('.file-column'); file.textContent = data.file_title; file.title = data.filepath;
     element.querySelector('.import-file-select').setAttribute('aria-label', `Import ${data.file_title}`);
-    element.querySelector('.bulk-match-select').setAttribute('aria-label', `Match ${data.file_title} in bulk`);
+    element.querySelector('.bulk-match-select').setAttribute('aria-label', `Select ${data.file_title} for actions`);
     element.querySelector('.publication-choice').setAttribute('aria-label', `Choose publication for ${data.file_title}`);
     const details = document.createElement('details'), summary = document.createElement('summary');
     summary.textContent = 'Path and evidence';
@@ -253,6 +262,7 @@ function addImportRow(data) {
     element.querySelector('.publication-choice').onclick = () => openPublicationSearch(row);
     element.querySelector('.import-file-select').onchange = updateSelectionSummary;
     element.querySelector('.bulk-match-select').onchange = updateSelectionSummary;
+    element.querySelector('.ignore-one').onclick = () => ignoreImportRows([row]);
     if (data.metadata_source) choosePublication(row, data.metadata_source, data.embedded?.series || data.file_title, '', true, 'embedded');
     else showIssueChoice(row);
     applyAutoSuggestion(row);
@@ -302,7 +312,7 @@ async function scanImport(reset=true) {
             'Selected scope checked completely';
         imp('scan-summary').textContent = `${counts.scanned_folders} folders checked · ` +
             `${counts.discovered} of ${total} unregistered archives selected · ` +
-            `${counts.already_managed} registered files skipped · ${reason} · ` +
+            `${counts.already_managed} registered files skipped · ${counts.ignored || 0} ignored files skipped · ${reason} · ` +
             `${importOffset === null ? 'All selected result pages shown' : 'More selected result pages available'}`;
         const body = document.querySelector('.proposal-list');
         for (const item of page.items)
@@ -542,6 +552,199 @@ function importResult(entry, artwork, generation) {
     if (importCoverObserver) importCoverObserver.observe(tr, {attributes:true, attributeFilter:['data-cover']});
     return tr;
 }
+function actionRows() {
+    return [...importRows.values()].filter(row => row.element.querySelector('.bulk-match-select').checked);
+}
+async function searchMyPublications() {
+    const query = imp('search-input').value.trim();
+    const generation = importSearchGeneration, context = importSearchContext;
+    const host = imp('my-publications-results');
+    host.replaceChildren(); host.textContent = 'Searching local publications…';
+    try {
+        const result = (await fetchAPI('/local-publications', importKey,
+            {query:encodeURIComponent(query)})).result;
+        if (generation !== importSearchGeneration || context !== importSearchContext) return;
+        host.replaceChildren();
+        if (!result.length) { host.textContent = 'No custom publications found.'; return; }
+        for (const publication of result) {
+            const button = document.createElement('button'); button.type = 'button';
+            button.textContent = `${publication.title}${publication.year ? ` (${publication.year})` : ''} · ${publication.issue_count} issues`;
+            button.onclick = () => {
+                const identity = {provider:'local', id:publication.provider_id};
+                if (context.mode === 'bulk') void applyBulkPublication(context, identity, publication);
+                else {
+                    const row = importRows.get(context.ids[0]);
+                    if (!row || context !== importSearchContext) return;
+                    choosePublication(row, identity, publication.title, '');
+                    resetImportSearch(); closeWindow(); context.trigger?.focus();
+                }
+            };
+            host.append(button);
+        }
+    } catch (_) {
+        if (generation === importSearchGeneration) host.textContent = 'Local publications unavailable. Retry.';
+    }
+}
+function syncCustomIssues() {
+    const host = imp('custom-issues'), count = Number(imp('custom-issue-count').value);
+    if (!Number.isInteger(count) || count < 1 || count > 500) return;
+    const old = [...host.children].map(row => ({
+        number:row.querySelector('.custom-issue-number').value,
+        title:row.querySelector('.custom-issue-title').value
+    }));
+    host.replaceChildren();
+    for (let n = 1; n <= count; n++) {
+        const row = document.createElement('label'); row.className = 'custom-issue-row';
+        const number = document.createElement('input'); number.className = 'custom-issue-number';
+        number.required = true; number.maxLength = 20; number.value = old[n - 1]?.number || String(n);
+        number.setAttribute('aria-label', `Issue ${n} label`);
+        const title = document.createElement('input'); title.className = 'custom-issue-title';
+        title.maxLength = 200; title.value = old[n - 1]?.title || '';
+        title.placeholder = 'Optional title'; title.setAttribute('aria-label', `Issue ${n} title`);
+        row.append(document.createTextNode(`Issue ${n}`), number, title); host.append(row);
+    }
+}
+function openCustomPublication(rows) {
+    if (!rows.length) return;
+    if (rows.length > 500) { importError('Create one custom publication from at most 500 selected files at a time.'); return; }
+    const dialog = imp('custom-publication-dialog'), form = imp('custom-publication-form');
+    form.reset(); form.dataset.created = '';
+    imp('custom-create').textContent = 'Create publication';
+    imp('custom-error').textContent = '';
+    imp('custom-target-summary').textContent = `Create a local publication for ${rows.length} explicitly chosen ${rows.length === 1 ? 'file' : 'files'}. Files remain untouched until Import selected.`;
+    const suggestions = rows.map(row => importSearchSuggestion(row));
+    imp('custom-title').value = suggestions[0] && suggestions.every(item => item === suggestions[0]) ? suggestions[0] : '';
+    const years = rows.map(row => row.data.parsed?.year || row.data.embedded?.year);
+    imp('custom-year').value = years[0] && years.every(value => value === years[0]) ? years[0] : '';
+    const numbered = rows.map(row => Number(row.data.file_title.match(/#\s*(\d{1,3})\b/)?.[1]));
+    imp('custom-issue-count').value = String(Math.max(1, ...numbered.filter(Number.isInteger)));
+    syncCustomIssues();
+    imp('custom-proposal-preview').textContent = rows.slice(0, 12).map((row, index) =>
+        `${row.data.file_title} → ${numbered[index] ? `issue ${numbered[index]} (proposal)` : 'Choose issue after creation'}`).join(' · ') +
+        (rows.length > 12 ? ` · and ${rows.length - 12} more files` : '');
+    dialog._rows = rows; dialog._generation = importGeneration;
+    if (imp('cv-window').hasAttribute('show-window')) { resetImportSearch(); closeWindow(); }
+    dialog.showModal(); imp('custom-title').focus();
+}
+function previewCustomCover() {
+    const dialog = imp('custom-publication-dialog'), image = imp('custom-cover-preview');
+    if (dialog._coverURL) URL.revokeObjectURL(dialog._coverURL);
+    dialog._coverURL = null;
+    image.hidden = true; image.removeAttribute('src');
+    const file = imp('custom-cover').files[0];
+    if (!file) return;
+    dialog._coverURL = URL.createObjectURL(file);
+    image.onerror = () => { image.hidden = true; };
+    image.src = dialog._coverURL; image.hidden = false;
+}
+async function saveCustomPublication(event) {
+    event.preventDefault();
+    const dialog = imp('custom-publication-dialog');
+    if (dialog._generation !== importGeneration) { imp('custom-error').textContent = 'Scan changed; choose the files again.'; return; }
+    const rows = dialog._rows.filter(row => importRows.get(row.data.row_id) === row);
+    const button = imp('custom-create'); button.disabled = true;
+    try {
+        let created = Number(imp('custom-publication-form').dataset.created);
+        if (!created) {
+            const issues = [...imp('custom-issues').children].map(item => ({
+                number:item.querySelector('.custom-issue-number').value.trim(),
+                title:item.querySelector('.custom-issue-title').value.trim()
+            }));
+            const year = imp('custom-year').value.trim();
+            const response = await sendAPI('POST', '/local-publications', importKey, {}, {
+                title:imp('custom-title').value.trim(), year:year ? Number(year) : null,
+                publisher:imp('custom-publisher').value.trim(),
+                description:imp('custom-description').value.trim(), issues,
+                sources:rows.map(row => row.data.filepath)
+            });
+            const payload = (await response.json()).result;
+            if (!response.ok) throw new Error(payload?.code || 'Could not create publication');
+            created = payload.volume_id;
+            imp('custom-publication-form').dataset.created = String(created);
+            for (const row of rows) choosePublication(row, {provider:'local', id:payload.provider_id}, payload.title, '', false);
+            if (rows.length) await loadCatalogue(rows[0]);
+            imp('bulk-result-status').textContent = `Custom publication created for ${rows.length} files. Review issue choices, then import explicitly.`;
+            button.textContent = 'Retry cover upload';
+        }
+        const cover = imp('custom-cover').files[0];
+        if (cover) {
+            const body = new FormData(); body.append('file', cover);
+            const response = await sendAPI('POST', `/volumes/${created}/manual-cover`, importKey, {}, body);
+            if (!response.ok) throw new Error('Cover upload failed. The publication was created; retry the cover here or on its volume page.');
+        }
+        dialog.close();
+    } catch (error) {
+        const details = await error?.json?.().catch(() => null);
+        const code = details?.result?.code;
+        const created = !!imp('custom-publication-form').dataset.created;
+        imp('custom-error').textContent = created
+            ? 'Publication created. Cover or issue suggestions could not finish; retry the cover here or use Edit issues and the volume page.'
+            : ({duplicate_issue_number:'Issue labels must be distinct.',
+                invalid_issue_number:'Use a supported issue label such as 1, 1A or 6.10.',
+                source_already_registered:'A selected file is already in the Library. Rescan and retry.',
+                source_is_ignored:'Restore an ignored selected file before creating its publication.',
+                sources_need_one_library_root:'Choose files from one configured library root.'})[code] ||
+                'Could not create publication. Check the selected files and issue labels, then retry.';
+    }
+    finally { button.disabled = false; }
+}
+async function ignoreImportRows(rows) {
+    if (!rows.length) return;
+    if (rows.length > 1) {
+        const dialog = imp('ignore-confirm');
+        imp('ignore-confirm-detail').textContent = `Ignore ${rows.length} selected archives in future scans? Files remain untouched. ` +
+            rows.slice(0, 3).map(row => row.data.file_title).join(', ') + (rows.length > 3 ? '…' : '');
+        const accepted = await new Promise(resolve => {
+            const finish = value => { dialog.close(); resolve(value); };
+            imp('ignore-cancel').onclick = () => finish(false);
+            imp('ignore-accept').onclick = () => finish(true);
+            dialog.oncancel = event => { event.preventDefault(); finish(false); };
+            dialog.showModal(); imp('ignore-cancel').focus();
+        });
+        if (!accepted) return;
+    }
+    let results = [];
+    try {
+        for (let start = 0; start < rows.length; start += 100) {
+            const response = await sendAPI('POST', '/libraryimport/ignore', importKey, {},
+                {files:rows.slice(start, start + 100).map(row => row.data.filepath)});
+            results.push(...(await response.json()).result);
+        }
+    } catch (_) { importError('A batch could not be ignored. Successful earlier batches remain ignored; retry the remaining files.'); }
+    for (const result of results) {
+        const row = importRowsByPath.get(result.path);
+        if (!row) continue;
+        if (result.status === 'ignored') {
+            row.element.remove(); importRows.delete(row.data.row_id); importRowsByPath.delete(result.path);
+            ++importMatchGeneration;
+        } else setImportStatus(row, `Failed: ${result.reason}`);
+    }
+    imp('bulk-result-status').textContent = `${results.filter(item => item.status === 'ignored').length} files ignored. Rescan to load the next eligible archives.`;
+    updateSelectionSummary();
+}
+async function showIgnoredFiles(offset=0) {
+    const panel = imp('ignored-files-panel'); panel.classList.remove('hidden');
+    const result = (await fetchAPI('/libraryimport/ignored', importKey, {offset, limit:100})).result;
+    if (!offset) imp('ignored-files-list').replaceChildren();
+    imp('ignored-files-count').textContent = `${result.total} ignored files`;
+    for (const item of result.items) {
+        const row = document.createElement('div'); row.className = 'ignored-file-row';
+        const selected = document.createElement('input'); selected.type = 'checkbox';
+        selected.className = 'ignored-restore-select'; selected.value = item.path;
+        selected.setAttribute('aria-label', `Select ${item.path} to restore`);
+        selected.onchange = () => { imp('restore-ignored-selected').disabled =
+            !document.querySelector('.ignored-restore-select:checked'); };
+        const label = document.createElement('span'); label.textContent = `${item.path} · ${item.state}`;
+        const restore = document.createElement('button'); restore.type = 'button'; restore.textContent = 'Restore';
+        restore.onclick = async () => {
+            const response = await sendAPI('POST', '/libraryimport/restore', importKey, {}, {files:[item.path]});
+            if (response.ok) { row.remove(); imp('ignored-files-count').textContent = 'Restored. Rescan to see the file.'; }
+        };
+        row.append(selected, label, restore); imp('ignored-files-list').append(row);
+    }
+    imp('ignored-next').classList.toggle('hidden', result.next_offset === null);
+    imp('ignored-next').onclick = () => showIgnoredFiles(result.next_offset);
+}
 async function searchImport(event) {
     event.preventDefault();
     const query = imp('search-input').value.trim(); if (!query) return;
@@ -622,6 +825,8 @@ async function submitImport(only=null) {
 }
 usingApiKey().then(async key => {
     importKey = key;
+    // Native dialogs need a visible ancestor even while the older custom window is closed.
+    document.querySelectorAll('.window > dialog').forEach(dialog => document.body.append(dialog));
     const viewer = imp('import-cover-lightbox');
     imp('bulk-match-review').addEventListener('click', event => event.stopPropagation());
     viewer.addEventListener('cancel', event => { event.preventDefault(); closeImportCover(); });
@@ -651,6 +856,39 @@ usingApiKey().then(async key => {
     imp('import-mode').onchange = () => { try { localStorage.setItem('pullarr.importMode', imp('import-mode').value); } catch (_) { /* private mode */ } };
     imp('run-import-button').onclick = () => scanImport();
     imp('open-bulk-match').onclick = () => openPublicationSearch();
+    imp('search-my-publications').onclick = searchMyPublications;
+    imp('create-custom-from-search').onclick = () => {
+        const context = importSearchContext;
+        if (context?.generation === importGeneration)
+            openCustomPublication(context.ids.map(id => importRows.get(id)).filter(Boolean));
+    };
+    imp('create-custom-selected').onclick = () => openCustomPublication(actionRows());
+    imp('custom-issue-count').onchange = syncCustomIssues;
+    imp('custom-cover').onchange = previewCustomCover;
+    imp('custom-publication-dialog').onclose = () => {
+        const dialog = imp('custom-publication-dialog');
+        if (dialog._coverURL) URL.revokeObjectURL(dialog._coverURL);
+        dialog._coverURL = null;
+        imp('custom-cover-preview').removeAttribute('src');
+    };
+    imp('custom-publication-form').onsubmit = saveCustomPublication;
+    imp('custom-cancel').onclick = () => imp('custom-publication-dialog').close();
+    imp('ignore-selected').onclick = () => ignoreImportRows(actionRows());
+    imp('show-ignored-files').onclick = () => showIgnoredFiles().catch(() =>
+        { imp('ignored-files-count').textContent = 'Ignored files unavailable. Retry.'; });
+    imp('restore-ignored-selected').onclick = async () => {
+        const chosen = [...document.querySelectorAll('.ignored-restore-select:checked')];
+        for (let start = 0; start < chosen.length; start += 100) {
+            const batch = chosen.slice(start, start + 100);
+            try {
+                await sendAPI('POST', '/libraryimport/restore', importKey, {},
+                    {files:batch.map(input => input.value)});
+                batch.forEach(input => input.parentElement.remove());
+            } catch (_) { imp('ignored-files-count').textContent = 'Restore failed. Retry selected files.'; return; }
+        }
+        imp('restore-ignored-selected').disabled = true;
+        imp('ignored-files-count').textContent = 'Selected files restored. Rescan to see them.';
+    };
     imp('clear-bulk-match').onclick = () => {
         for (const row of importRows.values()) row.element.querySelector('.bulk-match-select').checked = false;
         updateSelectionSummary();

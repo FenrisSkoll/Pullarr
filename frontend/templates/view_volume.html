@@ -93,6 +93,19 @@
 
 {% block windows %}
 	{{ loading_window("updating-window", "Updating volume...") }}
+	<dialog id="local-publication-edit" aria-labelledby="local-publication-edit-title">
+		<form id="local-publication-edit-form">
+			<h2 id="local-publication-edit-title">Edit custom publication</h2>
+			<label>Title <input id="local-edit-title" required maxlength="200"></label>
+			<label>Year <input id="local-edit-year" type="number" min="1000" max="2200"></label>
+			<label>Publisher <input id="local-edit-publisher" maxlength="200"></label>
+			<label>Description <textarea id="local-edit-description" maxlength="4000"></textarea></label>
+			<div id="local-edit-issues"></div>
+			<button id="local-add-issue" type="button">Add issue</button>
+			<p id="local-edit-feedback" role="alert"></p>
+			<div class="local-edit-actions"><button id="local-edit-cancel" type="button">Cancel</button><button type="submit">Save publication</button></div>
+		</form>
+	</dialog>
 
 	{% set delete_content %}
 		<p>Remove this publication from Pullarr? <strong>Delete folder = No</strong> leaves every file and directory on disk. <strong>Yes</strong> deletes its registered files in the managed folder and is irreversible.</p>
@@ -424,6 +437,7 @@
 							<p id="volume-cover-feedback" role="status" aria-live="polite"></p>
 						</div>
 						<section id="volume-tags" aria-label="Tags"></section>
+						<p id="local-publication-note" hidden>Custom / Local publication. Manually managed; no provider updates or automatic downloads.</p>
 						<p id="volume-path" aria-label="Volume folder path"></p>
 						<section id="volume-description" class="description" aria-label="Description"></section>
 					</div>
