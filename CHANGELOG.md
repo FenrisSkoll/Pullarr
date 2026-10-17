@@ -1,5 +1,21 @@
 # Release notes
 
+## 1.5.13 — Custom Publication Display Fixes
+
+- Fixed local publications showing 0/0 progress when their
+  owned issues were unmonitored.
+- Local publications now display owned issues out of total
+  issues in Library posters and table views.
+- Preserved monitored-only progress for ComicVine, Metron
+  and GCD publications.
+- Prevented zero or invalid issue totals from producing
+  non-finite progress bars.
+- Fixed titleless issues displaying null in Issue Info.
+- Added Untitled fallback in issue listings.
+- Improved Issue Info headings with Issue #N formatting.
+- No changes to files, ownership or Direct Import.
+- Database schema remains 75; no migration required.
+
 ## 1.5.12 — Custom Publications & Ignored Files
 
 ### Custom Publications
