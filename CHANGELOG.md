@@ -1,5 +1,41 @@
 # Release notes
 
+## 1.5.12 — Custom Publications & Ignored Files
+
+### Custom Publications
+
+- Added first-class, locally managed comic publications.
+- Create custom publications with user-defined titles, years,
+  publishers, descriptions and issue counts.
+- Added stable internal publication and issue identities,
+  independent of ComicVine, Metron and GCD.
+- Added bulk creation of custom publications from selected
+  local comic archives.
+- Added per-file issue matching for custom publications.
+- Preserve explicit Keep in place and Move and rename imports.
+- Support manual cover uploads for custom publications.
+- Allow custom publications to appear in the normal Library.
+- Exclude local publications from unsupported provider refreshes,
+  automatic acquisition and release searches.
+
+### Persistent Library Import Ignoring
+
+- Added persistent ignoring of selected local archives.
+- Ignored archives are excluded from future import scans.
+- Ignored archives do not consume unregistered-file scan limits.
+- Added management and restoration of ignored files.
+- Changed or relocated files can be discovered again.
+- Ignoring never deletes, moves or modifies comic archives.
+- Require explicit action selection before bulk ignoring.
+
+### Database & Compatibility
+
+- Database schema upgraded from 74 to 75.
+- Existing ComicVine, Metron and GCD integrations preserved.
+- Existing publications, issue ownership and cover art preserved.
+- Existing Direct Import execution path remains unchanged.
+- Database backup required before upgrading.
+
 ## 1.5.11 — GCD Import Fixes & Manual Covers
 
 ### GCD Library Import
