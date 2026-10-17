@@ -126,6 +126,10 @@ class IssueEntry {
 	};
 };
 
+function meaningfulIssueText(value) {
+	return typeof value === 'string' ? value.trim() : '';
+}
+
 function fillTable(issues, api_key, localPublication=false) {
 	ViewEls.issues_list.innerHTML = '';
 
@@ -152,11 +156,8 @@ function fillTable(issues, api_key, localPublication=false) {
 		inst.issue_number.innerText = obj.issue_number;
 
 		// Title
-		if (obj.display_title != null) {
-			inst.title.innerText = obj.display_title;
-		} else {
-			inst.title.innerText = obj.title;
-		};
+		inst.title.innerText = meaningfulIssueText(obj.display_title) ||
+			meaningfulIssueText(obj.title) || 'Untitled';
 		inst.title.onclick = e => showIssueInfo(obj.id, api_key);
 
 		// Release date
@@ -1042,6 +1043,14 @@ function deleteVolume() {
 //
 // Issue info
 //
+function issueInfoHeading(issue) {
+	const title = meaningfulIssueText(issue.display_title) || meaningfulIssueText(issue.title);
+	const number = String(issue.issue_number ?? '').trim();
+	const date = meaningfulIssueText(issue.date_display) || meaningfulIssueText(issue.date);
+	return [title || `Issue${number ? ` #${number}` : ''}`, title && number ? `#${number}` : '', date]
+		.filter(Boolean).join(' · ');
+}
+
 function showIssueInfo(issue_id, api_key) {
 	setupCollectedContents(issue_id, api_key);
 	setupReprints(issue_id, api_key);
@@ -1072,8 +1081,7 @@ function showIssueInfo(issue_id, api_key) {
 	document.querySelector('#issue-rename-selector').dataset.issue_id = issue_id;
 	fetchAPI(`/issues/${issue_id}`, api_key)
 	.then(json => {
-		document.querySelector('#issue-info-title').innerText =
-			`${json.result.title} - #${json.result.issue_number} - ${json.result.date_display ?? json.result.date ?? ''}`;
+		document.querySelector('#issue-info-title').innerText = issueInfoHeading(json.result);
 		document.querySelector('#issue-info-desc').textContent = json.result.description_text || '';
 		const files_table = document.querySelector('#issue-files-list');
 		files_table.innerHTML = '';

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync('frontend/static/js/view_volume.js', 'utf8');
-const renderer = source.slice(source.indexOf('function fillTable('), source.indexOf('function fillPage('));
+const renderer = source.slice(source.indexOf('function meaningfulIssueText('), source.indexOf('function fillPage('));
 for (const [label, date] of [['[nn]', '2021-12'], ['1A', '2021'], ['01', '2021-12-31'],
                            ['<img src=x onerror=alert(1)>', '<script>not markup</script>']]) {
     let row;

@@ -87,9 +87,10 @@ class LibraryEntry {
 		downloaded_count,
 		total_count
 	) {
-		downloaded_count = Math.min(downloaded_count, total_count);
-
-		const progress = downloaded_count / total_count * 100;
+		total_count = Number.isSafeInteger(total_count) && total_count > 0 ? total_count : 0;
+		downloaded_count = Number.isSafeInteger(downloaded_count) && downloaded_count > 0
+			? downloaded_count : 0;
+		const progress = total_count ? Math.min(100, downloaded_count / total_count * 100) : 0;
 		const list_bar = this.list_entry.querySelector('.list-prog-bar'),
 			table_bar = this.table_entry.querySelector('.table-prog-bar');
 
@@ -181,10 +182,9 @@ function populateLibrary(volumes, api_key) {
 			setIcon(monitored_button, icons.unmonitored, 'Unmonitored');
 
 		// Progress Bar
-		library_entry.setProgressBar(
-			volume.issues_downloaded_monitored,
-			volume.issue_count_monitored
-		);
+		const local = volume.metadata_source?.provider === 'local';
+		library_entry.setProgressBar(local ? volume.issues_downloaded : volume.issues_downloaded_monitored,
+			local ? volume.issue_count : volume.issue_count_monitored);
 
 		// Add to view without changing any earlier batch or its selection.
 		table_entry.querySelector('input[type="checkbox"]').setAttribute('aria-label',
