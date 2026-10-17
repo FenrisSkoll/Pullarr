@@ -1,6 +1,5 @@
 """Characterize current title semantics, never implement a proposed display rule."""
 
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import AsyncMock, patch
 
@@ -157,12 +156,26 @@ class CollectedTitles(MetronHarness, TestCase):
         self.assertTrue(volume.get_data().special_version_locked)
         self.assertEqual(volume.get_issues()[0].title, 'TPB')
 
-    def test_current_ui_reads_stored_title_not_display_title(self):
-        source = (Path(__file__).resolve().parents[3] / 'frontend/static/js/view_volume.js')
-        # Docker tests are mounted under /app/tests, same repository layout.
-        text = source.read_text(encoding='utf-8')
-        self.assertIn('inst.title.innerText = obj.title;', text)
-        self.assertIn('ViewEls.vol_data.title.innerText = data.title;', text)
+    def test_issue_title_payload_keeps_stored_and_display_titles_distinct(self):
+        collected = self.persist(cv_mapped(record('cyberpunk-cv-collected-volume'),
+                                           [record('cyberpunk-cv-collected-issue')]))
+        collected_issue = collected.get_issues()[0]
+        public = volume_identity_results([collected.get_public_data()], True)[0]
+        self.assertEqual(public['title'], collected.get_data().title)
+        self.assertEqual(public['issues'][0]['title'], 'TPB')
+        self.assertEqual(public['issues'][0]['display_title'], public['title'])
+        self.assertEqual(issue_identity_result(collected_issue, True)['title'], 'TPB')
+        self.assertEqual(collected_issue.title, 'TPB')
+
+        titleless = self.persist(cv_mapped(
+            record('cyberpunk-cv-floppy-volume'),
+            cv_issue_snapshot('cyberpunk-cv-floppy-volume', ['cyberpunk-cv-floppy-issue'])))
+        issue = titleless.get_issues()[0]
+        public_issue = volume_identity_results([titleless.get_public_data()], True)[0]['issues'][0]
+        self.assertIsNone(public_issue['title'])
+        self.assertIsNone(public_issue['display_title'])
+        self.assertIsNone(issue_identity_result(issue, True)['title'])
+        self.assertIsNone(issue.title)
 
     def test_fixture_inventory_is_metadata_only(self):
         self.assertEqual(len(CORPUS['records']), 46)
